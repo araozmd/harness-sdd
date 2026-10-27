@@ -1571,4 +1571,90 @@ F182_R9_orchestrator_prose() {
 }
 F182_R9_orchestrator_prose
 
+# ── F182-R10: init.sh names the per-front-end state when the AND is blocked ───────
+# Run through the installed init.sh's own shebang (bash), so `set -euo pipefail` is in force —
+# the large-file case is what pins "no pipeline that can take SIGPIPE". Every case's exit
+# status must equal the absent-file run's: this block is warn-only and never changes it.
+F182_R10_init_per_frontend_line() {
+  _t="$T/f182-r10"; install_to "$_t" "$T/ch-f182-r10" --agents=claude
+  _cfg="$_t/.harness/harness.config.yaml"
+  if grep -q '^  after_rejections:' "$_cfg"; then
+    awk '/^  after_rejections:/ { print "  after_rejections: 2"; next } { print }' "$_cfg" > "$_cfg.t" && mv "$_cfg.t" "$_cfg"
+  else
+    printf 'escalation:\n  after_rejections: 2\n' >> "$_cfg"
+  fi
+  _arm="$_t/.harness/.escalation-arming"
+  _armed_line='ℹ️  escalation: ARMED (builder-heavy after 2 rejections)'
+  _dis_line="⚠️  escalation: configured (after_rejections: 2) but DISARMED — .escalation-arming is absent or not 'armed', so builder-heavy will never fire. Configure models.builder-heavy and re-run the installer. (warn-only)"
+  _pf() { printf '%s' "ℹ️  escalation: ARMED per front-end on: $1 (builder-heavy after 2 rejections); not on: $2 — the Orchestrator escalates only where its host's line reads raise (E99-F182)"; }
+  # _run — init.sh's escalation line(s) → $T/r10.esc, exit status → $T/r10.rc
+  _run() {
+    _s=0; ( cd "$_t" && ./.harness/init.sh ) > "$T/r10.out" 2>&1 || _s=$?
+    printf '%s\n' "$_s" > "$T/r10.rc"
+    grep 'escalation: ' "$T/r10.out" > "$T/r10.esc" || true
+  }
+  _one() {  # _one <label> <exact line>
+    [ "$(grep -c . "$T/r10.esc")" = 1 ] || fail "F182-R10: $1 — not exactly one escalation line: $(cat "$T/r10.esc")"
+    grep -qxF -- "$2" "$T/r10.esc" || fail "F182-R10: $1 — expected the line '$2', got: $(cat "$T/r10.esc")"
+    [ "$(cat "$T/r10.rc")" = "$_rc0" ] || fail "F182-R10: $1 — init.sh exited $(cat "$T/r10.rc"), the absent-file run exited $_rc0"
+  }
+
+  rm -f "$_arm"; _run; _rc0="$(cat "$T/r10.rc")"
+  _one "absent file" "$_dis_line"
+
+  printf 'blocked\nclaude=raise\ncodex=neither\npi=none\n' > "$_arm"; _run
+  _one "blocked + claude=raise" "$(_pf claude 'codex pi')"
+  grep -q DISARMED "$T/r10.out" && fail "F182-R10: blocked + claude=raise still printed DISARMED"
+
+  printf 'blocked\nclaude=raise\ncodex=raise\npi=none\n' > "$_arm"; _run
+  _one "blocked + claude,codex=raise" "$(_pf 'claude codex' pi)"
+
+  printf 'armed\nclaude=raise\n' > "$_arm"; _run
+  _one "armed" "$_armed_line"
+  grep -q 'per front-end' "$T/r10.out" && fail "F182-R10: an armed file printed the per-front-end line"
+
+  printf 'blocked\nclaude=none\n' > "$_arm"; _run
+  _one "blocked, nothing raise" "$_dis_line"
+
+  # A first line that is neither armed nor blocked: no detail line is trusted.
+  printf 'Blocked\nclaude=raise\n' > "$_arm"; _run
+  _one "garbage first line + claude=raise" "$_dis_line"
+
+  # Symlinks read as absent — to a blocked+raise file AND to an armed one.
+  for _body in 'blocked\nclaude=raise\ncodex=raise\n' 'armed\nclaude=raise\n'; do
+    rm -f "$_arm"; printf "$_body" > "$T/r10-target"; ln -s "$T/r10-target" "$_arm"; _run
+    _one "symlink" "$_dis_line"
+  done
+  rm -f "$_arm"
+
+  # ~3000 lines (~200 KB — far past any pipe buffer, so a `producer | head` read WOULD take
+  # SIGPIPE under pipefail), the raise line last: printed, and the exit status is unchanged.
+  awk 'BEGIN { p = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; print "blocked"
+               for (i = 1; i <= 2999; i++) print "k" i "-" p "=neither"; print "claude=raise" }' > "$_arm"
+  [ "$(wc -c < "$_arm")" -gt 150000 ] || fail "F182-R10 setup: the large arming file is under 150 KB"
+  _run
+  [ "$(grep -c . "$T/r10.esc")" = 1 ] || fail "F182-R10: the ~3000-line file did not print exactly one escalation line"
+  grep -qE '^ℹ️  escalation: ARMED per front-end on: claude \(builder-heavy after 2 rejections\); not on: k1-a+ k2-a+ ' "$T/r10.esc" \
+    || fail "F182-R10: the ~3000-line file did not print the per-front-end line: $(cut -c1-200 "$T/r10.esc")"
+  grep -qE ' k2999-a+ — the Orchestrator' "$T/r10.esc" || fail "F182-R10: the ~3000-line file's not-on list was truncated"
+  [ "$(cat "$T/r10.rc")" = "$_rc0" ] || fail "F182-R10: the ~3000-line file changed init.sh's exit status to $(cat "$T/r10.rc")"
+
+  # An invalid byte before the raise line, under a UTF-8 CALLER locale: the macOS system awk
+  # aborts on it (`towc: multibyte conversion failure`) unless the read pins LC_ALL=C, which
+  # would lose the raise key and print DISARMED (progress/lessons.md 2026-10-26).
+  printf 'blocked\n\377x=none\nclaude=raise\n' > "$_arm"
+  _s=0; ( cd "$_t" && LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 ./.harness/init.sh ) > "$T/r10.out" 2>&1 || _s=$?
+  printf '%s\n' "$_s" > "$T/r10.rc"; grep 'escalation: ' "$T/r10.out" > "$T/r10.esc" || true
+  _one "invalid byte under a UTF-8 locale" "$(_pf claude '(none)')"
+
+  # Hostile keys: never eval'd, never printed. Relative and absolute `touch` targets; cwd is
+  # the target, so a relative X would land in it.
+  printf 'blocked\na$(touch "%s/X")=raise\nb`touch Y`=raise\nc$(touch Z)=none\nclaude=raise\n' "$T" > "$_arm"; _run
+  [ ! -e "$T/X" ] && [ ! -e "$_t/X" ] && [ ! -e "$_t/Y" ] && [ ! -e "$_t/Z" ] \
+    || fail "F182-R10: a hostile arming line was executed (a touch target exists)"
+  _one "hostile lines" "$(_pf claude '(none)')"
+  pass "init.sh prints one per-front-end line for blocked+raise, unchanged ARMED/DISARMED otherwise, large and hostile files safe (F182-R10)"
+}
+F182_R10_init_per_frontend_line
+
 echo "test_escalation.sh: all cases passed"

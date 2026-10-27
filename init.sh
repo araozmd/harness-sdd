@@ -544,10 +544,31 @@ case "$ESC_THRESHOLD" in
   ''|0|*[!0-9]*) : ;;   # off / absent / malformed (builder-role.sh warns on malformed) — not noteworthy
   *)
     ESC_ARMING="$HARNESS_DIR/.escalation-arming"
-    # A symlinked arming file reads as absent — same refusal builder-role.sh applies.
-    if [ ! -L "$ESC_ARMING" ] && [ -f "$ESC_ARMING" ] \
-       && [ "$(head -n 1 "$ESC_ARMING" 2>/dev/null)" = "armed" ]; then
+    # THREE-WAY (E99-F182, ADR-0011): `armed` ⇒ ARMED; `blocked` with at least one
+    # `<key>=raise` line ⇒ ARMED per front-end, naming the raise keys and the rest — the
+    # Orchestrator passes its host's key, so builder-heavy fires on exactly those hosts;
+    # anything else ⇒ DISARMED. A symlinked arming file reads as absent — same refusal
+    # builder-role.sh applies — and an unreadable one reads as empty.
+    #
+    # Read with THREE separate awk calls, each over the whole file, never `producer | head`:
+    # under this script's `set -euo pipefail` a producer that outlives its consumer takes
+    # SIGPIPE, the assignment returns 141, and `set -e` ends a warn-only block's whole
+    # session (progress/lessons.md 2026-10-27). Only keys matching `^[a-z][a-z0-9-]*$` are
+    # printed and nothing derived from the file is ever `eval`'d: the file's only trust
+    # boundary is the symlink check, and it is read at every session start, so a line like
+    # `a$(touch X)=raise` must contribute nothing. `LC_ALL=C` keeps an invalid byte from
+    # aborting the macOS awk under a UTF-8 caller locale. The verdict compare is RAW, as in
+    # builder-role.sh: only a remainder of exactly `raise` counts.
+    ESC_FIRST=""; ESC_RAISE=""; ESC_OTHER=""
+    if [ ! -L "$ESC_ARMING" ] && [ -f "$ESC_ARMING" ]; then
+      ESC_FIRST="$(LC_ALL=C awk 'NR == 1 { print; exit }' "$ESC_ARMING" 2>/dev/null || true)"
+      ESC_RAISE="$(LC_ALL=C awk -F= 'NR > 1 && index($0, "=") && $1 ~ /^[a-z][a-z0-9-]*$/ && substr($0, length($1) + 2) == "raise" { printf "%s%s", s, $1; s = " " }' "$ESC_ARMING" 2>/dev/null || true)"
+      ESC_OTHER="$(LC_ALL=C awk -F= 'NR > 1 && index($0, "=") && $1 ~ /^[a-z][a-z0-9-]*$/ && substr($0, length($1) + 2) != "raise" { printf "%s%s", s, $1; s = " " }' "$ESC_ARMING" 2>/dev/null || true)"
+    fi
+    if [ "$ESC_FIRST" = "armed" ]; then
       echo "ℹ️  escalation: ARMED (builder-heavy after $ESC_THRESHOLD rejections)"
+    elif [ "$ESC_FIRST" = "blocked" ] && [ -n "$ESC_RAISE" ]; then
+      echo "ℹ️  escalation: ARMED per front-end on: $ESC_RAISE (builder-heavy after $ESC_THRESHOLD rejections); not on: ${ESC_OTHER:-(none)} — the Orchestrator escalates only where its host's line reads raise (E99-F182)"
     else
       echo "⚠️  escalation: configured (after_rejections: $ESC_THRESHOLD) but DISARMED — .escalation-arming is absent or not 'armed', so builder-heavy will never fire. Configure models.builder-heavy and re-run the installer. (warn-only)"
     fi
