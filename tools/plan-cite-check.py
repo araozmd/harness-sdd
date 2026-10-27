@@ -399,7 +399,7 @@ def parse_args(args, flags):
                 raise InputError("%s needs %s" % (a, flags[a]))
             opts[a] = args[i + 1]
             i += 2
-        elif a.startswith("-") and a != "-":
+        elif a.startswith("-"):
             raise InputError("unknown flag: %s" % a)
         else:
             pos.append(a)
@@ -450,7 +450,7 @@ def sweep(specs_dir):
                 if ln.startswith("stage:"):
                     m = STAGE_RE.match(ln)
                     if m:
-                        stage = m.group(1) if stage == "absent" else stage
+                        stage = m.group(1)
                     else:
                         out.append("stage-unrecognized %s:%d %s" % (product, n, ln))
     return out, stage, len(adrs)
