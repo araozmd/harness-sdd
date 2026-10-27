@@ -409,6 +409,65 @@ run_tool "$GP" --spec "$GS"; expect_fail R5_trigger_empty_is_no_trigger
 one_deferred R5_trigger_empty_is_no_trigger "plan-cite-check: deferred-adr-no-trigger $GP:$_ln ADR-0002 $S/adr/0002-deferred-waf.md"
 pass "R5_trigger_empty_is_no_trigger"
 
-# @@R6@@
+# ── R6: usage / input errors ⇒ exit 2, `error:` + usage on stderr, nothing on stdout ─────
+# chk_exit2 <row> [<stderr-fixed-string>] — each row's argv is the minimal one ONLY that
+# branch rejects; the optional string names the branch so a second producer cannot pass it.
+chk_exit2() {
+  [ "$rc" -eq 2 ] || fail "$1: expected rc 2, got $rc ($(both))"
+  head -n 1 "$T/err" | grep -q '^plan-cite-check: error: ' || fail "$1: stderr's first line is not 'plan-cite-check: error: ...' ($(both))"
+  grep -q 'usage:' "$T/err" || fail "$1: no usage on stderr ($(both))"
+  [ ! -s "$T/out" ] || fail "$1: stdout is not empty on an error ($(both))"
+  if [ "$#" -ge 2 ]; then grep -qF -- "$2" "$T/err" || fail "$1: the error does not name '$2' ($(both))"; fi
+  pass "$1"
+}
+fresh r6
+run_tool; chk_exit2 R6_no_plan_arg 'exactly one <feature.plan.md>'
+run_tool "$GP" "$GP" --spec "$GS"; chk_exit2 R6_two_plan_args 'exactly one <feature.plan.md>'
+run_tool --bogus; chk_exit2 R6_unknown_flag 'unknown flag: --bogus'
+run_tool "$GP" --spec "$GS" --bogus; chk_exit2 R6_unknown_flag 'unknown flag: --bogus'
+run_tool "$GP" --spec; chk_exit2 R6_spec_flag_no_value '--spec needs a path'
+run_tool "$GP" --specs-dir; chk_exit2 R6_specs_dir_flag_no_value '--specs-dir needs a path'
+run_tool --grandfathered "$GP" --base; chk_exit2 R6_base_flag_no_value '--base needs a ref'
+run_tool "$T/nope.plan.md" --spec "$GS"; chk_exit2 R6_plan_missing "$T/nope.plan.md"
+run_tool "$S" --spec "$GS"; chk_exit2 R6_plan_is_dir 'not a regular file'
+# a character device opens and reads empty: only the regular-file check can reject it
+run_tool /dev/null --spec "$GS" --specs-dir "$S"; chk_exit2 R6_plan_not_regular 'not a regular file'
+cp "$GP" "$T/bad8.plan.md"; printf '\377\n' >> "$T/bad8.plan.md"
+run_tool "$T/bad8.plan.md" --spec "$GS" --specs-dir "$S"; chk_exit2 R6_plan_invalid_utf8 'cannot read'
+run_tool "$GP" --spec "$T/nope.spec.md"; chk_exit2 R6_spec_missing "$T/nope.spec.md"
+printf '%s\n' '# spec with no R-ids' '' 'Prose only.' > "$T/zero.spec.md"
+run_tool "$GP" --spec "$T/zero.spec.md"; chk_exit2 R6_spec_zero_rids 'no R-ids found'
+mkdir -p "$T/x"; cp "$GP" "$T/x/y.plan.md"
+run_tool "$T/x/y.plan.md" --spec "$GS"; chk_exit2 R6_no_specs_ancestor 'is named specs'
+run_tool "$GP" --spec "$GS" --specs-dir "$T/nope-specs"; chk_exit2 R6_specs_dir_not_dir 'not a directory'
+fresh r6lock
+mkdir "$S/locked"; chmod 000 "$S/locked"
+run_tool "$GP" --spec "$GS"; chmod 755 "$S/locked"; chk_exit2 R6_specs_subdir_unreadable 'cannot read specs dir'
+fresh r6adr
+printf '\377\n' >> "$S/adr/0002-deferred-waf.md"
+run_tool "$GP" --spec "$GS"; chk_exit2 R6_cited_adr_unreadable "$S/adr/0002-deferred-waf.md"
+
+fresh r6out
+run_tool --bogus; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: unknown flag wrote to stdout ($(both))"
+run_tool "$T/nope.plan.md" --spec "$GS"; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: missing plan wrote to stdout ($(both))"
+[ -s "$T/err" ] || fail "R6_stdout_empty_on_error: missing plan wrote nothing to stderr"
+pass "R6_stdout_empty_on_error"
+
+rm -rf "$T/dir with space"; mkdir -p "$T/dir with space"; cp -R "$FX/specs" "$T/dir with space/specs"
+_q="$T/dir with space/specs/epics/E01-x/F01-good/it's.plan.md"
+mv "$T/dir with space/specs/epics/E01-x/F01-good/E01-F01.plan.md" "$_q"
+run_tool "$_q" --spec "$T/dir with space/specs/epics/E01-x/F01-good/E01-F01.spec.md"; expect_ok R6_argv_path_verbatim
+grep -qF "plan-cite-check: ok $_q: " "$T/out" || fail "R6_argv_path_verbatim: the ok line does not print the argv path verbatim ($(both))"
+pass "R6_argv_path_verbatim"
+run_tool "--spec=$GS" "$GP" "--specs-dir=$S"; expect_ok R6_flag_equals_form
+pass "R6_flag_equals_form"
+
+run_tool --help
+[ "$rc" -eq 0 ] || fail "R6_help_exit0: rc $rc ($(both))"
+grep -q '^usage: ' "$T/out" || fail "R6_help_exit0: no usage on stdout ($(both))"
+[ ! -s "$T/err" ] || fail "R6_help_exit0: stderr not empty ($(both))"
+pass "R6_help_exit0"
+
+# @@R7@@
 
 echo "all plan-cite checks passed"

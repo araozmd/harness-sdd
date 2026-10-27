@@ -92,6 +92,9 @@ def iter_unfenced(lines, numbered=False):
 
 def _read(path):
     """Return the file's lines: strict UTF-8, each line's trailing \\r then \\n stripped."""
+    if not os.path.isfile(path):
+        raise InputError("cannot read %s: %s" % (
+            path, "not a regular file" if os.path.exists(path) else "no such file"))
     try:
         with open(path, "rb") as fh:
             data = fh.read()
@@ -340,37 +343,43 @@ def check_plan(plan, sections, spec_rids=None, index=None):
     return out, form
 
 
-def main(argv):
-    args = argv[1:]
-    if any(a in ("-h", "--help") for a in args):
-        print(USAGE)
-        return 0
-    try:
-        spec = specs_dir = None
-        pos = []
-        i = 0
-        while i < len(args):
-            a = args[i]
-            if a in ("--spec", "--specs-dir"):
-                if i + 1 >= len(args):
-                    raise InputError("%s needs a path" % a)
-                if a == "--spec":
-                    spec = args[i + 1]
-                else:
-                    specs_dir = args[i + 1]
-                i += 2
-            else:
-                pos.append(a)
-                i += 1
-        if len(pos) != 1:
-            raise InputError("expected exactly one <feature.plan.md>")
-        plan = pos[0]
-        sections = parse_sections(_read(plan))
-        spec_rids = None if spec is None else read_rids(spec)
-        index = discover_namespaces(specs_dir if specs_dir is not None else specs_dir_for(plan))
-    except InputError as exc:
-        sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
-        return 2
+def parse_args(args, flags):
+    """Walk argv as given (no shlex, glob or ~ expansion): ({flag: value}, [positionals]).
+
+    `--flag value` and `--flag=value` are both accepted; any other `-`-led word is an error.
+    """
+    opts = {}
+    pos = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        name, eq, val = a.partition("=")
+        if name in flags and eq:
+            opts[name] = val
+            i += 1
+        elif a in flags:
+            if i + 1 >= len(args):
+                raise InputError("%s needs %s" % (a, flags[a]))
+            opts[a] = args[i + 1]
+            i += 2
+        elif a.startswith("-") and a != "-":
+            raise InputError("unknown flag: %s" % a)
+        else:
+            pos.append(a)
+            i += 1
+    return opts, pos
+
+
+def main_lint(args):
+    opts, pos = parse_args(args, {"--spec": "a path", "--specs-dir": "a path"})
+    if len(pos) != 1:
+        raise InputError("expected exactly one <feature.plan.md>")
+    plan = pos[0]
+    spec = opts.get("--spec")
+    sections = parse_sections(_read(plan))
+    spec_rids = None if spec is None else read_rids(spec)
+    specs_dir = opts.get("--specs-dir")
+    index = discover_namespaces(specs_dir if specs_dir is not None else specs_dir_for(plan))
     violations, form = check_plan(plan, sections, spec_rids, index)
     if violations:
         for _n, v in violations:
@@ -381,6 +390,27 @@ def main(argv):
     print("%sok %s: %d row(s) cited, deferred: %s, spec: %s" % (
         PFX, plan, rows, form, "not checked" if spec_rids is None else "%d R-ids" % len(spec_rids)))
     return 0
+
+
+def main_grandfathered(args):
+    opts, pos = parse_args(args, {"--base": "a ref"})
+    if len(pos) != 1:
+        raise InputError("--grandfathered expects exactly one <feature.plan.md>")
+    raise InputError("--grandfathered is not implemented yet")
+
+
+def main(argv):
+    args = argv[1:]
+    if any(a in ("-h", "--help") for a in args):
+        print(USAGE)
+        return 0
+    try:
+        if "--grandfathered" in args:
+            return main_grandfathered([a for a in args if a != "--grandfathered"])
+        return main_lint(args)
+    except InputError as exc:
+        sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
+        return 2
 
 
 if __name__ == "__main__":
