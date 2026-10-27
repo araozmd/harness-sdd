@@ -69,6 +69,25 @@ not raised; an exemption line that names no feature id is itself reported.
 **Advisory.** All three findings are advisory like every other finding: you never block the
 Driller, and there is no gate, no new status and no schema change.
 
+## Plan-row citations and stage-aware NFRs (E36-F04)
+
+At `target-type=feature-spec`, also run the plan-row citation lint on the feature's plan:
+`python3 "$HARNESS_DIR/tools/plan-cite-check.py" <feature>.plan.md --spec <feature>.spec.md`
+(`tools/plan-cite-check.py` in the harness source repo, `.harness/tools/plan-cite-check.py`
+in an installed target). Report each line it prints as an advisory finding; an exit 2 is
+recorded as the finding "lint did not run: <stderr>". Two judgment flags go beside it
+(ADR-0009):
+
+- **Sticky NFR omitted** — the plan omits a sticky NFR the feature's scope touches: tenant
+  isolation, the auth boundary, secrets out of the repo, validation at the system edge (the
+  list in `specs/_templates/adr.md`; a sticky NFR is never deferred).
+- **Uncited bolt-on** — the plan adds a bolt-on row (encryption at rest, WAF, rate limits,
+  backups, caching) that cites no `R-id` and is not deferred in `## Deferred`.
+
+These findings are advisory like every other finding: you never block the Architect. The
+Reviewer's check 8 rejects on the lint's exit 1; whether a cited row is justified stays your
+YAGNI finding.
+
 ## Advisory-only behavior
 
 The Doc-critic is **advisory-only**. Your findings are **recommendations only** and never block the generating agent. The

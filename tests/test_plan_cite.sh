@@ -668,6 +668,62 @@ mkdir -p "$T/nogit"; echo x > "$T/nogit/a.plan.md"
 gf_run "$T/nogit" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_outside_repo: rc $rc ($(both))"
 grep -qF 'is not inside a git work tree' "$T/err" || fail "R8_exit2_outside_repo: wrong reason ($(both))"; pass R8_exit2_outside_repo
 
-# @@R9@@
+# ── prose helpers: fence-aware heading slicer (tests/lib/fence.awk), folded anchors ──────
+# slice <file> <heading-prefix> — one `## ` section (to the next `## ` heading outside fences).
+slice() {
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^## / { keep = (index($0, h) == 1); next }
+    keep' "$1"
+}
+# item <slice-file> <n> — numbered item n of a slice, up to the next `<digits>. ` item line.
+item() { awk -v n="$2" 'index($0, n ". ") == 1 { k = 1; print; next } k && /^[0-9]+\. / { k = 0 } k' "$1"; }
+folded() { tr '\n' ' ' < "$1" | tr -s ' '; }
+# has <row> <text-file> <exact-substring> — the folded text holds the exact sentence part.
+has() { folded "$2" | grep -qF -- "$3" || fail "$1: missing: $3"; }
+
+# ── R9: Reviewer check 8 (reject) and the doc-critic's advisory section ─────────────────
+slice "$I/agents/reviewer.md" '## What you check' > "$T/rv.txt"
+[ -s "$T/rv.txt" ] || fail "R9_reviewer_check8: '## What you check' not found in the installed reviewer.md"
+item "$T/rv.txt" 8 > "$T/rv8.txt"
+[ -s "$T/rv8.txt" ] || fail "R9_reviewer_check8: no numbered item 8 inside '## What you check'"
+_l7="$(grep -n '^7\. ' "$T/rv.txt" | cut -d: -f1)"; _l8="$(grep -n '^8\. ' "$T/rv.txt" | cut -d: -f1)"
+[ -n "$_l7" ] && [ "$_l8" -gt "$_l7" ] || fail "R9_reviewer_check8: item 8 does not follow item 7"
+has R9_reviewer_check8 "$T/rv8.txt" '8. **Plan-row citations (E36-F04, ADR-0009 decision 4).** For an `sdd: true` feature, run `python3 "$HARNESS_DIR/tools/plan-cite-check.py" "<dir>/<feature>.plan.md" --spec "<dir>/<feature>.spec.md"`'
+has R9_reviewer_check8 "$T/rv8.txt" 'the tool is `tools/plan-cite-check.py` in the harness source repo and `.harness/tools/plan-cite-check.py` in an installed target'
+has R9_reviewer_check8 "$T/rv8.txt" 'Exit 1 (an `uncited-row`, `unknown-rid`, `unresolved-adr` or `deferred-*` violation) → reject, quoting the tool'"'"'s output in `progress/<run>/review.md`.'
+has R9_reviewer_check8 "$T/rv8.txt" 'Exit 2 means the check did not run (a usage or input error): fix the invocation and run it again — never approve on an unrun check.'
+has R9_reviewer_check8 "$T/rv8.txt" 'A plan-row `unresolved-adr` is a **reject**, because the citation is the row'"'"'s justification (ADR-0009 decision 4); the `## ADR-citation check` below keeps its soft-flag posture for `.spec.md` citations, and both resolve ids with the same namespace rule.'
+has R9_reviewer_check8 "$T/rv8.txt" 'on an exit-1 lint, run `python3 "$HARNESS_DIR/tools/plan-cite-check.py" --grandfathered "<dir>/<feature>.plan.md"` after `git fetch origin`: exit 0 → flag ("add `## Deferred` and cite each row, or justify"), exit 1 → reject, exit 2 → flag with "grandfather check did not run: <stderr>".'
+has R9_reviewer_check8 "$T/rv8.txt" 'a plan written before this tool merged is flagged, not rejected.'
+has R9_reviewer_check8 "$T/rv8.txt" 'This check judges citation presence and resolution only — whether a cited row is justified stays the doc-critic'"'"'s YAGNI finding.'
+has R9_reviewer_check8 "$T/rv8.txt" '`sdd: false` items are exempt (they have no `.plan.md`).'
+has R9_reviewer_check8 "$T/rv8.txt" 'Checks 2 and 7 are unchanged.'
+pass "R9_reviewer_check8"
+
+item "$T/rv.txt" 2 > "$T/rv2.txt"; item "$T/rv.txt" 7 > "$T/rv7.txt"
+has R9_reviewer_checks_2_and_7_intact "$T/rv2.txt" 'A requirement without a passing test = reject.'
+has R9_reviewer_checks_2_and_7_intact "$T/rv7.txt" 'run `python3 "$HARNESS_DIR/tools/tasks-pair-check.py" --grandfathered "<dir>/<feature>.tasks.md"`: exit 0 → flag, exit 1 → reject'
+grep -qF 'plan-cite-check' "$T/rv7.txt" && fail "R9_reviewer_checks_2_and_7_intact: item 7 now names plan-cite-check — item 8 was merged into it"
+pass "R9_reviewer_checks_2_and_7_intact"
+
+_dc="$I/agents/doc-critic.md"
+_h='## Plan-row citations and stage-aware NFRs (E36-F04)'
+grep -qxF "$_h" "$_dc" || fail "R9_doc_critic_section: no '$_h' heading in the installed doc-critic.md"
+_hs="$(grep -nxF "$_h" "$_dc" | cut -d: -f1)"
+_rs="$(grep -n '^## Review scope and calibration' "$_dc" | cut -d: -f1)"
+_ab="$(grep -n '^## Advisory-only behavior' "$_dc" | cut -d: -f1)"
+[ -n "$_rs" ] && [ -n "$_ab" ] && [ "$_hs" -gt "$_rs" ] && [ "$_ab" -gt "$_hs" ] \
+  || fail "R9_doc_critic_section: the section is not between '## Review scope and calibration' and '## Advisory-only behavior' (scope=$_rs section=$_hs advisory=$_ab)"
+slice "$_dc" "$_h" > "$T/dc.txt"
+has R9_doc_critic_section "$T/dc.txt" 'At `target-type=feature-spec`, also run the plan-row citation lint on the feature'"'"'s plan: `python3 "$HARNESS_DIR/tools/plan-cite-check.py" <feature>.plan.md --spec <feature>.spec.md`'
+has R9_doc_critic_section "$T/dc.txt" 'Report each line it prints as an advisory finding; an exit 2 is recorded as the finding "lint did not run: <stderr>".'
+has R9_doc_critic_section "$T/dc.txt" '**Sticky NFR omitted** — the plan omits a sticky NFR the feature'"'"'s scope touches: tenant isolation, the auth boundary, secrets out of the repo, validation at the system edge'
+has R9_doc_critic_section "$T/dc.txt" '**Uncited bolt-on** — the plan adds a bolt-on row (encryption at rest, WAF, rate limits, backups, caching) that cites no `R-id` and is not deferred in `## Deferred`.'
+has R9_doc_critic_section "$T/dc.txt" 'These findings are advisory like every other finding: you never block the Architect.'
+grep -qF 'never block' "$_dc" || fail "R9_doc_critic_section: the role's never-block rule is gone"
+pass "R9_doc_critic_section"
+
+# @@R10@@
 
 echo "all plan-cite checks passed"
