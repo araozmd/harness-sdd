@@ -1332,4 +1332,34 @@ F182_R1_key_raise_opens_on_armed_first_line() {
 F182_R1_key_raise_opens_on_blocked_first_line
 F182_R1_key_raise_opens_on_armed_first_line
 
+# ── F182-R2: a non-raise line for the key shuts the gate, and says what was recorded ──
+# Branch guard: the advisory must be branch (i) — "this front-end" — and NOT branch (ii)
+# ("no verdict is recorded") or the no-key "blocked by:" text, so each shut path is pinned
+# to its own message rather than to whichever advisory happens to mention the key.
+F182_R2_key_non_raise_shuts() {
+  for _first in blocked armed; do
+    for _cell in none same neither unstamped bogus; do
+      _f="$(mkfix "f182-r2-$_first-$_cell" 2 "$_first" "claude=$_cell" codex=raise)"
+      _got="$(role complex 1 --config "$_f" --frontend claude)"
+      [ "$_got" = builder ] \
+        || fail "F182-R2: $_first/claude=$_cell with --frontend claude printed '$_got', not builder"
+      [ "$(rc complex 1 --config "$_f" --frontend claude)" = 0 ] \
+        || fail "F182-R2: $_first/claude=$_cell with --frontend claude did not exit 0"
+      _e="$(err complex 1 --config "$_f" --frontend claude)"
+      [ "$(printf '%s\n' "$_e" | grep -c .)" = 1 ] \
+        || fail "F182-R2: $_first/claude=$_cell wrote not exactly one advisory line: $_e"
+      printf '%s' "$_e" | grep -qF "claude=$_cell" \
+        || fail "F182-R2: the $_first/claude=$_cell advisory does not carry the literal claude=$_cell: $_e"
+      printf '%s' "$_e" | grep -qF 'on this front-end (claude)' \
+        || fail "F182-R2: the $_first/claude=$_cell advisory is not the this-front-end branch: $_e"
+      printf '%s' "$_e" | grep -qF 'no verdict is recorded' \
+        && fail "F182-R2: the $_first/claude=$_cell advisory took the no-verdict branch: $_e"
+      printf '%s' "$_e" | grep -qF 'blocked by:' \
+        && fail "F182-R2: the $_first/claude=$_cell advisory took the no-key blocked-by branch: $_e"
+    done
+  done
+  pass "a non-raise line for the key shuts the gate on armed and blocked, naming <key>=<cell> (F182-R2)"
+}
+F182_R2_key_non_raise_shuts
+
 echo "test_escalation.sh: all cases passed"

@@ -183,11 +183,15 @@ fi
 
 _armed=0
 _blocked_by=""
+_fe_checked=0
+_fe_verdict=""
 if [ -n "$_arming" ] && [ ! -L "$_arming" ] && [ -f "$_arming" ] && [ -r "$_arming" ]; then
  if [ -n "$_frontend" ]; then
   # KEY PATH (ADR-0011) — the host's own line decides.
   case "$(head -n 1 "$_arming" 2>/dev/null)" in
     armed|blocked)
+      _fe_checked=1
+      _fe_verdict="$(awk -F= -v k="$_frontend" 'NR > 1 && $1 == k { print substr($0, length(k) + 2); exit }' "$_arming" 2>/dev/null)"
       if grep -qxF "$_frontend=raise" "$_arming" 2>/dev/null; then _armed=1; fi ;;
   esac
  else
@@ -228,6 +232,8 @@ _escalate() {
   elif [ "$_armed" = 1 ]; then
     echo builder-heavy
     exit 0
+  elif [ "$_fe_checked" = 1 ] && [ -n "$_fe_verdict" ]; then
+    echo "ℹ️  $1, but on this front-end ($_frontend) the installer recorded $_frontend=$_fe_verdict — escalating would not raise the resolved stamp here. Give models.builder-heavy a different tier for $_frontend and re-run harness-install.sh. Using 'builder'." >&2
   elif [ -n "$_blocked_by" ]; then
     echo "ℹ️  $1, but the installer recorded that escalating would NOT raise the resolved stamp — blocked by: $_blocked_by. Give that front-end's models.builder-heavy a different tier. On codex a different model_reasoning_effort alone arms — no pin needed; opencode also needs a matching pin.opencode.<tier>. Then re-run harness-install.sh. Using 'builder'." >&2
   else

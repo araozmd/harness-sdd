@@ -96,6 +96,13 @@ _f182_role="$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.confi
 [ "$_f182_role" = builder-heavy ] \
   || fail "--frontend claude on the real blocked/claude=raise --self artifact printed '$_f182_role', not builder-heavy (E99-F182 R1)"
 pass "the real --self artifact escalates a Claude Code session on claude=raise (E99-F182 R1) [self_arming_per_frontend]"
+_f182_err="$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config.yaml" --frontend codex 2>&1 >"$T/f182-codex.out")" \
+  || fail "builder-role.sh --frontend codex exited non-zero on the real --self artifact (E99-F182 R2)"
+[ "$(cat "$T/f182-codex.out")" = builder ] \
+  || fail "--frontend codex on the real artifact (codex=neither) did not print builder (E99-F182 R2)"
+printf '%s' "$_f182_err" | grep -qF 'codex=neither' \
+  || fail "--frontend codex on the real artifact did not name codex=neither on stderr: $_f182_err (E99-F182 R2)"
+pass "the real --self artifact keeps a Codex session on builder, naming codex=neither (E99-F182 R2) [self_arming_per_frontend_codex]"
 
 # Disarmed arm: with NO recorded models anywhere, nothing resolves — the verdict file
 # is reclaimed, exactly as write_escalation_arming does for an unconfigured target.
