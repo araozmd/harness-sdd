@@ -825,6 +825,29 @@ gq checkout -q main; mkdir -p s; echo x > s/p.plan.md; gq add s; gci 1200 1200 p
 GIT_AUTHOR_DATE="@1150 +0000" GIT_COMMITTER_DATE="@1300 +0000" gq merge -q --no-ff -m merge-tool tool || fail "fixture merge failed"
 cd "$ROOT"
 gf_run "$G" s/p.plan.md; gf_expect R8_merge_time_not_branch_time 0 '^plan-cite-check: grandfather flag: s/p\.plan\.md authored 1200, before tool merged into main at 1300$'
+# G7: an in-flight sibling (review round 1, F3). The plan exists ONLY on the feature branch,
+# authored @1100 before the tool merged into main @1500; the branch was rebased onto main, so
+# its commit carries committer @1600 but keeps author @1100. The plan's date is read on HEAD:
+# reading it on the base branch finds no commit and rejects the sibling the rule protects (N21).
+G="$T/g7"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p tools; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1500 1500 tool
+gq checkout -q -b feat; mkdir -p s; echo x > s/sib.plan.md; gq add s; gci 1100 1600 sibling-rebased
+cd "$ROOT"
+git -C "$G" log --format=%H main -- s/sib.plan.md | grep -q . && fail "R8_flag_sibling_plan_only_on_head: precondition: the plan reached main"
+gf_run "$G" s/sib.plan.md --base main; gf_expect R8_flag_sibling_plan_only_on_head 0 '^plan-cite-check: grandfather flag: s/sib\.plan\.md authored 1100, before tool merged into main at 1500$'
+# G8: author times are not ordered by topology (review round 1, F4). The tool merges @1500,
+# the plan is ADDED @1600, and a later edit carries an older author date @900 (cherry-pick,
+# --date). The plan's date is its first ADD, so the edit's date never grandfathers it (M8).
+G="$T/g8"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p tools; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1500 1500 tool
+mkdir -p s; echo x > s/late.plan.md; gq add s; gci 1600 1600 plan-added
+echo y >> s/late.plan.md; gq add s; gci 900 1700 edit-with-older-author-date
+cd "$ROOT"
+[ "$(git -C "$G" log --format=%at -- s/late.plan.md | sort -n | head -n 1)" = 900 ] \
+  || fail "R8_reject_edit_with_older_author_date: precondition: the edit does not carry author time 900"
+gf_run "$G" s/late.plan.md --base main; gf_expect R8_reject_edit_with_older_author_date 1 '^plan-cite-check: grandfather reject: s/late\.plan\.md authored 1600, not before tool merged into main at 1500$'
 # G3: installed-target layout — the tool lives at .harness/tools/plan-cite-check.py.
 G="$T/g3"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
 echo base > README; gq add README; gci 1000 1000 base
