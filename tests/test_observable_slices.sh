@@ -142,7 +142,7 @@ csec '- `internal-only-outcome` — [^.]{0,60}Success outcome[^.]{0,60}only inte
   || fail "R6: internal-only-outcome trigger missing"
 csec 'briefs under review are the brief paths the Driller passed' || fail "R6: scope signal (the passed paths) missing"
 csec '\*\*fresh\*\* when the lowest-numbered feature[^.]{0,80}is among' || fail "R6: fresh definition missing"
-csec 'otherwise it is an \*\*amend\*\*[^.]{0,80}not raised' || fail "R6: amend definition (walking-skeleton-missing not raised) missing"
+csec 'an \*\*amend\*\*: `walking-skeleton-missing` is not raised' || fail "R6: amend definition (walking-skeleton-missing not raised) missing"
 csec 'briefs the Driller did not pass are never read' || fail "R6: unpassed briefs are not declared never read"
 pass "R6_doc_critic_three_findings"
 
