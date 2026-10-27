@@ -959,6 +959,14 @@ has R9_doc_critic_section "$T/dc.txt" '**Uncited bolt-on** — the plan adds a b
 has R9_doc_critic_section "$T/dc.txt" 'These findings are advisory like every other finding: you never block the Architect.'
 grep -qF 'never block' "$_dc" || fail "R9_doc_critic_section: the role's never-block rule is gone"
 pass "R9_doc_critic_section"
+# The doc-critic's Claude and pi shims grant no shell tool, so it may be unable to run the
+# lint at all (review round 1, F2). Subject-to-object: the no-shell case is recorded as a
+# did-not-run finding and never as clean citations. The negative fails on any sentence of the
+# section that lets the critic declare the citations clean without the tool.
+has R9_doc_critic_no_shell_fallback "$T/dc.txt" 'If your host gives you no shell tool, the lint does not run: record the finding "plan-row citation lint did not run: no shell tool" in your note, and never judge the plan'"'"'s citations clean by reading it — the Reviewer'"'"'s check 8 stays the gate.'
+folded "$T/dc.txt" | grep -qiE '(may|can|should|free to)[^.]{0,80}(citation|plan)[^.]{0,60}clean' \
+  && fail "R9_doc_critic_no_shell_fallback: the section lets the critic declare the plan's citations clean without running the lint"
+pass "R9_doc_critic_no_shell_fallback"
 
 # ── R10: the template's Data-model R-id column; the three enforcement sentences, present tense ─
 slice "$I/specs/_templates/feature.plan.md" '## Data model' > "$T/tdm.txt"

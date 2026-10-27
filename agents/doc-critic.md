@@ -50,8 +50,10 @@ At `target-type=feature-spec`, also run the plan-row citation lint on the featur
 `python3 "$HARNESS_DIR/tools/plan-cite-check.py" <feature>.plan.md --spec <feature>.spec.md`
 (`tools/plan-cite-check.py` in the harness source repo, `.harness/tools/plan-cite-check.py`
 in an installed target). Report each line it prints as an advisory finding; an exit 2 is
-recorded as the finding "lint did not run: <stderr>". Two judgment flags go beside it
-(ADR-0009):
+recorded as the finding "lint did not run: <stderr>". If your host gives you no shell tool,
+the lint does not run: record the finding "plan-row citation lint did not run: no shell tool"
+in your note, and never judge the plan's citations clean by reading it — the Reviewer's
+check 8 stays the gate. Two judgment flags go beside it (ADR-0009):
 
 - **Sticky NFR omitted** — the plan omits a sticky NFR the feature's scope touches: tenant
   isolation, the auth boundary, secrets out of the repo, validation at the system edge (the
