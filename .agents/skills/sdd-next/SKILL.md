@@ -52,7 +52,10 @@ a repeated token) selects nothing, changes no state, and prints
 
 Under `--wave`, act as the wave coordinator in `agents/orchestrator.md` →
 "## Wave coordinator mode (/sdd-next --wave)"; that section is the contract and this
-command only maps the scope.
+command only maps the scope. Its preflight stops before any mutation — naming the cause,
+pointing to `/sdd-next <id>` and exiting non-zero — on a missing native concurrent sub-agent
+capability, on an `execution.builder.backend` other than `in-session` (`delegate` or any
+unknown value), or on a non-empty `umbrella.manifest`.
 
 Under `--mine`, use **scoped selection**: consider only features whose **effective owner**
   (feature `owner` else parent epic `owner`) equals the identity resolved from

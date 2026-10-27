@@ -52,6 +52,7 @@ CFG="$T/.harness/harness.config.yaml"
 B_CLAUDE="$T/.claude/commands/sdd-next.md"
 B_OPENCODE="$T/.opencode/command/sdd-next.md"
 B_SKILL="$T/.agents/skills/sdd-next/SKILL.md"
+WAVE_H='## Wave coordinator mode (/sdd-next --wave)'
 
 # fold <file>: the whole file on one line, runs of blanks squeezed (wrapped prose folds).
 fold_file() { tr '\n' ' ' <"$1" | tr -s ' \t' '  '; }
@@ -162,8 +163,27 @@ test_max_wave_config_seed() {
   end
 }
 
+# ── R2 — preflight and cap ─────────────────────────────────────────────────────────────
+test_preflight_contract() {
+  begin test_preflight_contract
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'W1 runs entirely before any mutation.'
+  has "wave section" "$_w" 'The coordinator runs init, requires native in-session concurrent sub-agent delegation (otherwise it stops and names the missing native concurrency capability)'
+  has "wave section" "$_w" 'requires `execution.builder.backend: in-session` (otherwise it stops and names the incompatible backend — `delegate` or any unknown value)'
+  has "wave section" "$_w" 'and requires `umbrella.manifest` to be empty'
+  has "wave section" "$_w" 'It then resolves `cap`: `--max N` when given, else `workflow.max_wave` from `harness.config.yaml`, else `3`.'
+  has "wave section" "$_w" 'When `workflow.max_wave` is present but not a positive integer, the coordinator stops and names the key `workflow.max_wave`.'
+  has "wave section" "$_w" '`cap` is the only brake on concurrent workers: there is no hard ceiling, and the operator owns any value above the default.'
+  has "wave section" "$_w" 'Every W1 stop names its cause, points the operator to `/sdd-next <id>` and makes the coordinator exit non-zero with no worktree, branch, manifest or board change.'
+  _b=$(fold_file "$B_CLAUDE")
+  has "sdd-next body" "$_b" 'Its preflight stops before any mutation — naming the cause, pointing to `/sdd-next <id>` and exiting non-zero —'
+  has "sdd-next body" "$_b" 'on an `execution.builder.backend` other than `in-session` (`delegate` or any unknown value)'
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
+test_preflight_contract
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }

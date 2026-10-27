@@ -215,6 +215,31 @@ alone performs the locked final done write, bookkeeping PR merge, canonical-base
 fast-forward, and exact F02 teardown. This separation keeps the shared primary Git
 lifecycle serialized while worker board transitions remain lock-safe.
 
+## Wave coordinator mode (/sdd-next --wave)
+
+`/sdd-next --wave [--max N] [--epic E##]` fans out ONE wave of the derived dependency graph
+into isolated worktrees, one targeted worker per feature, each running this loop (Architect →
+Builder → Reviewer → PR). It reuses the fix lane by reference, not by copy: provisioning,
+manifest completeness and fan-out discipline are `agents/fixer.md`'s "Parallel dispatch mode"
+(P2 provisioning, P3 manifest, P5 fan-out before any wait, P6 exclusive wave, P7 aggregate
+exit), with the wave differences stated here. Nothing about a wave is written to the board
+(ADR-0010): no second scheduler, no stored plan, no lease field. The phases run in order,
+W1 to W7.
+
+### W1 — preflight
+
+W1 runs entirely before any mutation. The coordinator runs init, requires native in-session
+concurrent sub-agent delegation (otherwise it stops and names the missing native concurrency
+capability), requires `execution.builder.backend: in-session` (otherwise it stops and names
+the incompatible backend — `delegate` or any unknown value), and requires `umbrella.manifest`
+to be empty (umbrella coordinators are out of scope). It then resolves `cap`: `--max N` when
+given, else `workflow.max_wave` from `harness.config.yaml`, else `3`. When
+`workflow.max_wave` is present but not a positive integer, the coordinator stops and names the
+key `workflow.max_wave`. `cap` is the only brake on concurrent workers: there is no hard
+ceiling, and the operator owns any value above the default. Every W1 stop names its cause,
+points the operator to `/sdd-next <id>` and makes the coordinator exit non-zero with no
+worktree, branch, manifest or board change.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is
