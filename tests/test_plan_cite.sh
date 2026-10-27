@@ -759,6 +759,48 @@ grep -qF 'enforces it (E36-F04)' "$ROOT/tests/test_stage_nfrs.sh" || fail "R10_p
 grep -qF 'will enforce it' "$ROOT/tests/test_stage_nfrs.sh" && fail "R10_prose_present_tense: test_stage_nfrs.sh still pins the future tense"
 pass "R10_prose_present_tense"
 
-# @@R11@@
+# ── R11: fence parity — iter_unfenced() reads the edge corpus exactly as fence.awk does ──
+# The corpus is tests/test_tasks_pairs.sh's R5 corpus, verbatim: each segment exists for one
+# clause (closer length · closer char · closer info string · backtick-in-info opener · run
+# >= 3 · indent 0-3 · trailing blanks on a closer).
+{ printf '%s\n' 'P0 outside' \
+    '````md' 'P1 in: a 3-run cannot close a 4-run' '```' 'P2 in' '````' 'P3 out' \
+    '```' 'P4 in: a tilde run cannot close a backtick fence' '~~~' 'P5 in' '```' 'P6 out' \
+    '```' 'P7 in: a closer carries no info string' '```sh' 'P8 in' '```' 'P9 out' \
+    '```a`b' 'P10 out: backtick in a backtick info string is not an opener' \
+    '~~~a`b' 'P11 in: a tilde opener may carry a backtick' '~~~' 'P12 out' \
+    '``' 'P13 out: a 2-run is not a fence' '~~' 'P14 out' \
+    '    ```' 'P15 out: 4-space indent is not a fence' \
+    '   ~~~' 'P16 in: 3-space indent is' '~~~  ' 'P17 out: closer with trailing blanks' \
+    '~~~' 'P18 in' "$(printf '~~~\t')" 'P19 out: closer with a trailing tab'
+} > "$T/fence-corpus.md"
+awk "$FENCE_AWK"'fence_delim($0) { next } !fence' "$T/fence-corpus.md" > "$T/fence-awk.out"
+python3 - "$TOOL" "$T/fence-corpus.md" > "$T/fence-py.out" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("plan_cite_check", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+lines = mod._read(sys.argv[2])
+plain = list(mod.iter_unfenced(lines))
+numbered = list(mod.iter_unfenced(lines, numbered=True))
+assert [t for _n, t in numbered] == plain, "numbered and plain iter_unfenced disagree"
+assert all(lines[n - 1] == t for n, t in numbered), "a numbered line points at the wrong source line"
+for line in plain:
+    print(line)
+PY
+printf '%s\n' 'P0 outside' 'P3 out' 'P6 out' 'P9 out' '```a`b' \
+  'P10 out: backtick in a backtick info string is not an opener' 'P12 out' '``' \
+  'P13 out: a 2-run is not a fence' '~~' 'P14 out' '    ```' 'P15 out: 4-space indent is not a fence' \
+  'P17 out: closer with trailing blanks' 'P19 out: closer with a trailing tab' > "$T/fence-want.out"
+cmp -s "$T/fence-want.out" "$T/fence-awk.out" \
+  || fail "R11_fence_parity: fence.awk reads the corpus differently than the suite expects: $(diff "$T/fence-want.out" "$T/fence-awk.out" | tr '\n' '|')"
+cmp -s "$T/fence-awk.out" "$T/fence-py.out" \
+  || fail "R11_fence_parity: plan-cite-check's iter_unfenced() diverges from tests/lib/fence.awk: $(diff "$T/fence-awk.out" "$T/fence-py.out" | tr '\n' '|')"
+pass "R11_fence_parity"
+_mode="$(git -C "$ROOT" ls-files -s tools/plan-cite-check.py | cut -c1-6)"
+[ "$_mode" = "100755" ] || fail "R11_source_mode_100755: git mode of tools/plan-cite-check.py is '$_mode'"
+pass "R11_source_mode_100755"
+
+# @@R12@@
 
 echo "all plan-cite checks passed"
