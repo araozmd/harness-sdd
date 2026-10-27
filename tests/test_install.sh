@@ -1170,6 +1170,8 @@ grep -qF 'Observable behavior' "$T/.harness/agents/inception.md" \
   || fail "E36-F02: installed inception lacks the Observable behavior bullet"
 grep -qF '## Observable behavior' "$T/.harness/specs/_templates/inbox-brief.md" \
   || fail "E36-F02: installed inbox-brief template lacks ## Observable behavior"
+grep -qxF '<HTTP / CLI / UI / file / exit code> — <what a user or client sees>' "$T/.harness/specs/_templates/inbox-brief.md" \
+  || fail "E36-F02: installed inbox-brief template lacks the shared placeholder line the doc-critic names"
 # step 7 of the installed /sdd-drill, bounded by step 8 (the emitter is the only writer)
 f36="$T/.claude/commands/sdd-drill.md"
 a36="$(grep -n '^7\. ' "$f36" | head -1 | cut -d: -f1)"; b36="$(grep -n '^8\. ' "$f36" | head -1 | cut -d: -f1)"

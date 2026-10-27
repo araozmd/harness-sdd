@@ -44,6 +44,9 @@ cp "$TEMPLATE" "$T/brief.md"
 r4_order "$T/brief.md" || fail "R4: template lacks '## Observable behavior' between Success outcome and Scope / boundaries"
 body="$(sed -n "$(( $(ln "$T/brief.md" '## Observable behavior') + 1 ))p" "$T/brief.md")"
 printf '%s' "$body" | grep -qF 'user or client sees' || fail "R4: section body does not name what a user or client sees"
+# the body line IS the literal agents/doc-critic.md calls "the template placeholder" (R6 greps it there)
+printf '%s' "$body" | grep -qxF '<HTTP / CLI / UI / file / exit code> — <what a user or client sees>' \
+  || fail "R4: section body is not exactly the shared placeholder literal"
 printf '%s' "$body" | grep -qF 'HTTP' || fail "R4: section body does not name a surface"
 for k in 'feature:' 'seeded_by: inception' 'date:'; do
   grep -qF "$k" "$T/brief.md" || fail "R4: template lost frontmatter '$k'"
