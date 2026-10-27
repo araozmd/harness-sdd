@@ -98,14 +98,20 @@ test_wave_token_in_generated_bodies() {
     [ -f "$_b" ] || { fail "missing generated body $_b"; continue; }
     _t=$(fold_file "$_b")
     _n=${_b#"$T"/}
-    has "$_n" "$_t" '- `--wave`, optionally followed by `--max N` and/or `--epic E##` in either order → **wave coordinator mode**'
+    # The body is a POINTER (T13; review round 2, N10 / N11): the `--wave` row maps the
+    # scope and stops, so no `--max`/`--epic` handling is restated after it, and the
+    # pointer sentence names the section as the contract.
+    has "$_n" "$_t" '- `--wave`, optionally followed by `--max N` and/or `--epic E##` in either order → **wave coordinator mode** (below). - anything else is invalid and selects or changes nothing.'
     has "$_n" "$_t" '`--wave` is a closed-scope token beside `--mine` and `E##-F##`: it cannot be combined with either.'
     has "$_n" "$_t" '`--max` and `--epic` are valid only after `--wave`, each at most once;'
     has "$_n" "$_t" '`N` must match `^[1-9][0-9]*$` and `E##` must match `^E[0-9]+$`.'
     has "$_n" "$_t" 'Any other argument shape'
     has "$_n" "$_t" 'selects nothing, changes no state, and prints `usage: /sdd-next [--mine | E##-F## | --wave [--max N] [--epic E##]]`.'
-    has "$_n" "$_t" 'Under `--wave`, act as the wave coordinator in'
-    has "$_n" "$_t" '"## Wave coordinator mode (/sdd-next --wave)"'
+    has "$_n" "$_t" 'Under `--wave`, act as the wave coordinator in `.harness/agents/orchestrator.md` → "## Wave coordinator mode (/sdd-next --wave)"; that section is the contract — its preflight stops, how `--epic E##` and `--max N` are used, selection, provisioning, fan-out, the test-runner lock and the merge plan — and this command only maps the scope.'
+    # Restated clauses that left the body with the trim; their contract lives in the section.
+    for _gone in 'umbrella.manifest' 'selector flag' 'forwarding `--epic' 'critical_path[0]'; do
+      case "$_t" in *"$_gone"*) fail "$_n restates a wave-section clause: $_gone" ;; esac
+    done
     # The existing closed-scope rows keep their wiring.
     has "$_n" "$_t" '- the exact token `--mine` →'
     has "$_n" "$_t" '- anything else is invalid and selects or changes nothing.'
@@ -209,8 +215,7 @@ test_preflight_contract() {
   has "wave section" "$_w" '`cap` is the only brake on concurrent workers: there is no hard ceiling, and the operator owns any value above the default.'
   has "wave section" "$_w" 'Every W1 stop names its cause, points the operator to `/sdd-next <id>` and makes the coordinator exit non-zero with no worktree, branch, manifest or board change.'
   _b=$(fold_file "$B_CLAUDE")
-  has "sdd-next body" "$_b" 'Its preflight stops before any mutation — naming the cause, pointing to `/sdd-next <id>` and exiting non-zero —'
-  has "sdd-next body" "$_b" 'on an `execution.builder.backend` other than `in-session` (`delegate` or any unknown value)'
+  has "sdd-next body" "$_b" 'Its preflight stops before any mutation — naming the cause, pointing to `/sdd-next <id>` and exiting non-zero — on every condition that section lists, including an `execution.builder.backend` other than `in-session` (`delegate` or any unknown value).'
   end
 }
 
@@ -316,8 +321,6 @@ test_eligibility_order_and_cap() {
   has "wave section" "$_w" 'Selection order is `critical_path[0]` first when it is eligible and in the wave, then the remaining eligible records in the envelope'"'"'s listed order.'
   has "wave section" "$_w" 'The first `cap` eligible records are `selected`; the rest are `cap-deferred` and stay `pending` for the operator'"'"'s next run.'
   has "wave section" "$_w" 'When the wave has no eligible record, the coordinator prints `no eligible feature in wave <N>` and exits 0 with no mutation.'
-  _b=$(fold_file "$B_CLAUDE")
-  has "sdd-next body" "$_b" 'It selects the runnable, autonomous, `pending`, `route: architect` records of `waves[0]` up to `cap`, `critical_path[0]` first, and reports every other record as `cap-deferred` or `skipped: <reason>`.'
 
   # E1-F5 is critical_path[0] (E1-F9 depends on it) and numerically LATER than eligible
   # E1-F2; E1-F3 is an autonomous sdd:false fix (route builder); E1-F4 is parked; E1-F6 is
@@ -477,9 +480,7 @@ test_summary_and_merge_plan() {
   has "wave section" "$_w" 'The coordinator runs no `/sdd-pr-loop`, performs no merge, writes no `done`, and tears down no worktree; the operator runs `/sdd-pr-loop` per PR in merge order, and `done` and teardown follow the normal post-merge path'
   has "wave section" "$_w" 'It exits 0 iff every selected feature'"'"'s verdict is `pr-opened`.'
   has "wave section" "$_w" 'Wave 2 is not automatic: after wave 1 merges, the operator re-runs `/sdd-next --wave`, which derives the next wave from the updated board.'
-  has "sdd-next body" "$_b" 'it prints the summary table (verdicts `pr-opened`, `interrupted` or `stopped: <reason>`; a `runner-busy` worker is re-run once, alone)'
-  has "sdd-next body" "$_b" 'and the `merge order:` plan, in which each later PR takes the next MINOR `VERSION` over the then-current `main`.'
-  has "sdd-next body" "$_b" 'It runs no `/sdd-pr-loop`, merges nothing, writes no `done` and tears down no worktree.'
+  has "sdd-next body" "$_b" 'After the workers settle it prints the summary table (verdicts `pr-opened`, `interrupted` or `stopped: <reason>`; a `runner-busy` worker is re-run once, alone) and the `merge order:` plan of the opened PRs, in which each later PR takes the next MINOR `VERSION` over the then-current `main`. It runs no `/sdd-pr-loop`, merges nothing, writes no `done` and tears down no worktree.'
   has "WORKFLOW wave subsection" "$_d" 'Each worker opens its PR and leaves the feature `in-review` with verdict `pr-opened`; it never runs `/sdd-pr-loop` and never merges.'
   has "WORKFLOW wave subsection" "$_d" 'The coordinator prints a `merge order:` line (the selection order).'
   has "WORKFLOW wave subsection" "$_d" 'The operator runs `/sdd-pr-loop` per PR in that order;'
