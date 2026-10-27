@@ -157,6 +157,8 @@ csec 'advisory[^.]{0,80}never block[^.]{0,80}no gate[^.]{0,40}no (new )?status[^
 csec 'All three findings are advisory' || fail "R7: advisory sentence does not cover all three findings"
 if csec 'reject'; then fail "R7: critic section must not tell anyone to reject"; fi
 if csec 'fail the drill'; then fail "R7: critic section must not fail the drill"; fi
+# any 'block' other than the permitted 'never block' is a blocking claim (A3)
+if sed 's/never block//Ig' "$CS" | grep -qiE 'block'; then fail "R7: critic section makes a finding block (only 'never block' is allowed)"; fi
 pass "R7_doc_critic_exemption_and_advisory"
 
 # ── R9: docs/WORKFLOW.md section ──────────────────────────────────────────────────
