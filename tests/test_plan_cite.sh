@@ -311,19 +311,50 @@ add_row() {
   _ln="$(grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1)"
   [ -n "$_ln" ] || fail "add_row: precondition: row '$2' not inserted"
 }
-# Known limit (review round 1, A5; the tool docstring's "Known limits"): the spec reads an R
-# token from any non-alphanumeric left boundary, and `:` is one, so a cross-feature
-# `E36-F03:R1` counts as THIS spec's R1. Under --spec an id the spec does not declare still
-# surfaces as unknown-rid; one it does declare is a silent pass. Pinned so a change is deliberate.
+# Cross-feature citations (review round 1, A5; docs/SPEC-FORMAT.md grammar item 3): an R
+# token IMMEDIATELY preceded by `E<digits>-F<digits>:` cites ANOTHER feature's requirement.
+# It cites the row, but it is never checked against --spec's R-ids. A bare R token keeps its
+# reading. GS declares R1..R4 only, so R5/R9 are ids this spec does not have.
 fresh r3xf
 add_row "$GP" '| `xf.py` | modify | per E36-F03:R9 |'
-run_tool "$GP" --spec "$GS"; expect_fail R3_cross_feature_id_reads_as_local
-grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R9" "$T/out" || fail "R3_cross_feature_id_reads_as_local: E36-F03:R9 is not read as this spec's R9 ($(both))"
-[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_cross_feature_id_reads_as_local: expected exactly one finding ($(both))"
-fresh r3xf2
-add_row "$GP" '| `xf.py` | modify | per E36-F03:R1 |'
-run_tool "$GP" --spec "$GS"; expect_ok R3_cross_feature_id_reads_as_local
-pass "R3_cross_feature_id_reads_as_local"
+run_tool "$GP" --spec "$GS"; expect_ok R3_cross_feature_rid_cites_row
+grep -qE ', spec: 4 R-ids$' "$T/out" || fail "R3_cross_feature_rid_cites_row: the ok line does not say the spec was checked ($(both))"
+run_tool "$GP"; expect_ok R3_cross_feature_rid_cites_row
+pass "R3_cross_feature_rid_cites_row"
+fresh r3xfmix
+add_row "$GP" '| `xf.py` | modify | E36-F03:R5 R2 |'
+run_tool "$GP" --spec "$GS"; expect_ok R3_cross_feature_mixed_row
+# the bare id in a mixed row is still checked: R7 is unknown, the cross-feature R5 is not
+fresh r3xfmix2
+add_row "$GP" '| `xf.py` | modify | E36-F03:R5 R7 |'
+run_tool "$GP" --spec "$GS"; expect_fail R3_cross_feature_mixed_row
+grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R7" "$T/out" || fail "R3_cross_feature_mixed_row: the bare R7 beside E36-F03:R5 was not checked ($(both))"
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_cross_feature_mixed_row: expected exactly one finding, the bare R7 ($(both))"
+pass "R3_cross_feature_mixed_row"
+fresh r3xfbare
+add_row "$GP" '| `xf.py` | modify | R5 |'
+run_tool "$GP" --spec "$GS"; expect_fail R3_bare_rid_still_checked
+grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R5" "$T/out" || fail "R3_bare_rid_still_checked: a bare R5 the spec lacks is not unknown-rid ($(both))"
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_bare_rid_still_checked: expected exactly one finding ($(both))"
+pass "R3_bare_rid_still_checked"
+# Not a feature-id prefix ⇒ a bare R token: an alphanumeric before the `E` (XE36-F03:), a
+# space after the colon (E36-F03: R5), a lowercase id (e36-f03:).
+for _xr in 'XE36-F03:R5' 'E36-F03: R5' 'e36-f03:R5'; do
+  fresh r3xfnp
+  add_row "$GP" "| \`xf.py\` | modify | $_xr |"
+  run_tool "$GP" --spec "$GS"; expect_fail R3_feature_prefix_must_be_exact
+  grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R5" "$T/out" || fail "R3_feature_prefix_must_be_exact: '$_xr' was read as a cross-feature citation, not a bare R5 ($(both))"
+  [ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_feature_prefix_must_be_exact: '$_xr': expected exactly one finding ($(both))"
+done
+pass "R3_feature_prefix_must_be_exact"
+# The cross-feature form needs an R token right after the colon: `E36-F03:PR304` is no
+# citation (the PR304 rule, R3_pr_number_not_a_citation, holds behind a feature prefix too).
+fresh r3xfpr
+add_row "$GP" '| `xf.py` | modify | E36-F03:PR304 |'
+run_tool "$GP" --spec "$GS"; expect_fail R3_cross_feature_pr_not_a_citation
+grep -qxF "plan-cite-check: uncited-row $GP:$_ln Files to change" "$T/out" || fail "R3_cross_feature_pr_not_a_citation: E36-F03:PR304 counted as a citation ($(both))"
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_cross_feature_pr_not_a_citation: expected exactly one finding ($(both))"
+pass "R3_cross_feature_pr_not_a_citation"
 
 fresh r4
 run_tool "$BP" --spec "$BS"; expect_fail R4_bare_unresolved
@@ -1174,6 +1205,11 @@ heads = grab(r"under a `\.plan\.md`'s `## ([^`]+)`, `## ([^`]+)`, `## ([^`]+)` a
 checks.append(("CHECKED_RE", mod.CHECKED_RE.pattern, r"^## (" + "|".join(heads[:4]) + r")(\s|$)"))
 checks.append(("RID_TOKEN_RE", mod.RID_TOKEN_RE.pattern, r"(?<![A-Za-z0-9])" + heads[4]))
 checks.append(("ADR_TOKEN_RE", mod.ADR_TOKEN_RE.pattern, heads[5]))
+# Grammar item 3's cross-feature form (review round 1, A5): the stated feature-id prefix, the
+# R token after it, and what the form means — it cites the row, --spec never checks it.
+(xfeat,) = grab(r"An `R\[0-9\]\+` token immediately preceded by a feature id and a colon, `([^`]+)` \(as in `E36-F03:R5`\), is a \*\*cross-feature citation\*\*: it cites the row, but it is never checked against this feature's own spec R-ids\.", "the cross-feature citation form")
+checks.append(("XFEAT_RE", mod.XFEAT_RE.pattern, r"(?<![A-Za-z0-9])" + xfeat + "(" + heads[4] + ")"))
+grab(r"(A bare `R\[0-9\]\+` token is this feature's own R-id\.)", "that a bare R token is this feature's own R-id")
 (bolt,) = grab(r"a table headed `(\|[^`]+\|)`", "the Bolt-on table header")
 checks.append(("BOLT_ON_HEADER", "| " + " | ".join(mod.BOLT_ON_HEADER) + " |", bolt))
 (none,) = grab(r"the single line `(Deferred: none — )<why>`", "the none line")

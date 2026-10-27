@@ -138,8 +138,11 @@ into the ADR and plan templates, `agents/architect.md` and `docs/WORKFLOW.md`. F
 3. **Plan-row citation.** Every table row (`^|`) under a `.plan.md`'s `## Data model`,
    `## API / interface`, `## Files to change` and `## Deferred` headings carries an
    `R[0-9]+` token or an `ADR-[0-9]{4}` token. Header and separator rows are exempt; the
-   qualified `<ns>/ADR-NNNN` form counts, because `ADR-` is what is matched. A
-   `(serves: …)` suffix on a heading does not stand in for a row citation.
+   qualified `<ns>/ADR-NNNN` form counts, because `ADR-` is what is matched. An `R[0-9]+`
+   token immediately preceded by a feature id and a colon, `E[0-9]+-F[0-9]+:` (as in
+   `E36-F03:R5`), is a **cross-feature citation**: it cites the row, but it is never checked
+   against this feature's own spec R-ids. A bare `R[0-9]+` token is this feature's own R-id.
+   A `(serves: …)` suffix on a heading does not stand in for a row citation.
 4. **`## Deferred` subsection.** In `.plan.md`, **either** a table headed
    `| Bolt-on | Deferred by | Trigger |` whose every row's *Deferred by* cell holds an
    `ADR-[0-9]{4}` token (the *Trigger* cell copies the ADR's `Trigger:` text), **or** the

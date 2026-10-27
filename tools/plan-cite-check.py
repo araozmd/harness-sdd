@@ -30,7 +30,10 @@ readings below are the tool's own contract (E36-F04.plan.md, Data model):
     empty or `:?-+:?` (at least one not empty); the header row is the row right before a
     separator; every other row is a data row.  Cells split on unescaped `|`.
   * tokens: `R[0-9]+` from a non-alphanumeric left boundary (`PR304` is no citation) and
-    `ADR-[0-9]{4}`, after stripping the `*` `` ` `` `"` `'` wrappers.
+    `ADR-[0-9]{4}`, after stripping the `*` `` ` `` `"` `'` wrappers.  An `R[0-9]+` right
+    after a feature id and a colon (`E[0-9]+-F[0-9]+:`, the `E` itself on a non-alphanumeric
+    boundary, as in `E36-F03:R5`) is a cross-feature citation (grammar item 3): it cites the
+    row and is never checked against --spec's R-ids.
   * ADR namespaces are init.sh 2c's: every directory named `adr` under the specs tree (token
     = parent basename, `platform` for <specs-dir>/adr; `*.md` directly inside, numbered by
     leading digits).  `<ns>/ADR-NNNN` (or a known `<ns> ADR-NNNN`) resolves there only, an
@@ -51,11 +54,6 @@ with a non-empty `Trigger:`, or exactly one `Deferred: none — <why>` line):
 --sweep: `deferred-no-trigger <adr>` for a deferred ADR with no `Trigger:` line, and
 `stage-unrecognized <product.md>:<line> <text>` for a `stage:` line in product.md's first
 `---` block that is not `^stage: (discovery|pilot|production)$`.
-
-Known limits: a cross-feature id such as `E36-F03:R5` reads as this spec's `R5` (`:` is a
-non-alphanumeric boundary, the spec's own reading); under --spec an id the spec does not
-declare surfaces as `unknown-rid`, one it declares passes silently
-(R3_cross_feature_id_reads_as_local).
 
 --grandfathered: grandfather() below is a DELIBERATE second copy of tasks-pair-check's
 merge-time rule, keyed on THIS tool's paths (see its docstring).
@@ -83,6 +81,10 @@ CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 # The grammar's tokens.  `R[0-9]+` read from a non-alphanumeric left boundary (the tool's
 # reading where the grammar is silent): `PR304` / `CR12` are not citations.
 RID_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])R[0-9]+")
+# A cross-feature citation (docs/SPEC-FORMAT.md grammar item 3): an R token immediately after
+# `E<digits>-F<digits>:`, the feature id itself on a non-alphanumeric left boundary.  Group 1
+# is the R token; its start is how cites() tells it from a bare R token.
+XFEAT_RE = re.compile(r"(?<![A-Za-z0-9])E[0-9]+-F[0-9]+:(R[0-9]+)")
 ADR_TOKEN_RE = re.compile(r"ADR-[0-9]{4}")
 # A spec R-id line, copied from tools/tasks-pair-check.py's RID_RE: `- **R<n>** ...` or the
 # bold-title form `- **R<n> — Title.** ...`, outside fenced code.
@@ -230,13 +232,18 @@ def strip_wrappers(text):
 
 
 def cites(row):
-    """Return (r_tokens, has_adr_token) for one data row (wrappers stripped first)."""
+    """Return (bare_r_tokens, has_cross_feature_r, has_adr_token) for one data row (wrappers
+    stripped first).  A cross-feature R token is left out of bare_r_tokens: it cites the row,
+    but --spec never checks it."""
     text = strip_wrappers(row)
+    cross = {m.start(1) for m in XFEAT_RE.finditer(text)}
     rids = []
-    for tok in RID_TOKEN_RE.findall(text):
-        if tok not in rids:
-            rids.append(tok)
-    return rids, bool(ADR_TOKEN_RE.search(text))
+    for m in RID_TOKEN_RE.finditer(text):
+        if m.start() in cross:
+            continue
+        if m.group(0) not in rids:
+            rids.append(m.group(0))
+    return rids, bool(cross), bool(ADR_TOKEN_RE.search(text))
 
 
 def specs_dir_for(plan):
@@ -382,8 +389,8 @@ def check_plan(plan, sections, spec_rids, index):
     """
     out = []
     for sec, n, text in data_rows(sections):
-        rids, has_adr = cites(text)
-        if not rids and not has_adr:
+        rids, has_xfeat, has_adr = cites(text)
+        if not rids and not has_xfeat and not has_adr:
             out.append((n, "uncited-row %s:%d %s" % (plan, n, sec["name"])))
         if spec_rids is not None:
             for rid in rids:
