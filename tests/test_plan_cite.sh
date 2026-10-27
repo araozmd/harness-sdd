@@ -706,6 +706,30 @@ head -n 1 "$T/err" | grep -q '^plan-cite-check: error: internal: UnicodeEncodeEr
 grep -q 'Traceback' "$T/err" && fail "R6_internal_error_exit2: a traceback reached stderr instead of the error line ($(both))"
 [ ! -s "$T/out" ] || fail "R6_internal_error_exit2: stdout is not empty ($(both))"
 pass "R6_internal_error_exit2"
+# A second trigger, from a class OUTSIDE ValueError (review round 2, A7): UnicodeEncodeError
+# above IS a ValueError, so a catch narrowed to `except ValueError` stayed green on it. Here
+# stdout is a pipe with no reader left — a FIFO opened read-write on fd 4 (so the write open
+# on fd 5 does not block), then fd 4 closed — so the tool's write raises BrokenPipeError, an
+# OSError (Python ignores SIGPIPE). The plan's 400 uncited rows (> 16 KB of findings) overflow
+# the 8 KB stdout buffer, so the write — and the raise — happens INSIDE main(), not at exit-time
+# flush. No timing: the reader is gone before the tool starts.
+rm -rf "$T/r6pipe"; mkdir -p "$T/r6pipe"; cp -R "$FX/specs" "$T/r6pipe/specs"
+_pp="$T/r6pipe/specs/epics/E01-x/F01-good/big.plan.md"
+{ printf '%s\n' '# p' '' '## Files to change' '' '| File | Change |' '|---|---|'
+  _i=0; while [ "$_i" -lt 400 ]; do printf '| `f%d.py` | an uncited row |\n' "$_i"; _i=$((_i + 1)); done
+  printf '%s\n' '' '## Deferred' '' 'Deferred: none — x'; } > "$_pp"
+run_tool "$_pp"
+[ "$rc" -eq 1 ] && [ "$(wc -c < "$T/out" | tr -d ' ')" -gt 16384 ] \
+  || fail "R6_internal_error_exit2: precondition: the 400-row plan does not give exit 1 with > 16 KB of findings ($rc)"
+mkfifo "$T/r6pipe/fifo"
+exec 4<>"$T/r6pipe/fifo"; exec 5>"$T/r6pipe/fifo"; exec 4<&-
+set +e; python3 "$TOOL" "$_pp" >&5 2>"$T/err"; rc=$?; set -e
+exec 5>&-
+[ "$rc" -eq 2 ] || fail "R6_internal_error_exit2: a BrokenPipeError (OSError, not ValueError) exited $rc, not 2 ($(cat "$T/err" | tr '\n' '|'))"
+head -n 1 "$T/err" | grep -q '^plan-cite-check: error: internal: BrokenPipeError: ' \
+  || fail "R6_internal_error_exit2: stderr's first line is not 'plan-cite-check: error: internal: BrokenPipeError: …' ($(cat "$T/err" | tr '\n' '|'))"
+grep -q 'Traceback' "$T/err" && fail "R6_internal_error_exit2: a traceback reached stderr on the BrokenPipeError ($(cat "$T/err" | tr '\n' '|'))"
+pass "R6_internal_error_exit2 (OSError trigger)"
 
 # ── R7: --sweep (deferred-no-trigger, stage-unrecognized) and init.sh 2d, warn-only ──────
 expect_sweep_fail() {
