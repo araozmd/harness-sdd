@@ -425,7 +425,7 @@ test_runner_lock_contract() {
   begin test_runner_lock_contract
   _w=$(section "$ORCH" "$WAVE_H")
   has "wave section" "$_w" 'A worker runs the full `verification.test_command` at most once per role phase, as a gate, and touched suites while iterating'
-  has "wave section" "$_w" 'When the runner refuses with exit 5, the worker records `runner-busy`, does not re-invoke the runner, leaves the feature at its current status (the Reviewer never approves without a green gate) and returns.'
+  has "wave section" "$_w" 'When the runner refuses with exit 5, the worker records `runner-busy`, does not re-invoke the runner, leaves the feature at its current status (the Reviewer never approves without a green gate) and returns. It never polls and never waits for the slot.'
   has "wave section" "$_w" 'Nothing here raises `--jobs`'
   has "wave section" "$_w" 'A worker whose sub-agent or tool call was cancelled or killed, or that returned without a verdict, is `interrupted`: a stop, never relaunched, never queued.'
   has "wave section" "$_w" 'A runner exit of 1 is a red suite and is never reclassified as a signal'
