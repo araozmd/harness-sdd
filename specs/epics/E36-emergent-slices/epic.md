@@ -1,7 +1,7 @@
 ---
 id: E36
 title: "Emergent design: vertical slices, stage-aware NFRs, and derived waves"
-status: planned              # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done                 # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 

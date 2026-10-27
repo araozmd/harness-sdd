@@ -460,7 +460,7 @@
     {
       "id": "E36",
       "title": "Emergent design: vertical slices, stage-aware NFRs, and derived waves",
-      "status": "planned",
+      "status": "done",
       "owner": "araozmd",
       "features": [
         {
@@ -496,7 +496,8 @@
         {
           "id": "E36-F04",
           "title": "Uncited plan rows block: plan-cite-check tool + Reviewer gate",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "61d138cdfef8caa5efe32a6729316df81e66fa35", "ref": "61d138cdfef8caa5efe32a6729316df81e66fa35", "repo": "harness-sdd-E36-F04", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [
