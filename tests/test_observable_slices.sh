@@ -100,7 +100,7 @@ pass "R1_driller_rule_section"
 grep -qF 'Observable-slice exemption:' "$DRILLER" || fail "R2: $DRILLER lacks the 'Observable-slice exemption:' token"
 sec 'Observable-slice exemption:' || fail "R2: the token is not inside the observable-slice section"
 sec '\*\*Record the exemption in `epic.md`\.\*\*' || fail "R2: exemption paragraph lead-in does not say where it is recorded (epic.md)"
-sec 'one line per exempted feature[^.]{0,80}Notes' || fail "R2: section does not record one line per exempted feature under Notes"
+sec 'one line per exempted feature under `## Notes` in the epic.s `epic.md`' || fail "R2: section does not place the one-line-per-exempted-feature record under ## Notes in the epic's epic.md"
 sec 'beginning .?Observable-slice exemption:.{0,20}naming the feature id' || fail "R2: exemption line is not required to name the feature id"
 sec 'only consumer is another epic' || fail "R2: section lacks the cross-epic-consumer exemption"
 sec 'only consumer is another epic[^.]{0,200}thinnest path the consuming epic can exercise' \
