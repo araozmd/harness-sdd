@@ -78,17 +78,14 @@ validate_key() {
   # The id is E<digits>-F<digits> (E36-F07 widened it from E99-F<digits>), parsed
   # EXPLICITLY rather than matched by a wildcard glob: `E[0-9]*-F[0-9]*` would admit
   # `E1x-F1` and the path-injecting `E1/../-F1`, and the id becomes a branch name and a
-  # worktree path. Charset first, then exactly one `-F` split into two digit-only halves.
-  case "$FIX_ID" in
-    *[!0-9EF-]*) _key_error="invalid fix id: $FIX_ID" ;;
-  esac
+  # worktree path. A leading `E`, exactly one `-F`, and two non-empty digit-only halves;
+  # that alone rejects every character outside `[0-9EF-]`, so no separate charset arm
+  # (it would be an equivalent, untestable second guard — E36-F07 mutation F01).
   _id_rest=${FIX_ID#E}
   _id_epic=${_id_rest%%-F*}
   _id_feat=${_id_rest#*-F}
-  if [ -z "$_key_error" ]; then
-    if [ "$_id_rest" = "$FIX_ID" ] || [ "$_id_epic" = "$_id_rest" ]; then
-      _key_error="invalid fix id: $FIX_ID"
-    fi
+  if [ "$_id_rest" = "$FIX_ID" ] || [ "$_id_epic" = "$_id_rest" ]; then
+    _key_error="invalid fix id: $FIX_ID"
   fi
   if [ -z "$_key_error" ]; then
     case "$_id_epic" in
