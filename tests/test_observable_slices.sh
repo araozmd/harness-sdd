@@ -87,6 +87,7 @@ sec 'thinnest[^.]{0,40}end-to-end' || fail "R1: section does not define the skel
 sec 'lowest[^.]{0,20}F##' || fail "R1: section does not tie the skeleton to the lowest F##"
 sec 'skeleton[^.]{0,200}no intra-epic .?depends_on' || fail "R1: section does not give the skeleton no intra-epic depends_on"
 sec 'internal[^.]{0,80}merged[^.]{0,40}consum' || fail "R1: section does not merge an internal-only candidate into its consumer"
+sec 'merged into the slice that consumes it' || fail "R1: section does not merge the internal-only candidate INTO the slice that consumes it (direction)"
 sec 'max_requirements[^.]{0,60}size proxy' || fail "R1: section does not say max_requirements remains the size proxy"
 pass "R1_driller_rule_section"
 
