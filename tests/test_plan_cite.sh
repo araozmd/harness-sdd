@@ -676,12 +676,15 @@ grep -qF 'plan-cite:' "$T/out" && fail "R7_init_ok_on_good_plan: a warn line on 
 pass "R7_init_ok_on_good_plan"
 
 # The spec must stay on disk (init.sh section 2 rejects an sdd feature with no spec before
-# 2d runs), so the exit-2 cause is a spec that declares no R-id.
-init_case E01-F02 spec-ready true F02-bad
+# 2d runs), so the exit-2 cause is a spec that declares no R-id. The trigger-less ADR is
+# removed so the sweep is clean: the no-clean-line negative below then has ONE producer, the
+# exit-2 branch's own count (N10).
+init_case E01-F02 spec-ready true F02-bad; rm "$I/specs/adr/0003-deferred-no-trigger.md"
 grep -v '^- \*\*R' "$I/specs/epics/E01-x/F02-bad/E01-F02.spec.md" > "$T/zero.md"; mv "$T/zero.md" "$I/specs/epics/E01-x/F02-bad/E01-F02.spec.md"
 init_run; init_ok R7_init_exit2_reported_as_did_not_run
 grep -qF "⚠️  plan-cite: E01-F02 check did not run: error: no R-ids found in specs/epics/E01-x/F02-bad/E01-F02.spec.md" "$T/out" \
   || fail "R7_init_exit2_reported_as_did_not_run: an exit-2 lint is not reported as 'check did not run' ($(both))"
+grep -qF '✅ plan citations' "$T/out" && fail "R7_init_exit2_reported_as_did_not_run: the clean line printed though a plan's lint did not run ($(both))"
 pass "R7_init_exit2_reported_as_did_not_run"
 
 for _st in in-review in-progress; do
@@ -709,9 +712,11 @@ grep -qF '⚠️  plan-cite: sweep did not run: error: cannot read specs/booking
 grep -qF '✅ plan citations' "$T/out" && fail "R7_init_sweep_exit2_did_not_run: clean line printed though the sweep did not run ($(both))"
 pass "R7_init_sweep_exit2_did_not_run"
 
-init_case E01-F02 spec-ready true F02-bad; rm "$I/specs/epics/E01-x/F02-bad/E01-F02.plan.md"; init_run; init_ok R7_init_no_plan_did_not_run
+init_case E01-F02 spec-ready true F02-bad; rm "$I/specs/epics/E01-x/F02-bad/E01-F02.plan.md" "$I/specs/adr/0003-deferred-no-trigger.md"
+init_run; init_ok R7_init_no_plan_did_not_run
 grep -qxF '⚠️  plan-cite: E01-F02 check did not run: no *.plan.md in specs/epics/E01-x/F02-bad/ (warn-only)' "$T/out" \
   || fail "R7_init_no_plan_did_not_run: a feature with no plan is not reported ($(both))"
+grep -qF '✅ plan citations' "$T/out" && fail "R7_init_no_plan_did_not_run: the clean line printed though a feature's plan was never linted ($(both))"
 pass "R7_init_no_plan_did_not_run"
 
 # A warn-only lint never fails the gate, however much it prints: 2000 generated uncited rows
