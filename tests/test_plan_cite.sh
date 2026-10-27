@@ -171,6 +171,43 @@ grep -qxF "plan-cite-check: uncited-row $GP:$_ln Files to change" "$T/out" \
   || fail "R2_rows_after_subheading_checked: a '### sub-heading' closed the '## Files to change' section ($(both))"
 pass "R2_rows_after_subheading_checked"
 
-# @@R3@@
+# ── R3: --spec given ⇒ an undeclared R<n> is unknown-rid; absent ⇒ not checked ──────────
+fresh r3
+run_tool "$BP" --spec "$BS"; expect_fail R3_unknown_rid
+[ "$(count '^plan-cite-check: unknown-rid ')" -eq 1 ] || fail "R3_unknown_rid: expected exactly one unknown-rid line ($(both))"
+grep -qxF "plan-cite-check: unknown-rid $BP:14 R9" "$T/out" || fail "R3_unknown_rid: no 'unknown-rid <plan>:14 R9' line ($(both))"
+pass "R3_unknown_rid"
+
+fresh r3nospec
+run_tool "$BP"; expect_fail R3_no_spec_not_checked
+[ "$(count '^plan-cite-check: unknown-rid ')" -eq 0 ] || fail "R3_no_spec_not_checked: R-id existence was checked without --spec ($(both))"
+run_tool "$GP"; expect_ok R3_no_spec_not_checked
+grep -qE '^plan-cite-check: ok .*, spec: not checked$' "$T/out" || fail "R3_no_spec_not_checked: the ok line does not say 'spec: not checked' ($(both))"
+run_tool "$GP" --spec "$GS"; expect_ok R3_no_spec_not_checked
+grep -qE '^plan-cite-check: ok .*, spec: 4 R-ids$' "$T/out" || fail "R3_no_spec_not_checked: with --spec the ok line does not count the spec's 4 R-ids ($(both))"
+pass "R3_no_spec_not_checked"
+
+fresh r3bold
+printf '%s\n' '# Bold-title spec' '' '## Acceptance criteria' '' '- **R1 — Title.** The system shall do one.' \
+  "- **R1's note** — prose, not an R-id." > "$T/r3bold.spec.md"
+printf '%s\n' '# p' '' '## Files to change' '' '| File | Change | R-id |' '|---|---|---|' '| `a.py` | create | R1 |' \
+  '' '## Deferred' '' 'Deferred: none — x' > "$S/epics/E01-x/F01-good/bold.plan.md"
+run_tool "$S/epics/E01-x/F01-good/bold.plan.md" --spec "$T/r3bold.spec.md"; expect_ok R3_bold_title_rid_form
+grep -qE ', spec: 1 R-ids$' "$T/out" || fail "R3_bold_title_rid_form: the bold-title form '- **R1 — Title.**' was not read as R1 ($(both))"
+pass "R3_bold_title_rid_form"
+
+fresh r3pr
+grep -qF 'PR304 is a pull request' "$GP" || fail "R3_pr_number_not_a_citation: precondition: the PR304 row is gone"
+run_tool "$GP" --spec "$GS"; expect_ok R3_pr_number_not_a_citation
+grep -qF 'R304' "$T/out" && fail "R3_pr_number_not_a_citation: PR304 was read as the citation R304 ($(both))"
+_ln="$(grep -n 'PR304 is a pull request' "$GP" | cut -d: -f1)"
+sed 's/^\(| Booking | ref | text | boundary: PR304 is a pull request, not a citation | \)R2 |$/\1— |/' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+grep -qF 'not a citation | — |' "$GP" || fail "R3_pr_number_not_a_citation: precondition: R2 not removed from the PR304 row"
+run_tool "$GP" --spec "$GS"; expect_fail R3_pr_number_not_a_citation
+grep -qxF "plan-cite-check: uncited-row $GP:$_ln Data model" "$T/out" \
+  || fail "R3_pr_number_not_a_citation: with R2 removed, the PR304 row is not uncited — PR304 counted as a citation ($(both))"
+pass "R3_pr_number_not_a_citation"
+
+# @@R4@@
 
 echo "all plan-cite checks passed"

@@ -35,6 +35,9 @@ CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 # reading where the grammar is silent): `PR304` / `CR12` are not citations.
 RID_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])R[0-9]+")
 ADR_TOKEN_RE = re.compile(r"ADR-[0-9]{4}")
+# A spec R-id line, copied from tools/tasks-pair-check.py's RID_RE: `- **R<n>** ...` or the
+# bold-title form `- **R<n> — Title.** ...`, outside fenced code.
+RID_RE = re.compile(r"^[ \t]*-[ \t]+\*\*(R[0-9]+)(?:\*\*|[ \t]+(?:—|–|-))")
 WRAPPERS = "*`\"'"
 
 
@@ -90,6 +93,18 @@ def _read(path):
     if lines and lines[-1] == "":
         lines.pop()
     return [ln[:-1] if ln.endswith("\r") else ln for ln in lines]
+
+
+def read_rids(path):
+    """The spec's declared R-ids, first-appearance order, a repeated id counted once."""
+    rids = []
+    for line in iter_unfenced(_read(path)):
+        m = RID_RE.match(line)
+        if m and m.group(1) not in rids:
+            rids.append(m.group(1))
+    if not rids:
+        raise InputError("no R-ids found in %s" % path)
+    return rids
 
 
 def cells(row):
@@ -165,13 +180,20 @@ def data_rows(sections):
                     yield sec, n, text
 
 
-def check_plan(plan, sections):
-    """Pure: return [(line, finding)] in file order (finding without the prefix)."""
+def check_plan(plan, sections, spec_rids=None):
+    """Pure: return [(line, finding)] in file order (finding without the prefix).
+
+    spec_rids None = no --spec: R-id existence is not checked.
+    """
     out = []
     for sec, n, text in data_rows(sections):
         rids, has_adr = cites(text)
         if not rids and not has_adr:
             out.append((n, "uncited-row %s:%d %s" % (plan, n, sec["name"])))
+        if spec_rids is not None:
+            for rid in rids:
+                if rid not in spec_rids:
+                    out.append((n, "unknown-rid %s:%d %s" % (plan, n, rid)))
     out.sort(key=lambda v: v[0])
     return out
 
@@ -202,18 +224,19 @@ def main(argv):
             raise InputError("expected exactly one <feature.plan.md>")
         plan = pos[0]
         sections = parse_sections(_read(plan))
+        spec_rids = None if spec is None else read_rids(spec)
     except InputError as exc:
         sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
         return 2
-    violations = check_plan(plan, sections)
+    violations = check_plan(plan, sections, spec_rids)
     if violations:
         for _n, v in violations:
             print(PFX + v)
         print("%sFAIL %d violation(s)" % (PFX, len(violations)))
         return 1
     rows = sum(1 for _ in data_rows(sections))
-    print("%sok %s: %d row(s) cited, spec: %s" % (PFX, plan, rows,
-                                                 "not checked" if spec is None else "given"))
+    print("%sok %s: %d row(s) cited, spec: %s" % (
+        PFX, plan, rows, "not checked" if spec_rids is None else "%d R-ids" % len(spec_rids)))
     return 0
 
 
