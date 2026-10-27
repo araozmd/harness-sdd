@@ -1119,6 +1119,8 @@ HOME="$TMW/home" CODEX_HOME="$TMW/ch" sh "$SRC/harness-install.sh" "$TMW/t" >/de
 rm -rf "$TMW"
 grep -qF '.harness/agents/orchestrator.md' "$T/.claude/agents/orchestrator.md" \
   || fail "agent shim does not resolve against .harness/"
+grep -qxF '## Wave coordinator mode (/sdd-next --wave)' "$T/.harness/agents/orchestrator.md" \
+  || fail "installed orchestrator.md lacks the /sdd-next --wave coordinator section (E36-F07 R11)"
 grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
   || fail "sdd-new does not resolve inception against .harness/"
 grep -qE '(^|[^/])agents/inception\.md' "$T/.claude/commands/sdd-new.md" \

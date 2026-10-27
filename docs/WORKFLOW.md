@@ -755,6 +755,9 @@ cancel siblings. No ready work is a zero-mutation success; missing native concur
 or `execution.builder.backend: delegate` fails before manifest/provision/claim and
 points to serial `/sdd-fix`.
 
+The helper `tools/fix-worktree.sh` accepts any `E##-F##` id, so `/sdd-next --wave` provisions
+`sdd: true` features with it too; the E99 lane itself is unchanged.
+
 On OpenCode, the installer exposes `/sdd-fix-parallel` only after its concurrency
 capability marker or an explicit override enables it; the probe remains available.
 See [installation](INSTALL.md) for the capability gate.

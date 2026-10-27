@@ -460,6 +460,25 @@ test_summary_and_merge_plan() {
   end
 }
 
+# ── R11 — role, command and docs prose surfaces ────────────────────────────────────────
+test_prose_surfaces() {
+  begin test_prose_surfaces
+  grep -qxF "$WAVE_H" "$ORCH" || fail "installed orchestrator.md lacks the heading line: $WAVE_H"
+  # Placement: the wave section is the next `## ` section after the targeted worker mode.
+  _next=$(awk '/^## Targeted parallel-fix worker mode$/ { k = 1; next } k && /^## / { print; exit }' "$ORCH")
+  [ "$_next" = "$WAVE_H" ] || fail "the wave section does not directly follow the targeted worker mode (next: $_next)"
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'It reuses the fix lane by reference, not by copy: provisioning, manifest completeness and fan-out discipline are `agents/fixer.md`'"'"'s "Parallel dispatch mode"'
+  for _f in "$B_CLAUDE" "$B_OPENCODE" "$B_SKILL" "$ORCH" "$WORKFLOW"; do
+    grep -qF '/sdd-next --wave' "$_f" || fail "${_f#"$T"/} lacks /sdd-next --wave"
+  done
+  _r=$(section "$WORKFLOW" '## Running in waves and across machines')
+  has "WORKFLOW waves section" "$_r" "$WF_H"
+  _l=$(subsection "$WORKFLOW" '### Bounded parallel fix lane (`/sdd-fix-parallel`)')
+  has "WORKFLOW fix-lane subsection" "$_l" 'The helper `tools/fix-worktree.sh` accepts any `E##-F##` id, so `/sdd-next --wave` provisions `sdd: true` features with it too; the E99 lane itself is unchanged.'
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
@@ -470,6 +489,7 @@ test_manifest_contract
 test_worker_identity_and_harness_dir
 test_runner_lock_contract
 test_summary_and_merge_plan
+test_prose_surfaces
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }
