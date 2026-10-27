@@ -99,6 +99,23 @@ You **defer per-epic ADR deltas to F03 (`/sdd-drill`)**, and you **never author
 feature-level design**. Decisions local to a single epic, and refinements informed by
 what an earlier epic's implementation taught, are F03's job — not yours.
 
+## Stage (ADR-0009)
+
+Read the product's stage before you write `specs/architecture.md` and the ADRs, and scope
+the upfront NFR decisions to it. Take the literal from `specs/product.md` frontmatter:
+`sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'` — one of `discovery`, `pilot`,
+`production`; when the line is absent or unrecognized, the stage is `production`.
+
+- A bolt-on NFR the stage excludes (encryption at rest, WAF, rate limits, backups, caching)
+  is recorded as a deferred ADR with a `Trigger:` line (`- **Status:** deferred`, then
+  `- **Trigger:** <observable condition>`, per `specs/_templates/adr.md`) — not an
+  accepted ADR and not an omission. Sticky NFRs (tenant isolation, the auth boundary, secrets out of the repo,
+  validation at the system edge) are never deferred at any stage.
+- You never write `specs/product.md` — it is project-owned. If the stage line is absent, say
+  so in the completion report and let the human add it.
+- Name the stage you read (and whether it was declared or defaulted) in your completion
+  report.
+
 ## Repo topology output (R1-R7, R10)
 
 Repo topology is an output of planning, never an input. The repo-topology decision is
