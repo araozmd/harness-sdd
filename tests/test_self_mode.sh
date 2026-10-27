@@ -88,6 +88,25 @@ sh "$C/harness-install.sh" --self --agents=claude >/dev/null 2>&1 || fail "Claud
 grep -qx armed "$C/.escalation-arming" || fail "Claude-only sonnet→opus lost arming"
 pass "combined inherited Codex is unarmed; explicit Claude-only retains arming (R4/R5) [self_arming_real]"
 
+# ── E99-F182: the per-front-end gate on the REAL --self artifact (ADR-0011) ──────
+# The brief's problem statement end to end: this repo's own file reads `blocked`, yet its
+# Claude Code sessions must escalate on their `claude=raise` line.
+_f182_role="$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config.yaml" --frontend claude 2>/dev/null)" \
+  || fail "builder-role.sh --frontend claude exited non-zero on the real --self artifact (E99-F182 R1)"
+[ "$_f182_role" = builder-heavy ] \
+  || fail "--frontend claude on the real blocked/claude=raise --self artifact printed '$_f182_role', not builder-heavy (E99-F182 R1)"
+pass "the real --self artifact escalates a Claude Code session on claude=raise (E99-F182 R1) [self_arming_per_frontend]"
+_f182_err="$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config.yaml" --frontend codex 2>&1 >"$T/f182-codex.out")" \
+  || fail "builder-role.sh --frontend codex exited non-zero on the real --self artifact (E99-F182 R2)"
+[ "$(cat "$T/f182-codex.out")" = builder ] \
+  || fail "--frontend codex on the real artifact (codex=neither) did not print builder (E99-F182 R2)"
+printf '%s' "$_f182_err" | grep -qF 'on this front-end (codex) the installer recorded codex=neither' \
+  || fail "--frontend codex on the real artifact did not name codex=neither on stderr: $_f182_err (E99-F182 R2)"
+pass "the real --self artifact keeps a Codex session on builder, naming codex=neither (E99-F182 R2) [self_arming_per_frontend_codex]"
+[ "$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config.yaml" 2>/dev/null)" = builder ] \
+  || fail "builder-role.sh with no --frontend escalated on the real blocked --self artifact (E99-F182 R4)"
+pass "with no key the real --self artifact still decides from its blocked first line (E99-F182 R4) [self_arming_no_key]"
+
 # Disarmed arm: with NO recorded models anywhere, nothing resolves — the verdict file
 # is reclaimed, exactly as write_escalation_arming does for an unconfigured target.
 D="$(fixture disarmed)"

@@ -1000,7 +1000,8 @@ judgement — it asks a tool, so the same recorded state always yields the same 
 
 ```sh
 tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>] \
-                      [--config <path>] [--arming <path>]
+                      [--config <path>] [--arming <path>] \
+                      [--frontend "$(sh tools/host-frontend.sh)"]
 # → builder | builder-heavy
 ```
 
@@ -1021,8 +1022,9 @@ escalation:
 Notes that matter in practice:
 
 - **Escalation needs two independent yeses.** A positive `after_rejections` — which is both
-  the threshold and your master switch — **and** an `armed` verdict in
-  `.harness/.escalation-arming`. Either one alone routes to `builder`.
+  the threshold and your master switch — **and** an `armed` first line in
+  `.harness/.escalation-arming` — or, when the host is known, the host's own `<key>=raise`
+  line (ADR-0011). Either one alone routes to `builder`.
 - **The installer computes the verdict; you do not have to.** `harness-install.sh` asks its
   own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
   stamps, and records the comparison. `armed` means `builder-heavy` resolves to a **different
@@ -1035,6 +1037,8 @@ Notes that matter in practice:
   claude=raise
   codex=none
   ```
+
+  A `blocked` first line still lets a host whose own line is `raise` escalate (ADR-0011).
 
   A fifth verdict, `unstamped`, means the installer **declined to rewrite that front-end's
   live artifact** — an edited `opencode.json`, or a foreign/edited/symlinked
@@ -1057,12 +1061,16 @@ Notes that matter in practice:
   `unstamped` also covers an edited or symlinked `.pi/agents/builder*.md`.
   The verdict is computed at **install time**, so re-run the installer after changing any of
   it.
-- **The verdict is a conservative AND across selected front-ends.** The rule cannot know
-  which front-end it is running under, so one misconfigured front-end disables escalation
-  everywhere. That never downgrades anyone, and the `blocked` line tells you which one to fix.
+- **The first line is the AND; the host's own line decides when the host is known.** The
+  first line is the AND across selected front-ends; the Orchestrator passes its host's key
+  (printed by `tools/host-frontend.sh` from the session markers) and `builder-role.sh` reads
+  that front-end's own line (ADR-0011), so one misconfigured front-end no longer disables
+  escalation on the others. An empty key — no marker, two markers, or no `--frontend` — falls
+  back to the first line. Neither rule downgrades anyone, and the detail lines tell you which
+  front-end to fix.
   Source `--self` defaults to `claude,codex,opencode,pi` (the root `.escalation-arming` ends in
-  `pi=neither`): inherited Codex makes the combined
-  verdict **UNARMED** even when Claude alone is armed. Explicit
+  `pi=neither`): inherited Codex leaves the combined first line `blocked` while a Claude Code
+  session still escalates on its `claude=raise` line. Explicit
   `--self --agents=claude` retains the Claude-only verdict; model choices remain
   in each host’s source role files and are preserved on regeneration.
 - **WHAT IT DOES NOT CHECK: that the stamp is STRONGER, or that it exists.** The harness has

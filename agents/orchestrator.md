@@ -596,7 +596,8 @@ that choice.** Before every Builder spawn, ask:
 ```sh
 role="$(sh "$HARNESS_DIR/tools/builder-role.sh" "<complexity>" "<round>" \
           --backend "<execution.builder.backend>" \
-          --config "$HARNESS_DIR/harness.config.yaml")"
+          --config "$HARNESS_DIR/harness.config.yaml" \
+          --frontend "$(sh "$HARNESS_DIR/tools/host-frontend.sh")")"
 ```
 
 - `<complexity>` — the `complexity:` value from **the feature's own `.spec.md` frontmatter**.
@@ -605,6 +606,11 @@ role="$(sh "$HARNESS_DIR/tools/builder-role.sh" "<complexity>" "<round>" \
   is the ad-hoc judgment this rule exists to replace.
 - `<round>` — the **existing** build↔review counter from step 5. There is no second counter
   and no schema field; if you cannot determine the round, it is 1.
+- `--frontend` — the key `tools/host-frontend.sh` prints for the front-end this session runs
+  inside, read from its session markers (ADR-0011). An empty key means the host could not be
+  identified, and the tool then applies the all-front-ends rule — the first line of
+  `.harness/.escalation-arming`. You never supply the key by hand: a key you typed is the
+  guess this rule exists to replace.
 
 Then spawn **exactly the role it printed**. It exits 0 for every resolvable answer and writes
 advisories to stderr — an unrecognized `complexity`, a malformed threshold, or escalation
@@ -617,7 +623,8 @@ tag does not change mid-feature. There is no demotion rule — do not invent one
 **Escalation needs TWO yeses, and neither is yours to give.** A positive
 `escalation.after_rejections` — both the threshold and the operator's master switch, shipped
 at `2`, where `0` disables both triggers — **and** an `armed` verdict in
-`.harness/.escalation-arming`. When either gate is shut and a spec carries
+`.harness/.escalation-arming` — the first line, or, when the host is known, your host's own
+`<key>=raise` line (ADR-0011). When either gate is shut and a spec carries
 `complexity: complex`, the tool says which one on stderr; surface that and carry on. It is
 telling the operator what to configure, not reporting a failure.
 
@@ -625,7 +632,8 @@ telling the operator what to configure, not reporting a failure.
 `harness-install.sh` asks its own resolvers for the whole resolved stamp — `model` plus, on
 codex only, `model_reasoning_effort` (E99-F163), and on pi only, `thinking` (E35-F03) — that `builder` and `builder-heavy` resolve
 to on every front-end it stamps, and records the comparison in `.harness/.escalation-arming`.
-That file decides. Do not read it yourself, do not reason about `models:` or its pins, and do not
+That file decides — the first line when the host is unknown, your host's own line when it is.
+Do not read it yourself, do not reason about `models:` or its pins, and do not
 add a judgement on top: two E17-F03 review rounds killed two attempts to work this out
 anywhere other than the resolver, and each was wrong on a different front-end.
 

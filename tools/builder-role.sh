@@ -18,12 +18,17 @@
 #   tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>]
 #                                              [--config <harness.config.yaml>]
 #                                              [--arming <.escalation-arming>]
+#                                              [--frontend <key>]
 #
 #   <complexity>  the feature spec's `complexity:` frontmatter value. EMPTY is legal and
 #                 means `standard` — specs written before this feature carry no tag.
 #   <round>       the EXISTING build<->review counter (agents/orchestrator.md): 1 on the
 #                 first build, +1 on every in-review -> in-progress bounce. This tool
 #                 introduces no second counter and no schema field.
+#   --frontend    the front-end this session runs inside (`claude`, `codex`, …), as printed
+#                 by tools/host-frontend.sh — never typed by the caller (ADR-0011). Given a
+#                 key, the arming gate reads THAT front-end's own `<key>=raise` line; empty
+#                 or absent, it reads the first line exactly as before.
 #
 # Output:
 #   stdout  exactly one line: `builder` or `builder-heavy`
@@ -43,7 +48,7 @@
 set -eu
 
 usage() {
-  echo "usage: builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>] [--arming <path>]" >&2
+  echo "usage: builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>] [--arming <path>] [--frontend <key>]" >&2
   exit 4
 }
 
@@ -52,6 +57,7 @@ _round=""
 _backend="in-session"
 _config=""
 _arming=""
+_frontend=""
 _positional=0
 
 while [ $# -gt 0 ]; do
@@ -59,6 +65,9 @@ while [ $# -gt 0 ]; do
     --backend) [ $# -ge 2 ] || usage; _backend="$2"; shift 2 ;;
     --config)  [ $# -ge 2 ] || usage; _config="$2";  shift 2 ;;
     --arming)  [ $# -ge 2 ] || usage; _arming="$2";  shift 2 ;;
+    # An EMPTY value is "no key" (R4): host-frontend.sh prints nothing when it cannot tell,
+    # and `--frontend "$(…)"` must then behave exactly like a caller that never passed it.
+    --frontend) [ $# -ge 2 ] || usage; _frontend="$2"; shift 2 ;;
     --help|-h) usage ;;
     --*) echo "builder-role.sh: unknown option '$1'" >&2; usage ;;
     *)
@@ -79,6 +88,21 @@ done
 # broken, and silently coercing it would hide that while quietly changing which model runs.
 case "$_round" in
   ''|*[!0-9]*) echo "builder-role.sh: round must be a non-negative integer, got '$_round'" >&2; exit 4 ;;
+esac
+
+# The key must be a bare front-end token, `^[a-z][a-z0-9-]*$`, or empty (R4/R6). Anything
+# else means the CALLER is broken — host-frontend.sh only ever prints a marker-row key — so
+# it is a usage error, like a non-numeric round. Spelled-out letter classes rather than
+# `[a-z]`: a range is collation-dependent in some shells' UTF-8 locales and could admit
+# upper case.
+case "$_frontend" in
+  '') : ;;
+  [abcdefghijklmnopqrstuvwxyz]*)
+    case "$_frontend" in
+      *[!abcdefghijklmnopqrstuvwxyz0123456789-]*)
+        echo "builder-role.sh: --frontend must be a bare front-end key, got '$_frontend'" >&2; exit 4 ;;
+    esac ;;
+  *) echo "builder-role.sh: --frontend must be a bare front-end key, got '$_frontend'" >&2; exit 4 ;;
 esac
 
 # ── 1. Backend, checked FIRST ────────────────────────────────────────────────────
@@ -152,8 +176,9 @@ esac
 
 # ── 2b. The arming verdict — the SECOND gate ────────────────────────────────────
 # `.harness/.escalation-arming`, written by harness-install.sh. First line is exactly one
-# word, `armed` or `blocked`, so no parser is needed for the DECISION; the remaining
-# `<front-end>=<verdict>` lines are read for the advisory only.
+# word, `armed` or `blocked`, so no parser is needed for the no-key DECISION; the remaining
+# `<front-end>=<verdict>` lines are read for the advisory — and, when `--frontend <key>` is
+# given, the key's own line is the decision (ADR-0011, amending ADR-0002's scope).
 #
 # Located rather than searched for, so purity holds: `--arming` if given, else beside the
 # config file (both live in `.harness/`). With no `--config` there is no artifact and
@@ -176,25 +201,53 @@ fi
 
 _armed=0
 _blocked_by=""
+_fe_checked=0
+_fe_line=""
 if [ -n "$_arming" ] && [ ! -L "$_arming" ] && [ -f "$_arming" ] && [ -r "$_arming" ]; then
-  # The first line is compared RAW — no whitespace normalization. `opencode_parallel_wanted`
-  # in the installer does `tr -d '[:space:]'` and this deliberately does NOT copy it: that
-  # marker decides whether to install a command, while this one decides which MODEL runs a
-  # build, and the contract here is fail-closed — only an exact `armed` opens the gate.
-  # Stripping whitespace lets `armed `, ` armed`, and even `a r m e d` or `ar med` through,
-  # so a file that the installer could not have written would arm the target
-  # (Codex #3723207550, reproduced). `$( )` already strips the trailing newline, so a
-  # well-formed `armed\n` still matches; anything else fails closed, which is the only
-  # direction this gate is allowed to fail.
-  case "$(head -n 1 "$_arming" 2>/dev/null)" in
-    armed) _armed=1 ;;
-    *)
-      # Every non-`raise` detail line, joined — this is what tells the operator WHICH
-      # front-end to fix. `(unspecified)` keeps the blocked branch distinguishable from the
-      # absent branch even when the file carries no usable detail.
-      _blocked_by="$(sed -n '2,$p' "$_arming" 2>/dev/null | grep -v '=raise$' | tr '\n' ' ' | sed -e 's/[[:space:]]*$//')"
-      [ -n "$_blocked_by" ] || _blocked_by="(unspecified)" ;;
-  esac
+  # KEY PATH (ADR-0011, E99-F182). With `--frontend <key>` the gate's unit is that front-end's
+  # OWN verdict line, not the AND on line 1: this repo's file reads `blocked` because Codex /
+  # OpenCode / pi inherit, yet its `claude=raise` line is true for a Claude Code session.
+  #   - Line 1 must still be exactly `armed` or `blocked`. Anything else is not the
+  #     installer's file, so NO detail line in it is trusted — it falls through to the no-key
+  #     block below, which can only shut (its one opening value, `armed`, is taken here).
+  #   - The FIRST line whose text up to its first `=` is exactly <key> decides (the installer
+  #     never writes duplicates; first wins, so a later forged line cannot override it).
+  #     Whole-key compare (`$1 == k`), not a substring: `xclaude=raise` is not claude's line.
+  #   - Its remainder is compared RAW, like line 1: `raise `, `raise\r`, ` claude=raise` and
+  #     `claude = raise` are not `raise` (Codex #3723207550 precedent — fail closed).
+  #   - One awk over the file, no pipeline: nothing here can take SIGPIPE on a large file.
+  # A key with NO line shuts too (never a fallback to line 1): that front-end was not stamped
+  # on the last install, so escalating there provably changes nothing.
+  if [ -n "$_frontend" ]; then
+    case "$(head -n 1 "$_arming" 2>/dev/null)" in
+      armed|blocked)
+        _fe_checked=1
+        _fe_line="$(awk -F= -v k="$_frontend" 'NR > 1 && $1 == k { print; exit }' "$_arming" 2>/dev/null)"
+        [ "$_fe_line" != "$_frontend=raise" ] || _armed=1 ;;
+    esac
+  fi
+  # NO-KEY PATH — byte-for-byte the pre-ADR-0011 rule (R4). Also the garbage-first-line
+  # fallthrough of the key path, which therefore reports the same `blocked by:` advisory.
+  if [ "$_fe_checked" = 0 ]; then
+    # The first line is compared RAW — no whitespace normalization. `opencode_parallel_wanted`
+    # in the installer does `tr -d '[:space:]'` and this deliberately does NOT copy it: that
+    # marker decides whether to install a command, while this one decides which MODEL runs a
+    # build, and the contract here is fail-closed — only an exact `armed` opens the gate.
+    # Stripping whitespace lets `armed `, ` armed`, and even `a r m e d` or `ar med` through,
+    # so a file that the installer could not have written would arm the target
+    # (Codex #3723207550, reproduced). `$( )` already strips the trailing newline, so a
+    # well-formed `armed\n` still matches; anything else fails closed, which is the only
+    # direction this gate is allowed to fail.
+    case "$(head -n 1 "$_arming" 2>/dev/null)" in
+      armed) _armed=1 ;;
+      *)
+        # Every non-`raise` detail line, joined — this is what tells the operator WHICH
+        # front-end to fix. `(unspecified)` keeps the blocked branch distinguishable from the
+        # absent branch even when the file carries no usable detail.
+        _blocked_by="$(sed -n '2,$p' "$_arming" 2>/dev/null | grep -v '=raise$' | tr '\n' ' ' | sed -e 's/[[:space:]]*$//')"
+        [ -n "$_blocked_by" ] || _blocked_by="(unspecified)" ;;
+    esac
+  fi
 fi
 
 # _escalate <trigger> — honour a trigger, or decline it, saying which gate refused.
@@ -213,6 +266,10 @@ _escalate() {
   elif [ "$_armed" = 1 ]; then
     echo builder-heavy
     exit 0
+  elif [ "$_fe_checked" = 1 ] && [ -n "$_fe_line" ]; then
+    echo "ℹ️  $1, but on this front-end ($_frontend) the installer recorded $_fe_line — escalating would not raise the resolved stamp here. Give models.builder-heavy a different tier for $_frontend and re-run harness-install.sh. Using 'builder'." >&2
+  elif [ "$_fe_checked" = 1 ]; then
+    echo "ℹ️  $1, but no verdict is recorded for front-end '$_frontend' in .harness/.escalation-arming — it was not selected when the installer last ran. Re-run harness-install.sh with $_frontend selected. Using 'builder'." >&2
   elif [ -n "$_blocked_by" ]; then
     echo "ℹ️  $1, but the installer recorded that escalating would NOT raise the resolved stamp — blocked by: $_blocked_by. Give that front-end's models.builder-heavy a different tier. On codex a different model_reasoning_effort alone arms — no pin needed; opencode also needs a matching pin.opencode.<tier>. Then re-run harness-install.sh. Using 'builder'." >&2
   else

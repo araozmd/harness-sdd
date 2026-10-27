@@ -293,8 +293,9 @@ enabled front-end surfaces. Source `./harness-install.sh --self` defaults to
 **Claude + Codex**; `--agents=claude`, `--agents=codex`, or `--agents=opencode` selects one source set.
 Source references resolve from the repository root, while consumer glue resolves
 from `.harness/`. Existing per-role models survive regeneration. With inherited
-Codex models, combined source escalation is **UNARMED** even when Claude alone
-was armed; explicit Claude-only generation preserves that prior verdict. See
+Codex models, the combined source first line stays `blocked`, while Claude Code sessions
+still escalate on their own `claude=raise` line (E99-F182); explicit Claude-only generation
+keeps an `armed` first line. See
 [self mode and optional models](docs/INSTALL.md#self-mode----self-harness-developers-only).
 
 ### Codex PR review loop

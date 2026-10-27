@@ -1296,4 +1296,492 @@ init_visibility_strips_quotes() {
 init_visibility_strips_quotes
 pass "init.sh escalation line fires for quoted and bare thresholds alike"
 
+# ══ E99-F182 — per-front-end gate ══
+# ADR-0011: with `--frontend <key>` the gate reads that front-end's OWN `<key>=raise` line;
+# with no key (or an empty one) it reads the first line exactly as before. R-ids `F182-Rn`.
+#
+# THIS_REPO_ARMING — the bytes `--self` writes in this repository today: Claude Code tiers
+# from its committed shims, the other three inherit the all-`inherit` seed.
+THIS_REPO_ARMING="claude=raise codex=neither opencode=neither pi=neither"
+
+# ── F182-R1: the host's own raise line opens the gate, even on a `blocked` first line ──
+F182_R1_key_raise_opens_on_blocked_first_line() {
+  # shellcheck disable=SC2086  # word-splitting THIS_REPO_ARMING into detail lines is the point
+  _f="$(mkfix f182-r1b 2 blocked $THIS_REPO_ARMING)"
+  [ "$(role complex 1 --config "$_f" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R1: --frontend claude on this repo's own blocked/claude=raise file did not escalate a complex spec"
+  [ "$(role standard 3 --config "$_f" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R1: --frontend claude did not escalate on the round trigger (round 3 > after_rejections 2)"
+  [ "$(rc complex 1 --config "$_f" --frontend claude)" = 0 ] \
+    || fail "F182-R1: the escalating key path did not exit 0"
+  [ -z "$(err complex 1 --config "$_f" --frontend claude)" ] \
+    || fail "F182-R1: the escalating key path wrote to stderr: $(err complex 1 --config "$_f" --frontend claude)"
+  # Control: the SAME file without a key stays shut, so the key — not the file — opened it.
+  [ "$(role complex 1 --config "$_f")" = builder ] \
+    || fail "F182-R1 control: the blocked file escalated with no key — the first-line rule broke"
+  # The key's line is the SECOND gate only: it opens nothing without a trigger, and never
+  # past the operator's `0` veto, which is still checked first.
+  [ "$(role standard 2 --config "$_f" --frontend claude)" = builder ] \
+    || fail "F182-R1: --frontend claude escalated with no trigger (standard, round 2 = after_rejections)"
+  # shellcheck disable=SC2086
+  _veto="$(mkfix f182-r1-veto 0 blocked $THIS_REPO_ARMING)"
+  [ "$(role complex 1 --config "$_veto" --frontend claude)" = builder ] \
+    || fail "F182-R1: --frontend claude escalated past after_rejections = 0"
+  err complex 1 --config "$_veto" --frontend claude | grep -qF 'escalation.after_rejections is 0 (off)' \
+    || fail "F182-R1: the key path under the 0 veto did not report the veto"
+  pass "--frontend claude escalates on this repo's own blocked/claude=raise file, both triggers (F182-R1)"
+}
+
+F182_R1_key_raise_opens_on_armed_first_line() {
+  _f="$(mkfix f182-r1a 2 armed claude=raise)"
+  [ "$(role complex 1 --config "$_f" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R1: --frontend claude on an armed/claude=raise file did not escalate"
+  pass "--frontend claude escalates on an armed/claude=raise file (F182-R1)"
+}
+
+F182_R1_key_raise_opens_on_blocked_first_line
+F182_R1_key_raise_opens_on_armed_first_line
+
+# ── F182-R2: a non-raise line for the key shuts the gate, and says what was recorded ──
+# Branch guard: the advisory must be branch (i) — "this front-end" — and NOT branch (ii)
+# ("no verdict is recorded") or the no-key "blocked by:" text, so each shut path is pinned
+# to its own message rather than to whichever advisory happens to mention the key.
+F182_R2_key_non_raise_shuts() {
+  for _first in blocked armed; do
+    for _cell in none same neither unstamped bogus; do
+      _f="$(mkfix "f182-r2-$_first-$_cell" 2 "$_first" "claude=$_cell" codex=raise)"
+      _got="$(role complex 1 --config "$_f" --frontend claude)"
+      [ "$_got" = builder ] \
+        || fail "F182-R2: $_first/claude=$_cell with --frontend claude printed '$_got', not builder"
+      [ "$(rc complex 1 --config "$_f" --frontend claude)" = 0 ] \
+        || fail "F182-R2: $_first/claude=$_cell with --frontend claude did not exit 0"
+      _e="$(err complex 1 --config "$_f" --frontend claude)"
+      [ "$(printf '%s\n' "$_e" | grep -c .)" = 1 ] \
+        || fail "F182-R2: $_first/claude=$_cell wrote not exactly one advisory line: $_e"
+      printf '%s' "$_e" | grep -qF "claude=$_cell" \
+        || fail "F182-R2: the $_first/claude=$_cell advisory does not carry the literal claude=$_cell: $_e"
+      printf '%s' "$_e" | grep -qF 'on this front-end (claude)' \
+        || fail "F182-R2: the $_first/claude=$_cell advisory is not the this-front-end branch: $_e"
+      printf '%s' "$_e" | grep -qF 'no verdict is recorded' \
+        && fail "F182-R2: the $_first/claude=$_cell advisory took the no-verdict branch: $_e"
+      printf '%s' "$_e" | grep -qF 'blocked by:' \
+        && fail "F182-R2: the $_first/claude=$_cell advisory took the no-key blocked-by branch: $_e"
+    done
+  done
+  pass "a non-raise line for the key shuts the gate on armed and blocked, naming <key>=<cell> (F182-R2)"
+}
+F182_R2_key_non_raise_shuts
+
+# ── F182-R3: no line for the key shuts the gate — never a fallback to the first line ──
+# The decoys prove a WHOLE-key match: `codexx=raise`, `xcodex=raise` and `xclaude=raise`
+# each contain the key as a substring and none of them is that key's line.
+F182_R3_key_missing_line_shuts() {
+  for _first in armed blocked; do
+    for _decoy in claude=raise codexx=raise xcodex=raise; do
+      _f="$(mkfix "f182-r3-$_first-$_decoy" 2 "$_first" claude=raise "$_decoy")"
+      _got="$(role complex 1 --config "$_f" --frontend codex)"
+      [ "$_got" = builder ] \
+        || fail "F182-R3: $_first file with no codex= line (decoy $_decoy) printed '$_got' for --frontend codex"
+      [ "$(rc complex 1 --config "$_f" --frontend codex)" = 0 ] \
+        || fail "F182-R3: the missing-line path did not exit 0"
+      _e="$(err complex 1 --config "$_f" --frontend codex)"
+      [ "$(printf '%s\n' "$_e" | grep -c .)" = 1 ] \
+        || fail "F182-R3: the missing-line path wrote not exactly one advisory line: $_e"
+      printf '%s' "$_e" | grep -qF "no verdict is recorded for front-end 'codex'" \
+        || fail "F182-R3: $_first file (decoy $_decoy) lacks the no-verdict advisory for codex: $_e"
+      printf '%s' "$_e" | grep -qF 'blocked by:' \
+        && fail "F182-R3: the missing-line advisory took the no-key blocked-by branch: $_e"
+    done
+  done
+  _f="$(mkfix f182-r3-xclaude 2 blocked xclaude=raise)"
+  [ "$(role complex 1 --config "$_f" --frontend claude)" = builder ] \
+    || fail "F182-R3: an xclaude=raise line opened the gate for --frontend claude (substring match)"
+  err complex 1 --config "$_f" --frontend claude | grep -qF "no verdict is recorded for front-end 'claude'" \
+    || fail "F182-R3: blocked/xclaude=raise did not report a missing claude verdict"
+  # Line 1 is never a verdict line: `--frontend blocked` on a `blocked` file must not read
+  # the first line as its recorded verdict (pins the NR > 1 clause).
+  _f="$(mkfix f182-r3-line1 2 blocked claude=raise)"
+  _e="$(err complex 1 --config "$_f" --frontend blocked)"
+  printf '%s' "$_e" | grep -qF "no verdict is recorded for front-end 'blocked'" \
+    || fail "F182-R3: --frontend blocked read line 1 as its verdict: $_e"
+  # Boundary: an EMPTY verdict (`claude=`) is a recorded line, so it takes R2's branch.
+  _f="$(mkfix f182-r3-empty 2 blocked claude=)"
+  _e="$(err complex 1 --config "$_f" --frontend claude)"
+  printf '%s' "$_e" | grep -qF 'on this front-end (claude) the installer recorded claude= ' \
+    || fail "F182-R3: an empty claude= verdict was not reported as the recorded line: $_e"
+  pass "a key with no line of its own shuts the gate on armed and blocked, whole-key match (F182-R3)"
+}
+F182_R3_key_missing_line_shuts
+
+# ── F182-R4: no key, or an empty key, is today's rule byte for byte ──────────────
+# Every fixture shape the pre-feature rule distinguishes, both triggers. stdout AND stderr
+# of `… --frontend ''` must equal the no-flag run, and stdout must equal the pre-feature
+# expectation (`armed` ⇒ heavy, everything else ⇒ builder) — so an empty key that leaked
+# into the key path, or a no-key path that started reading detail lines, both red.
+F182_R4_no_key_unchanged() {
+  _armed_f="$(mkfix f182-r4-armed 2 armed claude=raise)"
+  _blk_f="$(mkfix f182-r4-blocked 2 blocked claude=raise codex=none)"
+  _abs_f="$(mkfix f182-r4-absent 2 '')"
+  _veto_f="$(mkfix f182-r4-veto 0 armed claude=raise)"
+  for _case in "armed:$_armed_f:" "blocked:$_blk_f:" "absent:$_abs_f:" "veto:$_veto_f:" "delegate:$_armed_f:delegate"; do
+    _name="${_case%%:*}"; _rest="${_case#*:}"; _cfg="${_rest%:*}"; _be="${_rest##*:}"
+    [ -n "$_be" ] || _be=in-session
+    for _trig in "complex 1" "standard 3"; do
+      # shellcheck disable=SC2086  # the trigger pair is two positional arguments
+      set -- $_trig
+      sh "$TOOL" "$1" "$2" --config "$_cfg" --backend "$_be" >"$T/r4-nokey.out" 2>"$T/r4-nokey.err" \
+        || fail "F182-R4: $_name/$_trig with no key exited non-zero"
+      sh "$TOOL" "$1" "$2" --config "$_cfg" --backend "$_be" --frontend '' >"$T/r4-empty.out" 2>"$T/r4-empty.err" \
+        || fail "F182-R4: $_name/$_trig with --frontend '' exited non-zero"
+      cmp -s "$T/r4-nokey.out" "$T/r4-empty.out" \
+        || fail "F182-R4: $_name/$_trig stdout differs between no key and --frontend ''"
+      cmp -s "$T/r4-nokey.err" "$T/r4-empty.err" \
+        || fail "F182-R4: $_name/$_trig stderr differs between no key and --frontend ''"
+      if [ "$_name" = armed ]; then _want=builder-heavy; else _want=builder; fi
+      [ "$(cat "$T/r4-empty.out")" = "$_want" ] \
+        || fail "F182-R4: $_name/$_trig with an empty key printed '$(cat "$T/r4-empty.out")', expected the pre-feature '$_want'"
+    done
+  done
+  pass "no key and an empty key decide from the first line exactly as before, stdout and stderr (F182-R4)"
+}
+F182_R4_no_key_unchanged
+
+# ── F182-R5: garbage never opens the gate, with or without a key ─────────────────
+# f182_raw <name> <printf-%b body> — a fixture whose arming file is written byte-exact,
+# for shapes mkfix cannot express (an empty first line, a trailing CR). Prints the config.
+f182_raw() {
+  _fr_c="$(mkfix "$1" 2 '')"
+  printf '%b' "$2" > "$(dirname "$_fr_c")/.escalation-arming"
+  printf '%s\n' "$_fr_c"
+}
+# f182_shut <label> <config> — builder and exit 0 with AND without --frontend claude.
+f182_shut() {
+  [ "$(role complex 1 --config "$2" --frontend claude)" = builder ] \
+    || fail "F182-R5: $1 opened the gate with --frontend claude"
+  [ "$(rc complex 1 --config "$2" --frontend claude)" = 0 ] \
+    || fail "F182-R5: $1 with --frontend claude did not exit 0"
+  [ "$(role complex 1 --config "$2")" = builder ] \
+    || fail "F182-R5: $1 opened the gate with no key"
+  [ "$(rc complex 1 --config "$2")" = 0 ] \
+    || fail "F182-R5: $1 with no key did not exit 0"
+}
+F182_R5_garbage_never_opens() {
+  f182_shut "an absent arming file" "$(mkfix f182-r5-absent 2 '')"
+
+  # A symlink to a file that WOULD open both paths: the shared outer guard must refuse it.
+  _real="$(mkfix f182-r5-real 2 armed claude=raise)"
+  [ "$(role complex 1 --config "$_real" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R5 setup: the symlink's target does not open the gate on its own"
+  _ln="$(mkfix f182-r5-link 2 '')"
+  ln -s "$(dirname "$_real")/.escalation-arming" "$(dirname "$_ln")/.escalation-arming"
+  f182_shut "a symlinked arming file" "$_ln"
+
+  _ur="$(mkfix f182-r5-unreadable 2 armed claude=raise)"
+  chmod 000 "$(dirname "$_ur")/.escalation-arming"
+  if [ -r "$(dirname "$_ur")/.escalation-arming" ]; then
+    echo "skip - F182-R5 unreadable case: this host does not enforce file modes (running as root?)"
+  else
+    f182_shut "an unreadable arming file" "$_ur"
+  fi
+  chmod 600 "$(dirname "$_ur")/.escalation-arming"
+
+  # First lines the installer cannot have written: no detail line may then be trusted.
+  _i=0
+  for _first in 'Armed' 'armed ' ' armed' 'ARMED' '' 'claude=raise' 'blocked '; do
+    _i=$((_i + 1))
+    f182_shut "first line '$_first'" "$(f182_raw "f182-r5-first$_i" "$_first\nclaude=raise\n")"
+  done
+
+  # Whitespace / CR variants of the key line are not the key line.
+  _i=0
+  for _kl in 'claude=raise ' ' claude=raise' 'claude = raise' 'claude=raise\r' 'claude =raise' 'claude= raise'; do
+    _i=$((_i + 1))
+    f182_shut "detail line '$_kl'" "$(f182_raw "f182-r5-ws$_i" "blocked\n$_kl\n")"
+  done
+
+  # Duplicate key: the FIRST `claude=` line decides — asserted in both orders, so the row
+  # proves order rather than "duplicates shut".
+  _dup="$(mkfix f182-r5-dup 2 blocked claude=none claude=raise)"
+  f182_shut "duplicate claude=none then claude=raise" "$_dup"
+  err complex 1 --config "$_dup" --frontend claude | grep -qF 'recorded claude=none ' \
+    || fail "F182-R5: the duplicate-key advisory does not name the FIRST line, claude=none"
+  _rev="$(mkfix f182-r5-rev 2 blocked claude=raise claude=none)"
+  [ "$(role complex 1 --config "$_rev" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R5: duplicate claude=raise then claude=none did not open — the first line must win"
+
+  # The one positive: a ~3000-line file with the key line LAST must still open, so the
+  # search is whole-file (not line 2 only) and the negatives above are not vacuous.
+  _big="$(mkfix f182-r5-big 2 '')"
+  awk 'BEGIN { print "blocked"; for (i = 1; i <= 3000; i++) print "k" i "=neither"; print "claude=raise" }' \
+    > "$(dirname "$_big")/.escalation-arming"
+  [ "$(role complex 1 --config "$_big" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R5: a ~3000-line file with claude=raise last did not open for --frontend claude"
+  [ "$(role complex 1 --config "$_big")" = builder ] \
+    || fail "F182-R5: the ~3000-line blocked file opened with no key"
+  pass "absent / symlink / unreadable / bad first line / whitespace / duplicate-order never open; a large file still does (F182-R5)"
+}
+F182_R5_garbage_never_opens
+
+# ── F182-R6: a missing or malformed key is a broken CALLER — usage, exit 4 ───────
+# The specific message is asserted, not just `--frontend`: the generic usage line also
+# names `[--frontend <key>]`, so a bare `--frontend` grep would pass on any usage error.
+F182_R6_usage() {
+  [ "$(rc complex 1 --frontend)" = 4 ] || fail "F182-R6: --frontend with no value did not exit 4"
+  [ -z "$(role complex 1 --frontend)" ] || fail "F182-R6: --frontend with no value printed a role"
+  for _v in Claude 'cl aude' claude=raise ../claude -claude 1claude 'claude
+codex'; do
+    [ "$(rc complex 1 --frontend "$_v")" = 4 ] \
+      || fail "F182-R6: --frontend '$_v' did not exit 4"
+    [ -z "$(role complex 1 --frontend "$_v")" ] \
+      || fail "F182-R6: --frontend '$_v' printed a role on stdout"
+    err complex 1 --frontend "$_v" | grep -qF -- "--frontend must be a bare front-end key, got '" \
+      || fail "F182-R6: --frontend '$_v' did not name the malformed key on stderr: $(err complex 1 --frontend "$_v")"
+  done
+  # The accepted shapes: a hyphenated / digit-bearing token, and the empty string (R4).
+  [ "$(rc complex 1 --frontend open-code2)" = 0 ] || fail "F182-R6: a valid token open-code2 was rejected"
+  [ "$(rc complex 1 --frontend '')" = 0 ] || fail "F182-R6: --frontend '' was rejected (it is the R4 no-key path)"
+  pass "--frontend with no value or a non-token value exits 4 with an empty stdout (F182-R6)"
+}
+F182_R6_usage
+
+# ── F182-R9: the INSTALLED orchestrator passes the produced key, never a typed one ──
+# Slice = `### Which Builder` up to the next `### ` heading (a `###` sibling ends it; the
+# fenced call block has no `###` line, so the call stays inside the slice). Every anchor runs
+# on the slice — never the whole file — so the sentences cannot drift into another section
+# (M9c moves them below `### The pre-PR change-size handoff` and must red).
+# f182_which_builder <orchestrator.md> — the folded `### Which Builder` slice.
+f182_which_builder() {
+  awk 'f && /^### /{exit} /^### Which Builder/{f=1} f' "$1" | tr '\n' ' ' | tr -s ' '
+}
+F182_R9_orchestrator_prose() {
+  _t="$T/f182-r9"; install_to "$_t" "$T/ch-f182-r9" --agents=claude
+  _o="$_t/.harness/agents/orchestrator.md"
+  [ -f "$_o" ] || fail "F182-R9 setup: no installed orchestrator.md"
+  _raw="$(awk 'f && /^### /{exit} /^### Which Builder/{f=1} f' "$_o")"
+  _sl="$(f182_which_builder "$_o")"
+  [ -n "$_sl" ] || fail "F182-R9 setup: the '### Which Builder' section did not extract — the heading moved"
+  printf '%s\n' "$_raw" | grep -qF -- '--frontend "$(sh "$HARNESS_DIR/tools/host-frontend.sh")"' \
+    || fail "F182-R9: the Which Builder call does not pass --frontend \"\$(sh \"\$HARNESS_DIR/tools/host-frontend.sh\")\""
+  printf '%s' "$_sl" | grep -qE 'An empty key means the host could not be identified[^.]{0,120}all-front-ends rule' \
+    || fail "F182-R9: the Which Builder section does not say an empty key applies the all-front-ends rule"
+  printf '%s' "$_sl" | grep -qF 'You never supply the key by hand' \
+    || fail "F182-R9: the Which Builder section does not forbid supplying the key by hand"
+  printf '%s' "$_sl" | grep -qE "your host's own[^.]{0,40}=raise[^.]{0,40}ADR-0011" \
+    || fail "F182-R9: the TWO-yeses clause does not name your host's own <key>=raise line (ADR-0011)"
+  printf '%s' "$_sl" | grep -qE "That file decides[^.]{0,120}your host's own line when it is" \
+    || fail "F182-R9: 'That file decides' does not say the host's own line decides when the host is known"
+  # The superseded wording is gone from the slice.
+  printf '%s' "$_sl" | grep -qF 'That file decides. Do not read' \
+    && fail "F182-R9: the slice still says 'That file decides.' with no per-front-end qualifier"
+  printf '%s' "$_sl" | grep -qF '`.harness/.escalation-arming`. When either gate' \
+    && fail "F182-R9: the TWO-yeses clause still names only an armed verdict, no host line"
+  # Pre-existing anchors still hold, and the call block lost nothing.
+  for _a in 'builder-role.sh' 'builder-heavy round 3' 'never override the answer' '"phase":"builder","role":"builder-heavy"'; do
+    printf '%s' "$_sl" | grep -qF -- "$_a" || fail "F182-R9: the Which Builder section lost its pre-existing anchor: $_a"
+  done
+  printf '%s\n' "$_raw" | grep -qE '^[[:space:]]+--backend "<execution\.builder\.backend>"' \
+    || fail "F182-R9: the fenced call lost its --backend line"
+  printf '%s\n' "$_raw" | grep -qE '^[[:space:]]+--config "\$HARNESS_DIR/harness\.config\.yaml"' \
+    || fail "F182-R9: the fenced call lost its --config line"
+  pass "the installed orchestrator pipes host-frontend.sh into --frontend and never types a key (F182-R9)"
+}
+F182_R9_orchestrator_prose
+
+# ── F182-R10: init.sh names the per-front-end state when the AND is blocked ───────
+# Run through the installed init.sh's own shebang (bash), so `set -euo pipefail` is in force —
+# the large-file case is what pins "no pipeline that can take SIGPIPE". Every case's exit
+# status must equal the absent-file run's: this block is warn-only and never changes it.
+F182_R10_init_per_frontend_line() {
+  _t="$T/f182-r10"; install_to "$_t" "$T/ch-f182-r10" --agents=claude
+  _cfg="$_t/.harness/harness.config.yaml"
+  if grep -q '^  after_rejections:' "$_cfg"; then
+    awk '/^  after_rejections:/ { print "  after_rejections: 2"; next } { print }' "$_cfg" > "$_cfg.t" && mv "$_cfg.t" "$_cfg"
+  else
+    printf 'escalation:\n  after_rejections: 2\n' >> "$_cfg"
+  fi
+  _arm="$_t/.harness/.escalation-arming"
+  _armed_line='ℹ️  escalation: ARMED (builder-heavy after 2 rejections)'
+  _dis_line="⚠️  escalation: configured (after_rejections: 2) but DISARMED — .escalation-arming is absent or not 'armed', so builder-heavy will never fire. Configure models.builder-heavy and re-run the installer. (warn-only)"
+  _pf() { printf '%s' "ℹ️  escalation: ARMED per front-end on: $1 (builder-heavy after 2 rejections); not on: $2 — the Orchestrator escalates only where its host's line reads raise (E99-F182)"; }
+  # _run — init.sh's escalation line(s) → $T/r10.esc, exit status → $T/r10.rc
+  _run() {
+    _s=0; ( cd "$_t" && ./.harness/init.sh ) > "$T/r10.out" 2>&1 || _s=$?
+    printf '%s\n' "$_s" > "$T/r10.rc"
+    grep 'escalation: ' "$T/r10.out" > "$T/r10.esc" || true
+  }
+  _one() {  # _one <label> <exact line>
+    [ "$(grep -c . "$T/r10.esc")" = 1 ] || fail "F182-R10: $1 — not exactly one escalation line: $(cat "$T/r10.esc")"
+    grep -qxF -- "$2" "$T/r10.esc" || fail "F182-R10: $1 — expected the line '$2', got: $(cat "$T/r10.esc")"
+    [ "$(cat "$T/r10.rc")" = "$_rc0" ] || fail "F182-R10: $1 — init.sh exited $(cat "$T/r10.rc"), the absent-file run exited $_rc0"
+  }
+
+  rm -f "$_arm"; _run; _rc0="$(cat "$T/r10.rc")"
+  _one "absent file" "$_dis_line"
+
+  printf 'blocked\nclaude=raise\ncodex=neither\npi=none\n' > "$_arm"; _run
+  _one "blocked + claude=raise" "$(_pf claude 'codex pi')"
+  grep -q DISARMED "$T/r10.out" && fail "F182-R10: blocked + claude=raise still printed DISARMED"
+
+  printf 'blocked\nclaude=raise\ncodex=raise\npi=none\n' > "$_arm"; _run
+  _one "blocked + claude,codex=raise" "$(_pf 'claude codex' pi)"
+
+  printf 'armed\nclaude=raise\n' > "$_arm"; _run
+  _one "armed" "$_armed_line"
+  grep -q 'per front-end' "$T/r10.out" && fail "F182-R10: an armed file printed the per-front-end line"
+
+  printf 'blocked\nclaude=none\n' > "$_arm"; _run
+  _one "blocked, nothing raise" "$_dis_line"
+
+  # A first line that is neither armed nor blocked: no detail line is trusted.
+  printf 'Blocked\nclaude=raise\n' > "$_arm"; _run
+  _one "garbage first line + claude=raise" "$_dis_line"
+
+  # Symlinks read as absent — to a blocked+raise file AND to an armed one.
+  for _body in 'blocked\nclaude=raise\ncodex=raise\n' 'armed\nclaude=raise\n'; do
+    rm -f "$_arm"; printf "$_body" > "$T/r10-target"; ln -s "$T/r10-target" "$_arm"; _run
+    _one "symlink" "$_dis_line"
+  done
+  rm -f "$_arm"
+
+  # ~3000 lines (~200 KB — far past any pipe buffer, so a `producer | head` read WOULD take
+  # SIGPIPE under pipefail), the raise line last: printed, and the exit status is unchanged.
+  awk 'BEGIN { p = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; print "blocked"
+               for (i = 1; i <= 2999; i++) print "k" i "-" p "=neither"; print "claude=raise" }' > "$_arm"
+  [ "$(wc -c < "$_arm")" -gt 150000 ] || fail "F182-R10 setup: the large arming file is under 150 KB"
+  _run
+  [ "$(grep -c . "$T/r10.esc")" = 1 ] || fail "F182-R10: the ~3000-line file did not print exactly one escalation line"
+  grep -qE '^ℹ️  escalation: ARMED per front-end on: claude \(builder-heavy after 2 rejections\); not on: k1-a+ k2-a+ ' "$T/r10.esc" \
+    || fail "F182-R10: the ~3000-line file did not print the per-front-end line: $(cut -c1-200 "$T/r10.esc")"
+  grep -qE ' k2999-a+ — the Orchestrator' "$T/r10.esc" || fail "F182-R10: the ~3000-line file's not-on list was truncated"
+  [ "$(cat "$T/r10.rc")" = "$_rc0" ] || fail "F182-R10: the ~3000-line file changed init.sh's exit status to $(cat "$T/r10.rc")"
+
+  # An invalid byte before the raise line, under a UTF-8 CALLER locale: the macOS system awk
+  # aborts on it (`towc: multibyte conversion failure`) unless the read pins LC_ALL=C, which
+  # would lose the raise key and print DISARMED (progress/lessons.md 2026-10-26).
+  printf 'blocked\n\377x=none\nclaude=raise\ncodex=none\n' > "$_arm"
+  _s=0; ( cd "$_t" && LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 ./.harness/init.sh ) > "$T/r10.out" 2>&1 || _s=$?
+  printf '%s\n' "$_s" > "$T/r10.rc"; grep 'escalation: ' "$T/r10.out" > "$T/r10.esc" || true
+  _one "invalid byte under a UTF-8 locale" "$(_pf claude codex)"
+
+  # Hostile keys: never eval'd, never printed. Relative and absolute `touch` targets; cwd is
+  # the target, so a relative X would land in it.
+  # Also two shapes only a sloppy parser accepts: `codex=raise=x` is not exactly `raise` (the
+  # raw compare builder-role.sh makes), and `orphan` has no `=` at all — neither is a key line.
+  printf 'blocked\na$(touch "%s/X")=raise\nb`touch Y`=raise\nc$(touch Z)=none\nclaude=raise\ncodex=raise=x\norphan\n' "$T" > "$_arm"; _run
+  [ ! -e "$T/X" ] && [ ! -e "$_t/X" ] && [ ! -e "$_t/Y" ] && [ ! -e "$_t/Z" ] \
+    || fail "F182-R10: a hostile arming line was executed (a touch target exists)"
+  _one "hostile lines" "$(_pf claude codex)"
+  pass "init.sh prints one per-front-end line for blocked+raise, unchanged ARMED/DISARMED otherwise, large and hostile files safe (F182-R10)"
+}
+F182_R10_init_per_frontend_line
+
+# ── F182-R11: the installer's summary names the per-front-end state; the file is unchanged ──
+# Three installs of one claude+codex target: all raise (armed ⇒ the existing `ok` line), no
+# raise (the existing NOT-armed line), and claude raise + codex unstamped (the new per-front-end
+# line). After each, the arming file must be exactly the pre-feature format — first line, then
+# one `<key>=<verdict>` per selected key in $AGENT_KEYS order (claude, codex), no blank line —
+# composed here independently of the file's own layout.
+F182_R11_installer_summary_line() {
+  _t="$T/f182-r11"; install_to "$_t" "$T/ch-f182-r11" --agents=claude,codex
+  _c="$_t/.harness/harness.config.yaml"
+  _pf_msg='escalation armed per front-end on: claude; not on: codex — the Orchestrator escalates where its host'"'"'s line reads raise (ADR-0011); see .harness/.escalation-arming'
+  _inst() { CODEX_HOME="$T/ch-f182-r11" sh "$SRC/harness-install.sh" --agents=claude,codex "$_t" > "$T/r11.out" 2>&1 \
+              || fail "F182-R11: install exited non-zero: $(tail -5 "$T/r11.out")"; }
+  _shape() {  # _shape <label> — the frozen file format
+    _vc="$(verdict_for "$_t" claude)"; _vx="$(verdict_for "$_t" codex)"
+    if [ "$_vc" = raise ] && [ "$_vx" = raise ]; then _first=armed; else _first=blocked; fi
+    printf '%s\n' "$_first" "claude=$_vc" "codex=$_vx" > "$T/r11.want"
+    cmp -s "$T/r11.want" "$_t/.harness/.escalation-arming" \
+      || fail "F182-R11: $1 — the arming file is not the pre-feature format: $(od -c "$_t/.harness/.escalation-arming" | head -5)"
+  }
+
+  set_models "$_c" builder standard
+  set_models "$_c" builder-heavy reasoning
+  _inst
+  [ "$(verdict_for "$_t" claude)" = raise ] && [ "$(verdict_for "$_t" codex)" = raise ] \
+    || fail "F182-R11 setup: standard/reasoning is not raise on both (claude=$(verdict_for "$_t" claude) codex=$(verdict_for "$_t" codex))"
+  grep -qF 'escalation armed — builder-heavy resolves to a different stamp' "$T/r11.out" \
+    || fail "F182-R11: an all-raise install did not print the existing armed line"
+  grep -qF 'per front-end' "$T/r11.out" && fail "F182-R11: an all-raise install printed the per-front-end line"
+  _shape "all raise"
+
+  set_models "$_c" builder-heavy inherit
+  _inst
+  grep -qF 'escalation NOT armed — see .harness/.escalation-arming' "$T/r11.out" \
+    || fail "F182-R11: a no-raise install did not print the existing NOT-armed line"
+  grep -qF 'per front-end' "$T/r11.out" && fail "F182-R11: a no-raise install printed the per-front-end line"
+  _shape "no raise"
+
+  set_models "$_c" builder-heavy reasoning
+  _inst
+  printf 'name = "builder-heavy"\n# hand-edited by the operator\n' > "$_t/.codex/agents/builder-heavy.toml"
+  _inst
+  [ "$(verdict_for "$_t" claude)" = raise ] && [ "$(verdict_for "$_t" codex)" = unstamped ] \
+    || fail "F182-R11 setup: expected claude=raise codex=unstamped, got claude=$(verdict_for "$_t" claude) codex=$(verdict_for "$_t" codex)"
+  grep -qF -- "$_pf_msg" "$T/r11.out" \
+    || fail "F182-R11: a mixed install did not print the per-front-end line: $(grep -i escalation "$T/r11.out")"
+  grep -qF 'escalation NOT armed' "$T/r11.out" && fail "F182-R11: a mixed install still printed the NOT-armed line"
+  _shape "claude raise, codex unstamped"
+  pass "the installer summary names per-front-end arming when mixed; the file stays the pre-feature format (F182-R11)"
+}
+F182_R11_installer_summary_line
+
+# ── F182-R12: VERSION ↔ CHANGELOG, and the installed docs state the per-front-end rule ──
+# Every doc anchor AND every negative runs on the FOLDED file: the source wraps the old
+# phrases across lines ("disables escalation\neverywhere"), so an unfolded negative would
+# pass vacuously. No version literal is asserted — VERSION is read, never frozen.
+F182_R12_docs_version_changelog() {
+  _v="$(cat "$SRC/VERSION")"
+  [ -n "$_v" ] || fail "F182-R12 setup: VERSION is empty"
+  _top="$(grep -m 1 '^## \[' "$SRC/CHANGELOG.md")"
+  case "$_top" in "## [$_v]"*) : ;; *) fail "F182-R12: the newest CHANGELOG heading '$_top' is not VERSION $_v" ;; esac
+  # Historical anchor: SOME release section names the feature, the flag and the tool — so this
+  # row survives later releases being prepended above it.
+  awk '/^## \[/ { if (b ~ /E99-F182/ && b ~ /--frontend/ && b ~ /tools\/host-frontend\.sh/) f = 1; b = ""; next }
+       { b = b "\n" $0 }
+       END { if (b ~ /E99-F182/ && b ~ /--frontend/ && b ~ /tools\/host-frontend\.sh/) f = 1; exit !f }' "$SRC/CHANGELOG.md" \
+    || fail "F182-R12: no CHANGELOG section names E99-F182, --frontend and tools/host-frontend.sh together"
+
+  _t="$T/f182-r12"; install_to "$_t" "$T/ch-f182-r12" --agents=claude
+  _wf="$(tr '\n' ' ' < "$_t/.harness/docs/WORKFLOW.md" | tr -s ' ')"
+  _in="$(tr '\n' ' ' < "$_t/.harness/docs/INSTALL.md" | tr -s ' ')"
+  _rd="$(tr '\n' ' ' < "$SRC/README.md" | tr -s ' ')"
+  [ -n "$_wf" ] && [ -n "$_in" ] || fail "F182-R12 setup: the installed WORKFLOW.md / INSTALL.md is missing"
+
+  printf '%s' "$_wf" | grep -qE "reads that front-end's own line[^.]{0,40}ADR-0011" \
+    || fail "F182-R12: installed WORKFLOW.md does not say builder-role.sh reads that front-end's own line (ADR-0011)"
+  printf '%s' "$_wf" | grep -qE 'empty key[^.]{0,120}falls back to the first line' \
+    || fail "F182-R12: installed WORKFLOW.md does not say an empty key falls back to the first line"
+  # Literal, not `[^.]{0,N}`: the sentence names `.harness/.escalation-arming`, whose dots a
+  # dot-free gap could never cross.
+  printf '%s' "$_wf" | grep -qF "an \`armed\` first line in \`.harness/.escalation-arming\` — or, when the host is known, the host's own \`<key>=raise\` line (ADR-0011). Either one alone routes to \`builder\`." \
+    || fail "F182-R12: installed WORKFLOW.md's two-yeses bullet does not name the host's own <key>=raise line"
+  printf '%s' "$_wf" | grep -qE 'A .blocked. first line still lets a host whose own line is .raise. escalate' \
+    || fail "F182-R12: installed WORKFLOW.md does not say a blocked first line still lets a raise host escalate"
+  printf '%s' "$_wf" | grep -qF 'disables escalation everywhere' \
+    && fail "F182-R12: installed WORKFLOW.md still says one front-end disables escalation everywhere"
+  printf '%s' "$_wf" | grep -qF 'verdict **UNARMED** even when Claude alone is armed' \
+    && fail "F182-R12: installed WORKFLOW.md still says the combined verdict is UNARMED even when Claude alone is armed"
+  printf '%s' "$_wf" | grep -qE 'armed. verdict in .\.harness/\.escalation-arming.\. Either one alone' \
+    && fail "F182-R12: installed WORKFLOW.md's two-yeses bullet still names only an armed verdict"
+
+  printf '%s' "$_in" | grep -qE "host's own[^.]{0,20}<key>=raise[^.]{0,80}ADR-0011" \
+    || fail "F182-R12: installed INSTALL.md does not say the host's own <key>=raise line fires escalation (ADR-0011)"
+  printf '%s' "$_in" | grep -qE 'an empty key falls back to the first line' \
+    || fail "F182-R12: installed INSTALL.md does not say an empty key falls back to the first line"
+  printf '%s' "$_in" | grep -qE 'codex=raise. line[^.]{0,60}ADR-0011' \
+    || fail "F182-R12: installed INSTALL.md's E99-F163 paragraph does not name the codex=raise line (ADR-0011)"
+  printf '%s' "$_in" | grep -qF 'Escalation fires only while that file reads' \
+    && fail "F182-R12: installed INSTALL.md still says escalation fires only while the file reads armed"
+  printf '%s' "$_in" | grep -qF 'an `armed` verdict even when neither tier' \
+    && fail "F182-R12: installed INSTALL.md's E99-F163 paragraph still requires an armed verdict"
+
+  printf '%s' "$_rd" | grep -qF 'combined source escalation is **UNARMED**' \
+    && fail "F182-R12: README.md still says combined source escalation is UNARMED"
+  printf '%s' "$_rd" | grep -qE 'Claude Code sessions[^.]{0,60}claude=raise' \
+    || fail "F182-R12: README.md does not say Claude Code sessions escalate on claude=raise"
+  pass "VERSION matches the newest CHANGELOG section; installed docs and README state the per-front-end rule (F182-R12)"
+}
+F182_R12_docs_version_changelog
+
 echo "test_escalation.sh: all cases passed"
