@@ -158,14 +158,14 @@ def read_rids(path):
 def cells(row):
     parts = CELL_SPLIT_RE.split(row)
     parts = parts[1:]  # the leading pipe
-    if parts and not parts[-1].strip():
+    if not parts[-1].strip():
         parts = parts[:-1]  # the trailing pipe
     return [c.strip() for c in parts]
 
 
 def is_separator(row):
     cs = cells(row)
-    return bool(cs) and all(c == "" or SEP_CELL_RE.match(c) for c in cs) \
+    return all(c == "" or SEP_CELL_RE.match(c) for c in cs) \
         and any(SEP_CELL_RE.match(c) for c in cs)
 
 
@@ -197,7 +197,7 @@ def parse_sections(lines):
                 for i, (_n, t) in enumerate(run):
                     if is_separator(t):
                         kinds[i] = "separator"
-                        if i > 0 and kinds[i - 1] == "data":
+                        if i > 0:
                             kinds[i - 1] = "header"
                 sec["tables"].append([(r[0], r[1], k) for r, k in zip(run, kinds)])
                 run = []
@@ -311,9 +311,10 @@ def check_deferred(plan, sections, index):
     for sec in secs:
         none_lines += sum(1 for _n, t in sec["body"] if NONE_LINE_RE.match(t))
         for table in sec["tables"]:
-            header = [r for r in table if r[2] == "header"]
-            if header and cells(header[0][1]) == BOLT_ON_HEADER:
-                bolt_tables.append((header[0][0], [r for r in table if r[2] == "data"]))
+            for n, text, kind in table:
+                if kind == "header" and cells(text) == BOLT_ON_HEADER:
+                    bolt_tables.append((n, [r for r in table if r[2] == "data"]))
+                    break
     form = "table" if bolt_tables and not none_lines else \
         "none" if none_lines == 1 and not bolt_tables else None
     head = secs[0]["line"]
@@ -355,12 +356,11 @@ def data_rows(sections):
                     yield sec, n, text
 
 
-def check_plan(plan, sections, spec_rids=None, index=None):
+def check_plan(plan, sections, spec_rids, index):
     """Pure: return [(line, finding)] in file order (finding without the prefix).
 
     spec_rids None = no --spec: R-id existence is not checked.
     """
-    index = index or {}
     out = []
     for sec, n, text in data_rows(sections):
         rids, has_adr = cites(text)
@@ -513,7 +513,7 @@ def grandfather(plan_path, base=None):
     if not os.path.isfile(path):
         raise InputError("cannot read %s: not a regular file" % plan_path)
     rc, out, _err = _git(os.path.dirname(path), "rev-parse", "--show-toplevel")
-    if rc != 0 or not out.strip():
+    if rc != 0:
         raise InputError("%s is not inside a git work tree" % plan_path)
     top = out.strip()  # git prints the toplevel symlink-resolved, like `path` above
     if base is None:
