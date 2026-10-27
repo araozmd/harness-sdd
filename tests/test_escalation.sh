@@ -1296,4 +1296,40 @@ init_visibility_strips_quotes() {
 init_visibility_strips_quotes
 pass "init.sh escalation line fires for quoted and bare thresholds alike"
 
+# ══ E99-F182 — per-front-end gate ══
+# ADR-0011: with `--frontend <key>` the gate reads that front-end's OWN `<key>=raise` line;
+# with no key (or an empty one) it reads the first line exactly as before. R-ids `F182-Rn`.
+#
+# THIS_REPO_ARMING — the bytes `--self` writes in this repository today: Claude Code tiers
+# from its committed shims, the other three inherit the all-`inherit` seed.
+THIS_REPO_ARMING="claude=raise codex=neither opencode=neither pi=neither"
+
+# ── F182-R1: the host's own raise line opens the gate, even on a `blocked` first line ──
+F182_R1_key_raise_opens_on_blocked_first_line() {
+  # shellcheck disable=SC2086  # word-splitting THIS_REPO_ARMING into detail lines is the point
+  _f="$(mkfix f182-r1b 2 blocked $THIS_REPO_ARMING)"
+  [ "$(role complex 1 --config "$_f" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R1: --frontend claude on this repo's own blocked/claude=raise file did not escalate a complex spec"
+  [ "$(role standard 3 --config "$_f" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R1: --frontend claude did not escalate on the round trigger (round 3 > after_rejections 2)"
+  [ "$(rc complex 1 --config "$_f" --frontend claude)" = 0 ] \
+    || fail "F182-R1: the escalating key path did not exit 0"
+  [ -z "$(err complex 1 --config "$_f" --frontend claude)" ] \
+    || fail "F182-R1: the escalating key path wrote to stderr: $(err complex 1 --config "$_f" --frontend claude)"
+  # Control: the SAME file without a key stays shut, so the key — not the file — opened it.
+  [ "$(role complex 1 --config "$_f")" = builder ] \
+    || fail "F182-R1 control: the blocked file escalated with no key — the first-line rule broke"
+  pass "--frontend claude escalates on this repo's own blocked/claude=raise file, both triggers (F182-R1)"
+}
+
+F182_R1_key_raise_opens_on_armed_first_line() {
+  _f="$(mkfix f182-r1a 2 armed claude=raise)"
+  [ "$(role complex 1 --config "$_f" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R1: --frontend claude on an armed/claude=raise file did not escalate"
+  pass "--frontend claude escalates on an armed/claude=raise file (F182-R1)"
+}
+
+F182_R1_key_raise_opens_on_blocked_first_line
+F182_R1_key_raise_opens_on_armed_first_line
+
 echo "test_escalation.sh: all cases passed"

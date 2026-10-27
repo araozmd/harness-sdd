@@ -88,6 +88,15 @@ sh "$C/harness-install.sh" --self --agents=claude >/dev/null 2>&1 || fail "Claud
 grep -qx armed "$C/.escalation-arming" || fail "Claude-only sonnet→opus lost arming"
 pass "combined inherited Codex is unarmed; explicit Claude-only retains arming (R4/R5) [self_arming_real]"
 
+# ── E99-F182: the per-front-end gate on the REAL --self artifact (ADR-0011) ──────
+# The brief's problem statement end to end: this repo's own file reads `blocked`, yet its
+# Claude Code sessions must escalate on their `claude=raise` line.
+_f182_role="$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config.yaml" --frontend claude 2>/dev/null)" \
+  || fail "builder-role.sh --frontend claude exited non-zero on the real --self artifact (E99-F182 R1)"
+[ "$_f182_role" = builder-heavy ] \
+  || fail "--frontend claude on the real blocked/claude=raise --self artifact printed '$_f182_role', not builder-heavy (E99-F182 R1)"
+pass "the real --self artifact escalates a Claude Code session on claude=raise (E99-F182 R1) [self_arming_per_frontend]"
+
 # Disarmed arm: with NO recorded models anywhere, nothing resolves — the verdict file
 # is reclaimed, exactly as write_escalation_arming does for an unconfigured target.
 D="$(fixture disarmed)"

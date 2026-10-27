@@ -18,12 +18,17 @@
 #   tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>]
 #                                              [--config <harness.config.yaml>]
 #                                              [--arming <.escalation-arming>]
+#                                              [--frontend <key>]
 #
 #   <complexity>  the feature spec's `complexity:` frontmatter value. EMPTY is legal and
 #                 means `standard` — specs written before this feature carry no tag.
 #   <round>       the EXISTING build<->review counter (agents/orchestrator.md): 1 on the
 #                 first build, +1 on every in-review -> in-progress bounce. This tool
 #                 introduces no second counter and no schema field.
+#   --frontend    the front-end this session runs inside (`claude`, `codex`, …), as printed
+#                 by tools/host-frontend.sh — never typed by the caller (ADR-0011). Given a
+#                 key, the arming gate reads THAT front-end's own `<key>=raise` line; empty
+#                 or absent, it reads the first line exactly as before.
 #
 # Output:
 #   stdout  exactly one line: `builder` or `builder-heavy`
@@ -43,7 +48,7 @@
 set -eu
 
 usage() {
-  echo "usage: builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>] [--arming <path>]" >&2
+  echo "usage: builder-role.sh <complexity> <round> [--backend <in-session|delegate>] [--config <path>] [--arming <path>] [--frontend <key>]" >&2
   exit 4
 }
 
@@ -52,6 +57,7 @@ _round=""
 _backend="in-session"
 _config=""
 _arming=""
+_frontend=""
 _positional=0
 
 while [ $# -gt 0 ]; do
@@ -59,6 +65,7 @@ while [ $# -gt 0 ]; do
     --backend) [ $# -ge 2 ] || usage; _backend="$2"; shift 2 ;;
     --config)  [ $# -ge 2 ] || usage; _config="$2";  shift 2 ;;
     --arming)  [ $# -ge 2 ] || usage; _arming="$2";  shift 2 ;;
+    --frontend) [ $# -ge 2 ] || usage; _frontend="$2"; shift 2 ;;
     --help|-h) usage ;;
     --*) echo "builder-role.sh: unknown option '$1'" >&2; usage ;;
     *)
@@ -177,6 +184,13 @@ fi
 _armed=0
 _blocked_by=""
 if [ -n "$_arming" ] && [ ! -L "$_arming" ] && [ -f "$_arming" ] && [ -r "$_arming" ]; then
+ if [ -n "$_frontend" ]; then
+  # KEY PATH (ADR-0011) — the host's own line decides.
+  case "$(head -n 1 "$_arming" 2>/dev/null)" in
+    armed|blocked)
+      if grep -qxF "$_frontend=raise" "$_arming" 2>/dev/null; then _armed=1; fi ;;
+  esac
+ else
   # The first line is compared RAW — no whitespace normalization. `opencode_parallel_wanted`
   # in the installer does `tr -d '[:space:]'` and this deliberately does NOT copy it: that
   # marker decides whether to install a command, while this one decides which MODEL runs a
@@ -195,6 +209,7 @@ if [ -n "$_arming" ] && [ ! -L "$_arming" ] && [ -f "$_arming" ] && [ -r "$_armi
       _blocked_by="$(sed -n '2,$p' "$_arming" 2>/dev/null | grep -v '=raise$' | tr '\n' ' ' | sed -e 's/[[:space:]]*$//')"
       [ -n "$_blocked_by" ] || _blocked_by="(unspecified)" ;;
   esac
+ fi
 fi
 
 # _escalate <trigger> — honour a trigger, or decline it, saying which gate refused.
