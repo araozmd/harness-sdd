@@ -1319,6 +1319,16 @@ F182_R1_key_raise_opens_on_blocked_first_line() {
   # Control: the SAME file without a key stays shut, so the key — not the file — opened it.
   [ "$(role complex 1 --config "$_f")" = builder ] \
     || fail "F182-R1 control: the blocked file escalated with no key — the first-line rule broke"
+  # The key's line is the SECOND gate only: it opens nothing without a trigger, and never
+  # past the operator's `0` veto, which is still checked first.
+  [ "$(role standard 2 --config "$_f" --frontend claude)" = builder ] \
+    || fail "F182-R1: --frontend claude escalated with no trigger (standard, round 2 = after_rejections)"
+  # shellcheck disable=SC2086
+  _veto="$(mkfix f182-r1-veto 0 blocked $THIS_REPO_ARMING)"
+  [ "$(role complex 1 --config "$_veto" --frontend claude)" = builder ] \
+    || fail "F182-R1: --frontend claude escalated past after_rejections = 0"
+  err complex 1 --config "$_veto" --frontend claude | grep -qF 'escalation.after_rejections is 0 (off)' \
+    || fail "F182-R1: the key path under the 0 veto did not report the veto"
   pass "--frontend claude escalates on this repo's own blocked/claude=raise file, both triggers (F182-R1)"
 }
 
@@ -1642,17 +1652,19 @@ F182_R10_init_per_frontend_line() {
   # An invalid byte before the raise line, under a UTF-8 CALLER locale: the macOS system awk
   # aborts on it (`towc: multibyte conversion failure`) unless the read pins LC_ALL=C, which
   # would lose the raise key and print DISARMED (progress/lessons.md 2026-10-26).
-  printf 'blocked\n\377x=none\nclaude=raise\n' > "$_arm"
+  printf 'blocked\n\377x=none\nclaude=raise\ncodex=none\n' > "$_arm"
   _s=0; ( cd "$_t" && LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 ./.harness/init.sh ) > "$T/r10.out" 2>&1 || _s=$?
   printf '%s\n' "$_s" > "$T/r10.rc"; grep 'escalation: ' "$T/r10.out" > "$T/r10.esc" || true
-  _one "invalid byte under a UTF-8 locale" "$(_pf claude '(none)')"
+  _one "invalid byte under a UTF-8 locale" "$(_pf claude codex)"
 
   # Hostile keys: never eval'd, never printed. Relative and absolute `touch` targets; cwd is
   # the target, so a relative X would land in it.
-  printf 'blocked\na$(touch "%s/X")=raise\nb`touch Y`=raise\nc$(touch Z)=none\nclaude=raise\n' "$T" > "$_arm"; _run
+  # Also two shapes only a sloppy parser accepts: `codex=raise=x` is not exactly `raise` (the
+  # raw compare builder-role.sh makes), and `orphan` has no `=` at all — neither is a key line.
+  printf 'blocked\na$(touch "%s/X")=raise\nb`touch Y`=raise\nc$(touch Z)=none\nclaude=raise\ncodex=raise=x\norphan\n' "$T" > "$_arm"; _run
   [ ! -e "$T/X" ] && [ ! -e "$_t/X" ] && [ ! -e "$_t/Y" ] && [ ! -e "$_t/Z" ] \
     || fail "F182-R10: a hostile arming line was executed (a touch target exists)"
-  _one "hostile lines" "$(_pf claude '(none)')"
+  _one "hostile lines" "$(_pf claude codex)"
   pass "init.sh prints one per-front-end line for blocked+raise, unchanged ARMED/DISARMED otherwise, large and hostile files safe (F182-R10)"
 }
 F182_R10_init_per_frontend_line

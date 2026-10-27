@@ -150,6 +150,10 @@ positional_arg_usage() {
     frun -- "$_h"
     [ "$(rcv)" = 0 ]      || fail "R7: $_h exited $(rcv), not 0"
     out | grep -qi usage  || fail "R7: $_h printed no usage on stdout"
+    # --help is the ONLY accepted argument: anything beside it is still a positional (R7).
+    frun -- "$_h" claude
+    [ "$(rcv)" = 4 ] || fail "R7: $_h followed by a positional exited $(rcv), not 4"
+    [ -z "$(out)" ]  || fail "R7: $_h followed by a positional printed '$(out)' on stdout"
   done
   pass "positional / unknown arguments exit 4; --help / -h print usage and exit 0 (F182-R7)"
 }

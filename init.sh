@@ -556,14 +556,16 @@ case "$ESC_THRESHOLD" in
     # session (progress/lessons.md 2026-10-27). Only keys matching `^[a-z][a-z0-9-]*$` are
     # printed and nothing derived from the file is ever `eval`'d: the file's only trust
     # boundary is the symlink check, and it is read at every session start, so a line like
-    # `a$(touch X)=raise` must contribute nothing. `LC_ALL=C` keeps an invalid byte from
-    # aborting the macOS awk under a UTF-8 caller locale. The verdict compare is RAW, as in
-    # builder-role.sh: only a remainder of exactly `raise` counts.
+    # `a$(touch X)=raise` must contribute nothing. `LC_ALL=C` on the two detail reads keeps
+    # an invalid byte from aborting the macOS awk under a UTF-8 caller locale (the first-line
+    # read stops at record 1, before any later byte is examined). The verdict compare is RAW,
+    # as in builder-role.sh: only a remainder of exactly `raise` counts, so `codex=raise=x`
+    # is not a raise line, and a line with no `=` is no key line at all.
     ESC_FIRST=""; ESC_RAISE=""; ESC_OTHER=""
     if [ ! -L "$ESC_ARMING" ] && [ -f "$ESC_ARMING" ]; then
-      ESC_FIRST="$(LC_ALL=C awk 'NR == 1 { print; exit }' "$ESC_ARMING" 2>/dev/null || true)"
-      ESC_RAISE="$(LC_ALL=C awk -F= 'NR > 1 && index($0, "=") && $1 ~ /^[a-z][a-z0-9-]*$/ && substr($0, length($1) + 2) == "raise" { printf "%s%s", s, $1; s = " " }' "$ESC_ARMING" 2>/dev/null || true)"
-      ESC_OTHER="$(LC_ALL=C awk -F= 'NR > 1 && index($0, "=") && $1 ~ /^[a-z][a-z0-9-]*$/ && substr($0, length($1) + 2) != "raise" { printf "%s%s", s, $1; s = " " }' "$ESC_ARMING" 2>/dev/null || true)"
+      ESC_FIRST="$(awk 'NR == 1 { print; exit }' "$ESC_ARMING" 2>/dev/null || true)"
+      ESC_RAISE="$(LC_ALL=C awk -F= '$1 ~ /^[a-z][a-z0-9-]*$/ && substr($0, length($1) + 2) == "raise" { printf "%s%s", s, $1; s = " " }' "$ESC_ARMING" 2>/dev/null || true)"
+      ESC_OTHER="$(LC_ALL=C awk -F= 'index($0, "=") && $1 ~ /^[a-z][a-z0-9-]*$/ && substr($0, length($1) + 2) != "raise" { printf "%s%s", s, $1; s = " " }' "$ESC_ARMING" 2>/dev/null || true)"
     fi
     if [ "$ESC_FIRST" = "armed" ]; then
       echo "ℹ️  escalation: ARMED (builder-heavy after $ESC_THRESHOLD rejections)"
