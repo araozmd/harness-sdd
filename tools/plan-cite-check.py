@@ -22,11 +22,15 @@ it never redefines it:
 """
 import os
 import re
+import subprocess
 import sys
 
 PFX = "plan-cite-check: "
 USAGE = ("usage: plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>] [--specs-dir <dir>]\n"
-         "       plan-cite-check.py --sweep <specs-dir>")
+         "       plan-cite-check.py --sweep <specs-dir>\n"
+         "       plan-cite-check.py --grandfathered <feature.plan.md> [--base <ref>]")
+TOOL_PATHS = ("tools/plan-cite-check.py", ".harness/tools/plan-cite-check.py")
+BASE_FALLBACKS = ("origin/main", "main", "origin/master", "master", "origin/trunk", "trunk")
 
 CHECKED_RE = re.compile(r"^## (Data model|API / interface|Files to change|Deferred)(\s|$)")
 CLOSE_RE = re.compile(r"^##? ")
@@ -435,11 +439,83 @@ def main_sweep(args):
     return 0
 
 
+def _git(repo, *args):
+    """Run git in repo; return (rc, stdout, stderr).  Pathspecs are literal (a plan named
+    `it*s.plan.md` is that file, never a glob)."""
+    try:
+        r = subprocess.run(["git", "--literal-pathspecs", "-C", repo] + list(args),
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        raise InputError("cannot run git: %s" % exc)
+    return r.returncode, os.fsdecode(r.stdout), os.fsdecode(r.stderr)
+
+
+def _git_ok(repo, *args):
+    """Run git; any non-zero exit is an InputError carrying git's stderr — never a verdict."""
+    rc, out, err = _git(repo, *args)
+    if rc != 0:
+        raise InputError("git %s failed (exit %d): %s" % (args[0], rc, err.strip()))
+    return out
+
+
+def _resolves(repo, ref):
+    return _git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}")[0] == 0
+
+
+def default_branch(repo):
+    rc, out, _err = _git(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    head = out.strip() if rc == 0 else ""
+    for ref in ((head,) if head else ()) + BASE_FALLBACKS:
+        if _resolves(repo, ref):
+            return ref
+    return None
+
+
+def grandfather(plan_path, base=None):
+    """Return (flag, reason): flag True = grandfathered (advisory), False = reject class.
+
+    A DELIBERATE second copy of tools/tasks-pair-check.py's grandfather(), keyed on THIS
+    tool's paths: the two tools install and run independently, and keying on the sibling's
+    merge would ambush every plan written between the two merges.
+    """
+    path = os.path.realpath(plan_path)
+    if not os.path.isfile(path):
+        raise InputError("cannot read %s: not a regular file" % plan_path)
+    rc, out, _err = _git(os.path.dirname(path), "rev-parse", "--show-toplevel")
+    if rc != 0 or not out.strip():
+        raise InputError("%s is not inside a git work tree" % plan_path)
+    top = out.strip()  # git prints the toplevel symlink-resolved, like `path` above
+    if base is None:
+        base = default_branch(top)
+        if base is None:
+            raise InputError("no default branch resolves (origin/HEAD, %s); pass --base"
+                             % " ".join(BASE_FALLBACKS))
+    elif not _resolves(top, base):
+        raise InputError("--base does not resolve: %s" % base)
+    out = _git_ok(top, "log", "--first-parent", "--reverse", "--format=%ct", base, "--",
+                  *TOOL_PATHS)
+    stamps = out.split()
+    if not stamps:
+        return True, "tool not on default branch %s yet" % base
+    merged = int(stamps[0])
+    rel = os.path.relpath(path, top)
+    out = _git_ok(top, "log", "--diff-filter=A", "--format=%at", "HEAD", "--", rel)
+    authored = [int(x) for x in out.split()]
+    if not authored:
+        return False, "%s has no commit on HEAD; tool merged into %s at %d" % (rel, base, merged)
+    first = min(authored)
+    if first < merged:
+        return True, "%s authored %d, before tool merged into %s at %d" % (rel, first, base, merged)
+    return False, "%s authored %d, not before tool merged into %s at %d" % (rel, first, base, merged)
+
+
 def main_grandfathered(args):
     opts, pos = parse_args(args, {"--base": "a ref"})
     if len(pos) != 1:
         raise InputError("--grandfathered expects exactly one <feature.plan.md>")
-    raise InputError("--grandfathered is not implemented yet")
+    flag, reason = grandfather(pos[0], opts.get("--base"))
+    print("%sgrandfather %s: %s" % (PFX, "flag" if flag else "reject", reason))
+    return 0 if flag else 1
 
 
 def main(argv):

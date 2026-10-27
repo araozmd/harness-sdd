@@ -580,6 +580,94 @@ grep -qF 'plan-cite' "$T/out" && fail "R7_init_silent_without_tool: 2d printed w
 pass "R7_init_silent_without_tool"
 cp "$TOOL" "$I/tools/plan-cite-check.py"
 
-# @@R8@@
+# ── R8: --grandfathered — flag a plan written before THIS tool merged, else reject class ─
+# The tool's date is its MERGE: the committer time of the first first-parent commit on the
+# default branch touching tools/plan-cite-check.py or .harness/tools/plan-cite-check.py. The
+# plan's date is the AUTHOR time of the earliest commit on HEAD that added it. Hermetic git:
+# bounded discovery, no host config, fixed dates (lessons 2026-10-17/19).
+GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
+GIT_CONFIG_GLOBAL=/dev/null; GIT_CONFIG_NOSYSTEM=1; export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+gq() { git -c user.name=fx -c user.email=fx@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+gci() { # gci <author-epoch> <committer-epoch> <msg>  (stage first)
+  GIT_AUTHOR_DATE="@$1 +0000" GIT_COMMITTER_DATE="@$2 +0000" gq commit -q -m "$3" || fail "fixture commit '$3' failed"
+}
+gf_run() { # gf_run <cwd> <plan-path> [args...]
+  _r="$1"; _f="$2"; shift 2
+  set +e; (cd "$_r" && python3 "$TOOL" --grandfathered "$_f" "$@") >"$T/out" 2>"$T/err"; rc=$?; set -e
+}
+gf_expect() { # gf_expect <row> <rc> <stdout-regex>
+  [ "$rc" -eq "$2" ] || fail "$1: expected rc $2, got $rc ($(both))"
+  grep -qE "$3" "$T/out" || fail "$1: stdout does not match '$3' ($(both))"
+  pass "$1"
+}
+# G1: main: base @1000; old.plan.md authored @1100 but COMMITTED @1900 (a rebase moved its
+# committer time past the tool, never its author time); the tool @1500; new.plan.md @1600;
+# re.plan.md added @1200, deleted @1210, re-added @1700 (the earliest add wins); a literal
+# `it*s.plan.md` @1600 beside an `itXs.plan.md` @1100 that a glob pathspec would also match.
+G="$T/g1"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p s; echo x > s/old.plan.md; gq add s; gci 1100 1900 old
+echo x > s/itXs.plan.md; gq add s; gci 1100 1100 itx
+echo x > s/re.plan.md; gq add s; gci 1200 1200 re-add-1
+gq rm -q s/re.plan.md; gci 1210 1210 re-del
+mkdir -p tools; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1500 1500 tool
+echo x > s/new.plan.md; gq add s; gci 1600 1600 new
+echo x > 's/it*s.plan.md'; gq add s; gci 1600 1600 star
+echo x > s/re.plan.md; gq add s; gci 1700 1700 re-add-2
+echo x > s/dirty.plan.md
+cd "$ROOT"
+gf_run "$G" s/old.plan.md; gf_expect R8_flag_plan_older_than_merge 0 '^plan-cite-check: grandfather flag: s/old\.plan\.md authored 1100, before tool merged into main at 1500$'
+gf_run "$G" s/new.plan.md; gf_expect R8_reject_plan_after_merge 1 '^plan-cite-check: grandfather reject: s/new\.plan\.md authored 1600, not before tool merged into main at 1500$'
+gf_run "$G" s/dirty.plan.md; gf_expect R8_reject_uncommitted_plan 1 '^plan-cite-check: grandfather reject: s/dirty\.plan\.md has no commit on HEAD'
+gf_run "$G" s/re.plan.md; gf_expect R8_earliest_add_wins 0 '^plan-cite-check: grandfather flag: s/re\.plan\.md authored 1200'
+gf_run "$G" 's/it*s.plan.md'; gf_expect R8_literal_pathspec 1 '^plan-cite-check: grandfather reject: s/it\*s\.plan\.md authored 1600'
+# An absolute path from another cwd must reach the same verdict — a FLAG case on purpose: a
+# path the tool cannot map into the repo finds no commit, which reads as reject (lesson 2026-10-25).
+gf_run "$T" "$G/s/old.plan.md"; gf_expect R8_absolute_path_flags 0 '^plan-cite-check: grandfather flag: s/old\.plan\.md authored 1100'
+# origin/HEAD is asked first: point it at a remote-tracking ref that never saw the tool.
+gq -C "$G" update-ref refs/remotes/origin/trunk "$(git -C "$G" rev-parse main~4)"
+gq -C "$G" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+gf_run "$G" s/new.plan.md; gf_expect R8_flag_tool_not_on_base 0 '^plan-cite-check: grandfather flag: tool not on default branch origin/trunk yet$'
+gf_run "$G" s/new.plan.md --base main; gf_expect R8_base_flag_equals_form 1 '^plan-cite-check: grandfather reject: .* main at 1500$'
+gf_run "$G" s/new.plan.md --base=main; gf_expect R8_base_flag_equals_form 1 '^plan-cite-check: grandfather reject: .* main at 1500$'
+gf_run "$G" s/new.plan.md --base nope; [ "$rc" -eq 2 ] || fail "R8_exit2_bad_base: rc $rc ($(both))"
+grep -qF 'plan-cite-check: error: --base does not resolve: nope' "$T/err" || fail "R8_exit2_bad_base: wrong error ($(both))"
+[ ! -s "$T/out" ] || fail "R8_exit2_bad_base: stdout not empty"; pass R8_exit2_bad_base
+gf_run "$G" s/new.plan.md --spec x; [ "$rc" -eq 2 ] || fail "R8_lint_flag_in_grandfather_mode_exit2: rc $rc ($(both))"; pass R8_lint_flag_in_grandfather_mode_exit2
+# A failing git call is exit 2, never a verdict: a stub git that fails one `log` call.
+mkdir -p "$T/stub"
+for _which in first-parent diff-filter; do
+  printf '#!/bin/sh\ncase " $* " in *" --%s"*) echo "stub: git log failed" >&2; exit 128 ;; esac\nexec %s "$@"\n' "$_which" "$(command -v git)" > "$T/stub/git"
+  chmod +x "$T/stub/git"
+  set +e; (cd "$G" && PATH="$T/stub:$PATH" python3 "$TOOL" --grandfathered s/new.plan.md --base main) >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "R8_git_failure_exit2[$_which]: a failed git log gave rc $rc instead of 2 ($(both))"
+  grep -qF 'stub: git log failed' "$T/err" || fail "R8_git_failure_exit2[$_which]: git's stderr is not surfaced ($(both))"
+  pass "R8_git_failure_exit2[$_which]"
+done
+# G2: the tool reaches main only through a --no-ff merge. Its branch commit (@1100) is OLDER
+# than the plan (@1200); the merge (@1300) is newer: the first-parent merge is the tool's date.
+G="$T/g2"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+gq checkout -q -b tool; mkdir -p tools; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1100 1100 tool
+gq checkout -q main; mkdir -p s; echo x > s/p.plan.md; gq add s; gci 1200 1200 plan
+GIT_AUTHOR_DATE="@1150 +0000" GIT_COMMITTER_DATE="@1300 +0000" gq merge -q --no-ff -m merge-tool tool || fail "fixture merge failed"
+cd "$ROOT"
+gf_run "$G" s/p.plan.md; gf_expect R8_merge_time_not_branch_time 0 '^plan-cite-check: grandfather flag: s/p\.plan\.md authored 1200, before tool merged into main at 1300$'
+# G3: installed-target layout — the tool lives at .harness/tools/plan-cite-check.py.
+G="$T/g3"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p .harness/tools s; echo v1 > .harness/tools/plan-cite-check.py; gq add .harness; gci 1100 1100 upgrade
+echo x > s/n.plan.md; gq add s; gci 1200 1200 new
+cd "$ROOT"
+gf_run "$G" s/n.plan.md; gf_expect R8_consumer_layout_rejects 1 '^plan-cite-check: grandfather reject: s/n\.plan\.md authored 1200, not before tool merged into main at 1100$'
+# G4: the only branch is `trunkless`, no origin: no default branch resolves.
+G="$T/g4"; mkdir -p "$G"; cd "$G"; gq init -q -b trunkless .; echo x > a.plan.md; gq add a.plan.md; gci 1000 1000 a; cd "$ROOT"
+gf_run "$G" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_no_default_branch: rc $rc ($(both))"
+grep -qF -- '--base' "$T/err" || fail "R8_exit2_no_default_branch: the error does not name --base ($(both))"; pass R8_exit2_no_default_branch
+mkdir -p "$T/nogit"; echo x > "$T/nogit/a.plan.md"
+gf_run "$T/nogit" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_outside_repo: rc $rc ($(both))"
+grep -qF 'is not inside a git work tree' "$T/err" || fail "R8_exit2_outside_repo: wrong reason ($(both))"; pass R8_exit2_outside_repo
+
+# @@R9@@
 
 echo "all plan-cite checks passed"
