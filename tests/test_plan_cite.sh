@@ -801,6 +801,25 @@ _mode="$(git -C "$ROOT" ls-files -s tools/plan-cite-check.py | cut -c1-6)"
 [ "$_mode" = "100755" ] || fail "R11_source_mode_100755: git mode of tools/plan-cite-check.py is '$_mode'"
 pass "R11_source_mode_100755"
 
-# @@R12@@
+# ── R12: VERSION ↔ newest CHANGELOG heading (read at runtime, no literal); ledger row C10 ─
+_v="$(cat "$ROOT/VERSION")"
+[ -n "$_v" ] || fail "R12_version_changelog_ledger: VERSION is empty"
+_head="$(grep -m1 '^## \[' "$ROOT/CHANGELOG.md" || true)"
+case "$_head" in "## [$_v]"*) ;; *) fail "R12_version_changelog_ledger: newest CHANGELOG heading '$_head' != VERSION '$_v'" ;; esac
+# historical anchor: SOME release section names E36-F04 and plan-cite-check and says the
+# enforcement is now real, so a later release prepended above stays green
+awk '/^## \[/ { if (sec ~ /E36-F04/ && sec ~ /plan-cite-check/ && sec ~ /is now real/) ok = 1; sec = ""; next } { sec = sec "\n" $0 }
+     END { if (sec ~ /E36-F04/ && sec ~ /plan-cite-check/ && sec ~ /is now real/) ok = 1; exit ok ? 0 : 1 }' "$ROOT/CHANGELOG.md" \
+  || fail "R12_version_changelog_ledger: no CHANGELOG section names E36-F04 and plan-cite-check and says enforcement is now real"
+slice "$ROOT/docs/RATIONALE.md" '## Deletion ledger' > "$T/led.txt"
+_c10="$(grep -E '^\| C10 — Plan-row citation lint \| Capability compensation \|' "$T/led.txt" || true)"
+[ -n "$_c10" ] || fail "R12_version_changelog_ledger: no '| C10 — Plan-row citation lint | Capability compensation |' row in the Deletion ledger"
+# the evidence cell (the 4th) states the ablation condition, not just a token
+printf '%s\n' "$_c10" | awk -F'|' '{ print $5 }' | grep -qE 'Ablation[^|]*uncited-row[^|]*Retain while' \
+  || fail "R12_version_changelog_ledger: the C10 evidence cell does not state the ablation condition (Ablation … uncited-row … Retain while)"
+printf '%s\n' "$_c10" | grep -qF '[`tools/plan-cite-check.py`](../tools/plan-cite-check.py)' \
+  || fail "R12_version_changelog_ledger: the C10 row does not point at tools/plan-cite-check.py"
+pass "R12_version_changelog_ledger"
+
 
 echo "all plan-cite checks passed"

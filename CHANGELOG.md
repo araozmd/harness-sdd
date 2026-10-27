@@ -4,6 +4,39 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.103.0] — 2026-10-27
+
+### Added — plan-row citation lint and Reviewer gate (E36-F04)
+- `tools/plan-cite-check.py` (stdlib Python, executable) lints a feature `.plan.md` against the
+  citation grammar E36-F03 pinned in `docs/SPEC-FORMAT.md` → *Plan rows cite an R-id or an
+  ADR*, with the regex bytes copied from it. Three modes, each exit `0` ok / `1` violation /
+  `2` usage or input error (never a pass):
+  - `<plan> [--spec <spec>] [--specs-dir <dir>]` reports `uncited-row` (a data row under
+    `## Data model`, `## API / interface`, `## Files to change` or `## Deferred`, outside
+    fenced code, with no `R[0-9]+` and no `ADR-[0-9]{4}` token; `PR304` is no citation),
+    `unknown-rid` (with `--spec`), `unresolved-adr` (the namespace rule `init.sh` 2c and the
+    Reviewer share) and `deferred-*` (`section-missing`, `form both|neither|<n>-none-lines`,
+    `table-empty`, `row-no-adr`, `by-not-deferred`, `adr-no-trigger`).
+  - `--sweep <specs-dir>` reports a `deferred` ADR with no `Trigger:` line and an unrecognized
+    `stage:` value in `specs/product.md`'s frontmatter.
+  - `--grandfathered <plan> [--base <ref>]` reuses E36-F01's merge-time rule, keyed on this
+    tool's own merge: a plan authored before the tool reached the default branch is flagged,
+    not rejected. Every git call's status is checked.
+- `init.sh` section 2d runs the lint over every `spec-ready` / `in-progress` / `in-review`
+  `sdd: true` feature and the sweep, warn-only (exit 2 is reported as "check did not run").
+- `agents/reviewer.md` check 8 rejects on exit 1, quoting the output; exit 2 is a check that
+  did not run; a plan-row `unresolved-adr` is a reject while the spec-level ADR-citation soft
+  flag is unchanged; `--grandfathered` decides flag vs reject. `agents/doc-critic.md` reports the
+  lint at the `feature-spec` checkpoint as advisory findings and flags an omitted sticky NFR or
+  an uncited, undeferred bolt-on row.
+- `specs/_templates/feature.plan.md`'s `## Data model` table gains an `R-id` column.
+- Enforcement — declared by 0.101.0 as E36-F04's — is now real: `agents/architect.md`,
+  `docs/SPEC-FORMAT.md` and `docs/WORKFLOW.md` say so in the present tense (the Architect runs
+  the tool before hand-off; it must exit 0).
+- `docs/RATIONALE.md` gains ledger row `C10 — Plan-row citation lint` (capability compensation).
+- New suite `tests/test_plan_cite.sh` and fixtures `tests/fixtures/plan-cite/`;
+  `harness-install.sh` marks the tool executable.
+
 ## [0.102.0] — 2026-10-26
 
 ### Added — observable-slice rule and walking skeleton (E36-F02)
