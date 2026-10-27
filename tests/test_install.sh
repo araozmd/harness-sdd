@@ -3318,4 +3318,22 @@ test_single_install_makes_no_umbrella_artifacts() {
 }
 test_single_install_makes_no_umbrella_artifacts
 
+# ── E99-F182 R11: the installer ships tools/host-frontend.sh executable and identical ──
+# The installed `-x` here is the INSTALLER's chmod (the source mode is pinned by
+# test_source_scripts_are_executable via `_sse_expected`), so the chmod line is asserted too.
+test_host_frontend_installed_contract() {
+  _hf="$T/f182-hostfe"; mkdir -p "$_hf"
+  sh "$SRC/harness-install.sh" --agents=claude "$_hf" >/dev/null 2>&1 || fail "E99-F182 R11: install failed"
+  [ -f "$_hf/.harness/tools/host-frontend.sh" ] || fail "E99-F182 R11: .harness/tools/host-frontend.sh was not installed"
+  [ -x "$_hf/.harness/tools/host-frontend.sh" ] || fail "E99-F182 R11: the installed host-frontend.sh is not executable"
+  cmp -s "$SRC/tools/host-frontend.sh" "$_hf/.harness/tools/host-frontend.sh" \
+    || fail "E99-F182 R11: the installed host-frontend.sh differs from the source copy"
+  grep -qF 'chmod +x "$H/tools/host-frontend.sh"' "$SRC/harness-install.sh" \
+    || fail "E99-F182 R11: harness-install.sh has no chmod +x line for tools/host-frontend.sh"
+  grep -qF 'tools/host-frontend.sh' "$_hf/.harness/agents/orchestrator.md" \
+    || fail "E99-F182 R11: the installed orchestrator.md does not name tools/host-frontend.sh"
+  pass "the installer ships host-frontend.sh executable and byte-identical (E99-F182 R11) [host_frontend_installed_contract]"
+}
+test_host_frontend_installed_contract
+
 echo "All install tests passed."

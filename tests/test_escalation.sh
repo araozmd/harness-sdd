@@ -1657,4 +1657,55 @@ F182_R10_init_per_frontend_line() {
 }
 F182_R10_init_per_frontend_line
 
+# ── F182-R11: the installer's summary names the per-front-end state; the file is unchanged ──
+# Three installs of one claude+codex target: all raise (armed ⇒ the existing `ok` line), no
+# raise (the existing NOT-armed line), and claude raise + codex unstamped (the new per-front-end
+# line). After each, the arming file must be exactly the pre-feature format — first line, then
+# one `<key>=<verdict>` per selected key in $AGENT_KEYS order (claude, codex), no blank line —
+# composed here independently of the file's own layout.
+F182_R11_installer_summary_line() {
+  _t="$T/f182-r11"; install_to "$_t" "$T/ch-f182-r11" --agents=claude,codex
+  _c="$_t/.harness/harness.config.yaml"
+  _pf_msg='escalation armed per front-end on: claude; not on: codex — the Orchestrator escalates where its host'"'"'s line reads raise (ADR-0011); see .harness/.escalation-arming'
+  _inst() { CODEX_HOME="$T/ch-f182-r11" sh "$SRC/harness-install.sh" --agents=claude,codex "$_t" > "$T/r11.out" 2>&1 \
+              || fail "F182-R11: install exited non-zero: $(tail -5 "$T/r11.out")"; }
+  _shape() {  # _shape <label> — the frozen file format
+    _vc="$(verdict_for "$_t" claude)"; _vx="$(verdict_for "$_t" codex)"
+    if [ "$_vc" = raise ] && [ "$_vx" = raise ]; then _first=armed; else _first=blocked; fi
+    printf '%s\n' "$_first" "claude=$_vc" "codex=$_vx" > "$T/r11.want"
+    cmp -s "$T/r11.want" "$_t/.harness/.escalation-arming" \
+      || fail "F182-R11: $1 — the arming file is not the pre-feature format: $(od -c "$_t/.harness/.escalation-arming" | head -5)"
+  }
+
+  set_models "$_c" builder standard
+  set_models "$_c" builder-heavy reasoning
+  _inst
+  [ "$(verdict_for "$_t" claude)" = raise ] && [ "$(verdict_for "$_t" codex)" = raise ] \
+    || fail "F182-R11 setup: standard/reasoning is not raise on both (claude=$(verdict_for "$_t" claude) codex=$(verdict_for "$_t" codex))"
+  grep -qF 'escalation armed — builder-heavy resolves to a different stamp' "$T/r11.out" \
+    || fail "F182-R11: an all-raise install did not print the existing armed line"
+  grep -qF 'per front-end' "$T/r11.out" && fail "F182-R11: an all-raise install printed the per-front-end line"
+  _shape "all raise"
+
+  set_models "$_c" builder-heavy inherit
+  _inst
+  grep -qF 'escalation NOT armed — see .harness/.escalation-arming' "$T/r11.out" \
+    || fail "F182-R11: a no-raise install did not print the existing NOT-armed line"
+  grep -qF 'per front-end' "$T/r11.out" && fail "F182-R11: a no-raise install printed the per-front-end line"
+  _shape "no raise"
+
+  set_models "$_c" builder-heavy reasoning
+  _inst
+  printf 'name = "builder-heavy"\n# hand-edited by the operator\n' > "$_t/.codex/agents/builder-heavy.toml"
+  _inst
+  [ "$(verdict_for "$_t" claude)" = raise ] && [ "$(verdict_for "$_t" codex)" = unstamped ] \
+    || fail "F182-R11 setup: expected claude=raise codex=unstamped, got claude=$(verdict_for "$_t" claude) codex=$(verdict_for "$_t" codex)"
+  grep -qF -- "$_pf_msg" "$T/r11.out" \
+    || fail "F182-R11: a mixed install did not print the per-front-end line: $(grep -i escalation "$T/r11.out")"
+  grep -qF 'escalation NOT armed' "$T/r11.out" && fail "F182-R11: a mixed install still printed the NOT-armed line"
+  _shape "claude raise, codex unstamped"
+  pass "the installer summary names per-front-end arming when mixed; the file stays the pre-feature format (F182-R11)"
+}
+F182_R11_installer_summary_line
+
 echo "test_escalation.sh: all cases passed"

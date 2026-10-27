@@ -4210,6 +4210,7 @@ install_one() {
   chmod +x "$H/tools/sweep-scratch.sh" 2>/dev/null || true   # E34-F01 automated scratch-dir sweep
   chmod +x "$H/tools/tasks-pair-check.py" 2>/dev/null || true   # E36-F01 Reviewer task-pair shape lint
   chmod +x "$H/tools/plan-cite-check.py" 2>/dev/null || true   # E36-F04 Reviewer plan-row citation lint
+  chmod +x "$H/tools/host-frontend.sh" 2>/dev/null || true   # E99-F182 host front-end key for builder-role.sh --frontend
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -6267,13 +6268,14 @@ PYNPM
   #     armed|blocked
   #     <front-end>=<raise|none|same|neither|unstamped>   one per selected front-end
   #
-  # `armed` iff EVERY selected front-end is `raise`. A conservative AND, because
-  # tools/builder-role.sh cannot know which front-end it is running under: the config does not
-  # say, and the five are chosen at install time, not at build time. Passing the front-end as
-  # an argument would only move the guess into agents/orchestrator.md, where it is prose and
-  # untestable. The cost, stated: a mixed target where four front-ends would raise and one
-  # lacks a pin gets no escalation ANYWHERE — deliberate, since the AND never downgrades
-  # anyone, and the detail lines name the offender so the fix is one pin and one re-run.
+  # `armed` iff EVERY selected front-end is `raise` — the AND, and the rule for a caller that
+  # does not know its host. Since ADR-0011 (E99-F182, amending ADR-0002) the Orchestrator
+  # DOES know it: tools/host-frontend.sh reads the same session markers detect_host trusts,
+  # and `builder-role.sh --frontend <key>` then reads that front-end's OWN `<key>=raise` line.
+  # So a mixed target where one front-end lacks a pin still escalates on the others, and the
+  # first line stays the fallback for an empty key (no marker, two markers, no flag). The file
+  # format is unchanged by that — only who consumes which line — so the bytes written below
+  # are exactly what they were before ADR-0011.
   #
   # Only `raise` arms. `same`/`neither` are not harmful — neither downgrades — but arming on
   # them would spend a build round, a progress/history.md line and a telemetry record
@@ -6341,7 +6343,21 @@ PYNPM
     if [ "$_ea_armed" = 1 ]; then
       ok "escalation armed — builder-heavy resolves to a different stamp (model and, on codex/pi, reasoning effort/thinking) on every selected front-end"
     else
-      info "escalation NOT armed — see .harness/.escalation-arming for which front-end blocked it"
+      # Report-only (ADR-0011): when the AND is blocked but some front-end raises, name both
+      # sides — the Orchestrator escalates on exactly the raise hosts. Derived from the body
+      # just written, never re-read from disk.
+      _ea_on=""; _ea_off=""
+      for _ea_l in $_ea_body; do
+        case "$_ea_l" in
+          *=raise) _ea_on="${_ea_on:+$_ea_on }${_ea_l%%=*}" ;;
+          *) _ea_off="${_ea_off:+$_ea_off }${_ea_l%%=*}" ;;
+        esac
+      done
+      if [ -n "$_ea_on" ]; then
+        info "escalation armed per front-end on: $_ea_on; not on: $_ea_off — the Orchestrator escalates where its host's line reads raise (ADR-0011); see .harness/.escalation-arming"
+      else
+        info "escalation NOT armed — see .harness/.escalation-arming for which front-end blocked it"
+      fi
     fi
   }
 
