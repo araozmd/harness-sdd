@@ -62,7 +62,7 @@ restore_caller_locale() {
 die() { echo "fix-worktree: $*" >&2; exit 1; }
 
 usage() {
-  die "usage: fix-worktree.sh create <E99-Fn> <slug> [--base <branch>] | run <E99-Fn> <slug> -- <command> [args...] | teardown <E99-Fn> <slug> [--base <branch>]"
+  die "usage: fix-worktree.sh create <E##-F##> <slug> [--base <branch>] | run <E##-F##> <slug> -- <command> [args...] | teardown <E##-F##> <slug> [--base <branch>]"
 }
 
 # The ONLY C-pinned region in this file (see the locale contract above). The
@@ -75,11 +75,26 @@ validate_key() {
   LC_ALL=C
   export LC_ALL
   _key_error=
-  case "$FIX_ID" in
-    E99-F*[!0-9]*|E99-F) _key_error="invalid fix id: $FIX_ID" ;;
-    E99-F[0-9]*) : ;;
-    *) _key_error="invalid fix id: $FIX_ID" ;;
-  esac
+  # The id is E<digits>-F<digits> (E36-F07 widened it from E99-F<digits>), parsed
+  # EXPLICITLY rather than matched by a wildcard glob: `E[0-9]*-F[0-9]*` would admit
+  # `E1x-F1` and the path-injecting `E1/../-F1`, and the id becomes a branch name and a
+  # worktree path. A leading `E`, exactly one `-F`, and two non-empty digit-only halves;
+  # that alone rejects every character outside `[0-9EF-]`, so no separate charset arm
+  # (it would be an equivalent, untestable second guard — E36-F07 mutation F01).
+  _id_rest=${FIX_ID#E}
+  _id_epic=${_id_rest%%-F*}
+  _id_feat=${_id_rest#*-F}
+  if [ "$_id_rest" = "$FIX_ID" ] || [ "$_id_epic" = "$_id_rest" ]; then
+    _key_error="invalid fix id: $FIX_ID"
+  fi
+  if [ -z "$_key_error" ]; then
+    case "$_id_epic" in
+      ''|*[!0-9]*) _key_error="invalid fix id: $FIX_ID" ;;
+    esac
+    case "$_id_feat" in
+      ''|*[!0-9]*) _key_error="invalid fix id: $FIX_ID" ;;
+    esac
+  fi
   if [ -z "$_key_error" ]; then
     case "$FIX_SLUG" in
       ''|*[!a-z0-9-]*|-*|*-) _key_error="invalid slug: $FIX_SLUG" ;;

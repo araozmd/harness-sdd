@@ -1096,8 +1096,31 @@ grep -Eq '^[[:space:]]+max_parallel:[[:space:]]+3' "$T/.harness/harness.config.y
   fail "fresh installed config missing max_parallel default"
 grep -Eq '^[[:space:]]+shared_paths:[[:space:]]+\[\]' "$T/.harness/harness.config.yaml" ||
   fail "fresh installed config missing shared_paths default"
+# E36-F07 R10: the /sdd-next --wave worker cap is seeded under workflow: on a fresh install,
+# and an upgrade seeds it once into a preserved workflow: that lacks it (never a second one).
+awk '/^workflow:[[:space:]]*(#.*)?$/{w=1;next} w&&/^[^[:space:]#]/{w=0} w' "$T/.harness/harness.config.yaml" |
+  grep -Eq '^[[:space:]]+max_wave:[[:space:]]+3([[:space:]]|$)' ||
+  fail "fresh installed config missing workflow.max_wave: 3 (E36-F07 R10)"
+TMW="$(mktemp -d 2>/dev/null || mktemp -d -t harness)"
+mkdir -p "$TMW/home" "$TMW/ch" "$TMW/t"
+HOME="$TMW/home" CODEX_HOME="$TMW/ch" sh "$SRC/harness-install.sh" "$TMW/t" >/dev/null 2>&1 ||
+  fail "max_wave-migration fresh install exited non-zero"
+printf 'workflow:\n  identity: ""\n' > "$TMW/t/.harness/harness.config.yaml"
+HOME="$TMW/home" CODEX_HOME="$TMW/ch" sh "$SRC/harness-install.sh" "$TMW/t" >/dev/null 2>&1 ||
+  fail "max_wave-migration upgrade exited non-zero"
+[ "$(grep -cE '^[[:space:]]+max_wave:[[:space:]]+3([[:space:]]|$)' "$TMW/t/.harness/harness.config.yaml")" = 1 ] ||
+  fail "upgrade did not seed exactly one workflow.max_wave into a preserved config lacking it (E36-F07 R10)"
+printf 'workflow:\n  identity: ""\n  max_wave: 2\n' > "$TMW/t/.harness/harness.config.yaml"
+HOME="$TMW/home" CODEX_HOME="$TMW/ch" sh "$SRC/harness-install.sh" "$TMW/t" >/dev/null 2>&1 ||
+  fail "max_wave-migration second upgrade exited non-zero"
+[ "$(grep -cE '^[[:space:]]+max_wave:' "$TMW/t/.harness/harness.config.yaml")" = 1 ] &&
+  grep -qxF '  max_wave: 2' "$TMW/t/.harness/harness.config.yaml" ||
+  fail "upgrade touched a preserved workflow.max_wave or added a second one (E36-F07 R10)"
+rm -rf "$TMW"
 grep -qF '.harness/agents/orchestrator.md' "$T/.claude/agents/orchestrator.md" \
   || fail "agent shim does not resolve against .harness/"
+grep -qxF '## Wave coordinator mode (/sdd-next --wave)' "$T/.harness/agents/orchestrator.md" \
+  || fail "installed orchestrator.md lacks the /sdd-next --wave coordinator section (E36-F07 R11)"
 grep -qF '.harness/agents/inception.md' "$T/.claude/commands/sdd-new.md" \
   || fail "sdd-new does not resolve inception against .harness/"
 grep -qE '(^|[^/])agents/inception\.md' "$T/.claude/commands/sdd-new.md" \
@@ -1233,6 +1256,8 @@ pass "OpenCode commands generated (R7)"
 for _b in "$T/.claude/commands/sdd-next.md" "$T/.opencode/command/sdd-next.md" "$T/.agents/skills/sdd-next/SKILL.md"; do
   grep -qF -- '--mine' "$_b"      || fail "generated /sdd-next glue missing --mine scope wiring: $_b (E10-F01 R12/R13)"
   grep -qF '$ARGUMENTS' "$_b"     || fail "generated /sdd-next glue does not forward \$ARGUMENTS: $_b (E10-F01 R13)"
+  grep -qF -- '`--wave` is a closed-scope token beside `--mine`' "$_b" \
+    || fail "generated /sdd-next glue missing the --wave scope token: $_b (E36-F07 R1)"
 done
 pass "E10-F01: /sdd-next glue generated per target, byte-identical, carries --mine + \$ARGUMENTS [sdd_next_glue_generated_all_targets][sdd_next_scope_wiring_asserted]"
 

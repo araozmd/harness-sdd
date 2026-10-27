@@ -214,6 +214,27 @@ migrate_config() {
     fi
   fi
 
+  # --- workflow.max_wave (E36-F07 `/sdd-next --wave` worker cap) ---
+  # Insert under the top-level `workflow:` header (tolerating a trailing comment), else
+  # append a new `workflow:` header. The presence check is scoped to a `max_wave:` INSIDE
+  # the top-level `workflow:` section (_cfg_has_workflow_max_wave), so a same-named key
+  # under another section never suppresses the seed and an existing value is never touched.
+  # The seeded line is byte-identical to the source harness.config.yaml line. This runs
+  # BEFORE the identity seed below, so both arms here are reachable (the identity seed
+  # would otherwise always have created the header first).
+  if ! _cfg_has_workflow_max_wave "$_cfg"; then
+    if grep -Eq '^workflow:[[:space:]]*(#.*)?$' "$_cfg"; then
+      _mc_insert_after "$_cfg" '^workflow:[[:space:]]*(#.*)?$' \
+        '  max_wave: 3   # worker cap for `/sdd-next --wave` (E36-F07); `--max N` overrides it for one run'
+    else
+      {
+        printf '\n'
+        printf 'workflow:\n'
+        printf '%s\n' '  max_wave: 3   # worker cap for `/sdd-next --wave` (E36-F07); `--max N` overrides it for one run'
+      } >> "$_cfg"
+    fi
+  fi
+
   # --- workflow.identity (E10-F01 scoped `--mine` ownership) ---
   # Insert under the top-level `workflow:` header (tolerating a trailing comment).
   # Empty default ⇒ solo / board-wide, exactly today's behavior (owner ignored). A
@@ -679,6 +700,17 @@ _cfg_has_workflow_identity() {
     /^workflow:[[:space:]]*(#.*)?$/ { w=1; next }
     w && /^[^[:space:]#]/ { w=0 }
     w && /^[[:space:]]+identity:/ { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
+# _cfg_has_workflow_max_wave <file> — true (exit 0) iff a `max_wave:` key exists INSIDE
+# the top-level `workflow:` section (same awk shape as _cfg_has_workflow_identity).
+_cfg_has_workflow_max_wave() {
+  awk '
+    /^workflow:[[:space:]]*(#.*)?$/ { w=1; next }
+    w && /^[^[:space:]#]/ { w=0 }
+    w && /^[[:space:]]+max_wave:/ { found=1 }
     END { exit found ? 0 : 1 }
   ' "$1"
 }
@@ -6793,7 +6825,28 @@ Map `$ARGUMENTS` to the selector's closed scope flags:
 - one valid positional feature id `E##-F##` → translate it to
   `node .harness/tools/next-task.mjs --json --feature E##-F##`; never forward the feature
   id as a selector positional token.
+- `--wave`, optionally followed by `--max N` and/or `--epic E##` in either order → **wave
+  coordinator mode** (below).
 - anything else is invalid and selects or changes nothing.
+
+`--wave` is a closed-scope token beside `--mine` and `E##-F##`: it cannot be combined with
+either. `--max` and `--epic` are valid only after `--wave`, each at most once; `N` must match
+`^[1-9][0-9]*$` and `E##` must match `^E[0-9]+$`. Any other argument shape (`--wave --mine`,
+`--wave E##-F##`, `--max N` or `--epic E##` without `--wave`, `--max 0`, `--epic E36-F01`,
+a repeated token) selects nothing, changes no state, and prints
+`usage: /sdd-next [--mine | E##-F## | --wave [--max N] [--epic E##]]`.
+
+Under `--wave`, act as the wave coordinator in `.harness/agents/orchestrator.md` →
+"## Wave coordinator mode (/sdd-next --wave)"; that section is the contract — its preflight
+stops, how `--epic E##` and `--max N` are used, selection, provisioning, fan-out, the
+test-runner lock and the merge plan — and this command only maps the scope. Its preflight
+stops before any mutation — naming the cause, pointing to `/sdd-next <id>` and exiting
+non-zero — on every condition that section lists, including an `execution.builder.backend`
+other than `in-session` (`delegate` or any unknown value). After the workers settle it
+prints the summary table (verdicts `pr-opened`, `interrupted` or `stopped: <reason>`; a
+`runner-busy` worker is re-run once, alone) and the `merge order:` plan of the opened PRs,
+in which each later PR takes the next MINOR `VERSION` over the then-current `main`. It runs
+no `/sdd-pr-loop`, merges nothing, writes no `done` and tears down no worktree.
 
 Under `--mine`, use **scoped selection**: consider only features whose **effective owner**
   (feature `owner` else parent epic `owner`) equals the identity resolved from
