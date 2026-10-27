@@ -161,8 +161,9 @@ esac
 
 # ── 2b. The arming verdict — the SECOND gate ────────────────────────────────────
 # `.harness/.escalation-arming`, written by harness-install.sh. First line is exactly one
-# word, `armed` or `blocked`, so no parser is needed for the DECISION; the remaining
-# `<front-end>=<verdict>` lines are read for the advisory only.
+# word, `armed` or `blocked`, so no parser is needed for the no-key DECISION; the remaining
+# `<front-end>=<verdict>` lines are read for the advisory — and, when `--frontend <key>` is
+# given, the key's own line is the decision (ADR-0011, amending ADR-0002's scope).
 #
 # Located rather than searched for, so purity holds: `--arming` if given, else beside the
 # config file (both live in `.harness/`). With no `--config` there is no artifact and
@@ -188,34 +189,50 @@ _blocked_by=""
 _fe_checked=0
 _fe_line=""
 if [ -n "$_arming" ] && [ ! -L "$_arming" ] && [ -f "$_arming" ] && [ -r "$_arming" ]; then
- if [ -n "$_frontend" ]; then
-  # KEY PATH (ADR-0011) — the host's own line decides.
-  case "$(head -n 1 "$_arming" 2>/dev/null)" in
-    armed|blocked)
-      _fe_checked=1
-      _fe_line="$(awk -F= -v k="$_frontend" 'NR > 1 && $1 == k { print; exit }' "$_arming" 2>/dev/null)"
-      if grep -qxF "$_frontend=raise" "$_arming" 2>/dev/null; then _armed=1; fi ;;
-  esac
- else
-  # The first line is compared RAW — no whitespace normalization. `opencode_parallel_wanted`
-  # in the installer does `tr -d '[:space:]'` and this deliberately does NOT copy it: that
-  # marker decides whether to install a command, while this one decides which MODEL runs a
-  # build, and the contract here is fail-closed — only an exact `armed` opens the gate.
-  # Stripping whitespace lets `armed `, ` armed`, and even `a r m e d` or `ar med` through,
-  # so a file that the installer could not have written would arm the target
-  # (Codex #3723207550, reproduced). `$( )` already strips the trailing newline, so a
-  # well-formed `armed\n` still matches; anything else fails closed, which is the only
-  # direction this gate is allowed to fail.
-  case "$(head -n 1 "$_arming" 2>/dev/null)" in
-    armed) _armed=1 ;;
-    *)
-      # Every non-`raise` detail line, joined — this is what tells the operator WHICH
-      # front-end to fix. `(unspecified)` keeps the blocked branch distinguishable from the
-      # absent branch even when the file carries no usable detail.
-      _blocked_by="$(sed -n '2,$p' "$_arming" 2>/dev/null | grep -v '=raise$' | tr '\n' ' ' | sed -e 's/[[:space:]]*$//')"
-      [ -n "$_blocked_by" ] || _blocked_by="(unspecified)" ;;
-  esac
- fi
+  # KEY PATH (ADR-0011, E99-F182). With `--frontend <key>` the gate's unit is that front-end's
+  # OWN verdict line, not the AND on line 1: this repo's file reads `blocked` because Codex /
+  # OpenCode / pi inherit, yet its `claude=raise` line is true for a Claude Code session.
+  #   - Line 1 must still be exactly `armed` or `blocked`. Anything else is not the
+  #     installer's file, so NO detail line in it is trusted — it falls through to the no-key
+  #     block below, which can only shut (its one opening value, `armed`, is taken here).
+  #   - The FIRST line whose text up to its first `=` is exactly <key> decides (the installer
+  #     never writes duplicates; first wins, so a later forged line cannot override it).
+  #     Whole-key compare (`$1 == k`), not a substring: `xclaude=raise` is not claude's line.
+  #   - Its remainder is compared RAW, like line 1: `raise `, `raise\r`, ` claude=raise` and
+  #     `claude = raise` are not `raise` (Codex #3723207550 precedent — fail closed).
+  #   - One awk over the file, no pipeline: nothing here can take SIGPIPE on a large file.
+  # A key with NO line shuts too (never a fallback to line 1): that front-end was not stamped
+  # on the last install, so escalating there provably changes nothing.
+  if [ -n "$_frontend" ]; then
+    case "$(head -n 1 "$_arming" 2>/dev/null)" in
+      armed|blocked)
+        _fe_checked=1
+        _fe_line="$(awk -F= -v k="$_frontend" 'NR > 1 && $1 == k { print; exit }' "$_arming" 2>/dev/null)"
+        [ "$_fe_line" != "$_frontend=raise" ] || _armed=1 ;;
+    esac
+  fi
+  # NO-KEY PATH — byte-for-byte the pre-ADR-0011 rule (R4). Also the garbage-first-line
+  # fallthrough of the key path, which therefore reports the same `blocked by:` advisory.
+  if [ "$_fe_checked" = 0 ]; then
+    # The first line is compared RAW — no whitespace normalization. `opencode_parallel_wanted`
+    # in the installer does `tr -d '[:space:]'` and this deliberately does NOT copy it: that
+    # marker decides whether to install a command, while this one decides which MODEL runs a
+    # build, and the contract here is fail-closed — only an exact `armed` opens the gate.
+    # Stripping whitespace lets `armed `, ` armed`, and even `a r m e d` or `ar med` through,
+    # so a file that the installer could not have written would arm the target
+    # (Codex #3723207550, reproduced). `$( )` already strips the trailing newline, so a
+    # well-formed `armed\n` still matches; anything else fails closed, which is the only
+    # direction this gate is allowed to fail.
+    case "$(head -n 1 "$_arming" 2>/dev/null)" in
+      armed) _armed=1 ;;
+      *)
+        # Every non-`raise` detail line, joined — this is what tells the operator WHICH
+        # front-end to fix. `(unspecified)` keeps the blocked branch distinguishable from the
+        # absent branch even when the file carries no usable detail.
+        _blocked_by="$(sed -n '2,$p' "$_arming" 2>/dev/null | grep -v '=raise$' | tr '\n' ' ' | sed -e 's/[[:space:]]*$//')"
+        [ -n "$_blocked_by" ] || _blocked_by="(unspecified)" ;;
+    esac
+  fi
 fi
 
 # _escalate <trigger> — honour a trigger, or decline it, saying which gate refused.

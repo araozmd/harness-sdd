@@ -1430,4 +1430,80 @@ F182_R4_no_key_unchanged() {
 }
 F182_R4_no_key_unchanged
 
+# ── F182-R5: garbage never opens the gate, with or without a key ─────────────────
+# f182_raw <name> <printf-%b body> — a fixture whose arming file is written byte-exact,
+# for shapes mkfix cannot express (an empty first line, a trailing CR). Prints the config.
+f182_raw() {
+  _fr_c="$(mkfix "$1" 2 '')"
+  printf '%b' "$2" > "$(dirname "$_fr_c")/.escalation-arming"
+  printf '%s\n' "$_fr_c"
+}
+# f182_shut <label> <config> — builder and exit 0 with AND without --frontend claude.
+f182_shut() {
+  [ "$(role complex 1 --config "$2" --frontend claude)" = builder ] \
+    || fail "F182-R5: $1 opened the gate with --frontend claude"
+  [ "$(rc complex 1 --config "$2" --frontend claude)" = 0 ] \
+    || fail "F182-R5: $1 with --frontend claude did not exit 0"
+  [ "$(role complex 1 --config "$2")" = builder ] \
+    || fail "F182-R5: $1 opened the gate with no key"
+  [ "$(rc complex 1 --config "$2")" = 0 ] \
+    || fail "F182-R5: $1 with no key did not exit 0"
+}
+F182_R5_garbage_never_opens() {
+  f182_shut "an absent arming file" "$(mkfix f182-r5-absent 2 '')"
+
+  # A symlink to a file that WOULD open both paths: the shared outer guard must refuse it.
+  _real="$(mkfix f182-r5-real 2 armed claude=raise)"
+  [ "$(role complex 1 --config "$_real" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R5 setup: the symlink's target does not open the gate on its own"
+  _ln="$(mkfix f182-r5-link 2 '')"
+  ln -s "$(dirname "$_real")/.escalation-arming" "$(dirname "$_ln")/.escalation-arming"
+  f182_shut "a symlinked arming file" "$_ln"
+
+  _ur="$(mkfix f182-r5-unreadable 2 armed claude=raise)"
+  chmod 000 "$(dirname "$_ur")/.escalation-arming"
+  if [ -r "$(dirname "$_ur")/.escalation-arming" ]; then
+    echo "skip - F182-R5 unreadable case: this host does not enforce file modes (running as root?)"
+  else
+    f182_shut "an unreadable arming file" "$_ur"
+  fi
+  chmod 600 "$(dirname "$_ur")/.escalation-arming"
+
+  # First lines the installer cannot have written: no detail line may then be trusted.
+  _i=0
+  for _first in 'Armed' 'armed ' ' armed' 'ARMED' '' 'claude=raise' 'blocked '; do
+    _i=$((_i + 1))
+    f182_shut "first line '$_first'" "$(f182_raw "f182-r5-first$_i" "$_first\nclaude=raise\n")"
+  done
+
+  # Whitespace / CR variants of the key line are not the key line.
+  _i=0
+  for _kl in 'claude=raise ' ' claude=raise' 'claude = raise' 'claude=raise\r' 'claude =raise' 'claude= raise'; do
+    _i=$((_i + 1))
+    f182_shut "detail line '$_kl'" "$(f182_raw "f182-r5-ws$_i" "blocked\n$_kl\n")"
+  done
+
+  # Duplicate key: the FIRST `claude=` line decides — asserted in both orders, so the row
+  # proves order rather than "duplicates shut".
+  _dup="$(mkfix f182-r5-dup 2 blocked claude=none claude=raise)"
+  f182_shut "duplicate claude=none then claude=raise" "$_dup"
+  err complex 1 --config "$_dup" --frontend claude | grep -qF 'recorded claude=none ' \
+    || fail "F182-R5: the duplicate-key advisory does not name the FIRST line, claude=none"
+  _rev="$(mkfix f182-r5-rev 2 blocked claude=raise claude=none)"
+  [ "$(role complex 1 --config "$_rev" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R5: duplicate claude=raise then claude=none did not open — the first line must win"
+
+  # The one positive: a ~3000-line file with the key line LAST must still open, so the
+  # search is whole-file (not line 2 only) and the negatives above are not vacuous.
+  _big="$(mkfix f182-r5-big 2 '')"
+  awk 'BEGIN { print "blocked"; for (i = 1; i <= 3000; i++) print "k" i "=neither"; print "claude=raise" }' \
+    > "$(dirname "$_big")/.escalation-arming"
+  [ "$(role complex 1 --config "$_big" --frontend claude)" = builder-heavy ] \
+    || fail "F182-R5: a ~3000-line file with claude=raise last did not open for --frontend claude"
+  [ "$(role complex 1 --config "$_big")" = builder ] \
+    || fail "F182-R5: the ~3000-line blocked file opened with no key"
+  pass "absent / symlink / unreadable / bad first line / whitespace / duplicate-order never open; a large file still does (F182-R5)"
+}
+F182_R5_garbage_never_opens
+
 echo "test_escalation.sh: all cases passed"
