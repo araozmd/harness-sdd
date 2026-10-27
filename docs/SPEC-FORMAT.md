@@ -122,11 +122,13 @@ observed is the Reviewer's behavior check.
 Stage-aware NFRs (ADR-0009) rest on one citation grammar, stated here once and copied exactly
 into the ADR and plan templates, `agents/architect.md` and `docs/WORKFLOW.md`. Four forms:
 
-1. **Stage line.** In `specs/product.md`, inside the first `---` … `---` block, a line
-   matching `^stage: (discovery|pilot|production)$`. The value is the whole rest of the line,
+1. **Stage line.** In `specs/product.md`'s frontmatter (the `---` block that starts on line 1
+   and runs to the next `---` line), a line matching `^stage: (discovery|pilot|production)$`.
+   A `---` block that starts on any later line is not frontmatter, so a `stage:` line inside
+   it is absent. The value is the whole rest of the line,
    so no inline comment is allowed on it — an explanation goes on its own `#` line in the
    block, as the installer's stub shows. Absent, or any other value, reads as `production`.
-   Read it with `sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'`.
+   Read it with `sed -n '1{/^---$/!q;};1,/^---$/p' specs/product.md | grep '^stage:'`.
 2. **Deferred ADR header.** In `specs/adr/NNNN-*.md` (or a product space's `adr/`), the
    header list under the `# ADR-NNNN —` title carries a line `- **Status:** deferred`
    (regex `^- \*\*Status:\*\* deferred`) **and** a line `- **Trigger:**` followed by a

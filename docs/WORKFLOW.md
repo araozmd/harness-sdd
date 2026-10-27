@@ -271,7 +271,8 @@ the Builder/Reviewer (the consumers) — it is additive and distinct from the `/
 
 Non-functional requirements are stage-aware, so an MVP plan does not grow production
 machinery nobody asked for. The project declares its stage once, as a `stage:` line in
-`specs/product.md` frontmatter — `discovery`, `pilot` or `production`; when the line is
+`specs/product.md` frontmatter (the `---` block that starts on line 1) — `discovery`, `pilot`
+or `production`; when the line is
 absent or unrecognized, the stage is `production` (today's behavior). Only the human writes
 it. The Planner reads it before writing the architecture and ADRs, the Driller copies it
 into every inbox brief's `## Constraints` as `Stage: <value>`, and the Architect reads it

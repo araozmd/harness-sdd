@@ -692,6 +692,24 @@ run_tool --sweep "$S"; expect_ok R7_sweep_stage_absent_ok
 printf '%s\n' '# Product with no frontmatter' 'stage: bogus' > "$S/product.md"
 run_tool --sweep "$S"; expect_ok R7_sweep_stage_absent_ok
 pass "R7_sweep_stage_absent_ok"
+# Frontmatter is the `---` block that starts on LINE 1 (review round 1, A2; docs/SPEC-FORMAT.md
+# grammar item 1): a `---` block after a preamble, or a second block after line 1's, is not
+# frontmatter, so its `stage: pilot` is absent (production) and its `stage: Pilot` is no
+# stage-unrecognized. The documented sed reader is run on the same shapes by
+# tests/test_stage_nfrs.sh R1_stage_read_command_line1.
+fresh r7line1
+rm "$S/adr/0003-deferred-no-trigger.md"
+printf '%s\n' '# Product' '' '---' 'stage: pilot' '---' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_block_not_on_line1
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: absent' "$T/out" \
+  || fail "R7_sweep_stage_block_not_on_line1: a --- block after a preamble was read as frontmatter ($(both))"
+printf '%s\n' '---' 'status: draft' '---' '' '---' 'stage: pilot' '---' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_block_not_on_line1
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: absent' "$T/out" \
+  || fail "R7_sweep_stage_block_not_on_line1: a second --- block after line 1's was read as frontmatter ($(both))"
+printf '%s\n' '# Product' '---' 'stage: Pilot' '---' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_block_not_on_line1
+pass "R7_sweep_stage_block_not_on_line1"
 
 fresh r7clean
 rm "$S/adr/0003-deferred-no-trigger.md"

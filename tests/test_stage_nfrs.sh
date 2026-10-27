@@ -302,6 +302,57 @@ R10_workflow_stage_section() {
 }
 R10_workflow_stage_section
 
+# R1 — every reader of the stage line agrees on what frontmatter is: the `---` block that
+# starts on LINE 1, nothing else (review round 1, A2). tools/plan-cite-check.py --sweep reads
+# it that way (tests/test_plan_cite.sh R7_sweep_stage_block_not_on_line1); so does the
+# installer's own check above. Here the documented read command is EXTRACTED from each
+# installed section that states it — SPEC-FORMAT's grammar item 1 and the Architect, Planner
+# and Driller Stage sections — required identical, and RUN against product.md shapes, so
+# a reader that finds a `---` block anywhere (the pre-fix `sed -n '/^---$/,/^---$/p'`) reds.
+R1_stage_read_command_line1() {
+  _n=0; _cmd0=''
+  for _sec in "docs/SPEC-FORMAT.md|## Plan rows cite an R-id or an ADR|## Architecture alignment" \
+              "agents/architect.md|## Stage and NFRs (ADR-0009)|## Principles" \
+              "agents/planner.md|## Stage (ADR-0009)|## Repo topology output" \
+              "agents/driller.md|## Stage (ADR-0009)|## Feature-size budget"; do
+    _sf="${_sec%%|*}"; _rest="${_sec#*|}"; _sh="${_rest%%|*}"; _se="${_rest#*|}"
+    span "$I/$_sf" "$_sh" "$_se" "$T/r1rd.sec" || fail "R1: installed $_sf has no '$_sh' .. '$_se' span"
+    _c="$(fold "$T/r1rd.sec" | grep -oE "\`sed -n [^\`]*\| grep '\^stage:'\`" || true)"
+    [ "$(printf '%s\n' "$_c" | grep -c .)" -eq 1 ] || fail "R1: $_sf's '$_sh' does not state exactly one \`sed -n … | grep '^stage:'\` read command (got: $_c)"
+    fold "$T/r1rd.sec" | grep -qF 'frontmatter (the `---` block that starts on line 1' \
+      || fail "R1: $_sf's '$_sh' does not say frontmatter is the --- block that starts on line 1"
+    _c="${_c#\`}"; _c="${_c%\`}"
+    if [ "$_n" -eq 0 ]; then _cmd0="$_c"; else
+      [ "$_c" = "$_cmd0" ] || fail "R1: $_sf's read command '$_c' differs from SPEC-FORMAT's '$_cmd0'"
+    fi
+    _n=$((_n + 1))
+  done
+  [ "$_n" -eq 4 ] || fail "R1: expected 4 read-command sections, read $_n"
+  # SPEC-FORMAT grammar item 1 states the rule from its subject through its verb to its object.
+  span "$I/docs/SPEC-FORMAT.md" '## Plan rows cite an R-id or an ADR' '## Architecture alignment' "$T/r1rd.sec"
+  fold "$T/r1rd.sec" | grep -qF "In \`specs/product.md\`'s frontmatter (the \`---\` block that starts on line 1 and runs to the next \`---\` line), a line matching" \
+    || fail "R1: SPEC-FORMAT grammar item 1 does not define frontmatter as the --- block that starts on line 1"
+  fold "$T/r1rd.sec" | grep -qF 'A `---` block that starts on any later line is not frontmatter, so a `stage:` line inside it is absent.' \
+    || fail "R1: SPEC-FORMAT grammar item 1 does not say a --- block starting on a later line is not frontmatter (its stage: is absent)"
+  fold "$T/r1rd.sec" | grep -qF 'inside the first `---`' && fail "R1: SPEC-FORMAT grammar item 1 still says 'inside the first --- block'"
+  span "$I/docs/WORKFLOW.md" '## Stage and NFRs (ADR-0009)' '## Doc-critic checkpoints' "$T/r1rd.sec"
+  fold "$T/r1rd.sec" | grep -qF 'a `stage:` line in `specs/product.md` frontmatter (the `---` block that starts on line 1) — `discovery`, `pilot` or `production`' \
+    || fail "R1: the WORKFLOW Stage section does not say the stage: line sits in the frontmatter block that starts on line 1"
+  mkdir -p "$T/r1rd/specs"
+  # rd <want> <line>... — write product.md, run the documented command, compare its output.
+  rd() {
+    _w="$1"; shift; printf '%s\n' "$@" > "$T/r1rd/specs/product.md"
+    _got="$(cd "$T/r1rd" && sh -c "$_cmd0" || true)"
+    [ "$_got" = "$_w" ] || fail "R1: the documented read command gave '$_got', want '$_w', on: $*"
+  }
+  rd 'stage: pilot' '---' 'status: draft' 'stage: pilot' '---' '# Product'
+  rd '' '# Product' '' '---' 'stage: pilot' '---'
+  rd '' '---' 'status: draft' '---' '' '---' 'stage: pilot' '---'
+  rd '' 'stage: pilot' '# Product'
+  pass "the stage read command is one command in SPEC-FORMAT, Architect, Planner and Driller, and reads only a line-1 --- frontmatter block (R1) [R1_stage_read_command_line1]"
+}
+R1_stage_read_command_line1
+
 # R12 — VERSION and the newest CHANGELOG heading agree (read at runtime, no frozen literal),
 # and some release section's body names E36-F03 and the stage (a historical anchor that stays
 # green when a later release is prepended above it).

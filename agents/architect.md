@@ -127,8 +127,9 @@ reference (the inter-repo seam): they are independent, and you satisfy both. Per
 ## Stage and NFRs (ADR-0009)
 
 Non-functional requirements are stage-aware. Before you write the `.plan.md`, read the
-product's stage from `specs/product.md` frontmatter — take the literal, never infer it:
-`sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'`. The value is one of
+product's stage from `specs/product.md` frontmatter (the `---` block that starts on line 1;
+a later `---` block is not frontmatter) — take the literal, never infer it:
+`sed -n '1{/^---$/!q;};1,/^---$/p' specs/product.md | grep '^stage:'`. The value is one of
 `discovery`, `pilot`, `production`; when the line is absent or unrecognized, the stage is
 `production` (today's behavior, so a project that never declares one sees no change). The
 inbox brief's `## Constraints` also records the `Stage:` the Driller read.
