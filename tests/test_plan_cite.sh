@@ -286,6 +286,20 @@ add_row() {
   _ln="$(grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1)"
   [ -n "$_ln" ] || fail "add_row: precondition: row '$2' not inserted"
 }
+# Known limit (review round 1, A5; the tool docstring's "Known limits"): the spec reads an R
+# token from any non-alphanumeric left boundary, and `:` is one, so a cross-feature
+# `E36-F03:R1` counts as THIS spec's R1. Under --spec an id the spec does not declare still
+# surfaces as unknown-rid; one it does declare is a silent pass. Pinned so a change is deliberate.
+fresh r3xf
+add_row "$GP" '| `xf.py` | modify | per E36-F03:R9 |'
+run_tool "$GP" --spec "$GS"; expect_fail R3_cross_feature_id_reads_as_local
+grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R9" "$T/out" || fail "R3_cross_feature_id_reads_as_local: E36-F03:R9 is not read as this spec's R9 ($(both))"
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_cross_feature_id_reads_as_local: expected exactly one finding ($(both))"
+fresh r3xf2
+add_row "$GP" '| `xf.py` | modify | per E36-F03:R1 |'
+run_tool "$GP" --spec "$GS"; expect_ok R3_cross_feature_id_reads_as_local
+pass "R3_cross_feature_id_reads_as_local"
+
 fresh r4
 run_tool "$BP" --spec "$BS"; expect_fail R4_bare_unresolved
 grep -qxF "plan-cite-check: unresolved-adr $BP:15 ADR-0042 not-in-any-namespace" "$T/out" \

@@ -48,6 +48,11 @@ with a non-empty `Trigger:`, or exactly one `Deferred: none — <why>` line):
 `stage-unrecognized <product.md>:<line> <text>` for a `stage:` line in product.md's first
 `---` block that is not `^stage: (discovery|pilot|production)$`.
 
+Known limits: a cross-feature id such as `E36-F03:R5` reads as this spec's `R5` (`:` is a
+non-alphanumeric boundary, the spec's own reading); under --spec an id the spec does not
+declare surfaces as `unknown-rid`, one it declares passes silently
+(R3_cross_feature_id_reads_as_local).
+
 --grandfathered: grandfather() below is a DELIBERATE second copy of tasks-pair-check's
 merge-time rule, keyed on THIS tool's paths (see its docstring).
 """
