@@ -9,7 +9,7 @@ All notable changes to the harness body are recorded here. Versions follow
 ### Added — observable-slice rule and walking skeleton (E36-F02)
 - `agents/driller.md` gains `## Observable slice — the shape rule beside the size budget
   (ADR-0008)`: every seeded feature names a behavior observable at the product boundary (HTTP,
-  CLI, UI, file output, exit code); the first feature of a fresh epic is the walking skeleton
+  CLI, UI, a file a user or client reads, exit code); the first feature of a fresh epic is the walking skeleton
   (thinnest end-to-end path, no intra-epic `depends_on`); an internal-only candidate is merged
   into the slice that consumes it. `max_requirements` stays the size proxy. The rule is advisory
   and never blocks: an exempted feature is recorded as one `Observable-slice exemption:` line in

@@ -211,7 +211,7 @@ have, so that something can be exercised before the last feature lands. Three cl
 applied by the Driller at `/sdd-drill`:
 
 1. **Every feature names a behavior observable at the product boundary** — an HTTP response, a
-   CLI invocation, a UI interaction, a file output or an exit code. The brief states it in its
+   CLI invocation, a UI interaction, a file a user or client reads or an exit code. The brief states it in its
    `## Observable behavior` section (one line: the surface and what a user or client sees).
 2. **The first feature of a fresh epic is the walking skeleton** — the thinnest end-to-end path
    a user or client can exercise, the lowest `F##` a default drill seeds, with no intra-epic

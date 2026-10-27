@@ -85,6 +85,8 @@ sec 'Every feature you seed names at least one behavior observable at the produc
   || fail "R1: section does not say EVERY seeded feature names a behavior observable at the product boundary"
 sec 'product boundary[^.]{0,120}HTTP[^.]{0,40}CLI[^.]{0,40}UI[^.]{0,40}file[^.]{0,40}exit code' \
   || fail "R1: section does not name the product-boundary surfaces (HTTP, CLI, UI, file, exit code)"
+sec 'a UI interaction, a file a user or client reads or an exit code' \
+  || fail "R1: section counts an internal storage file as observable (must be 'a file a user or client reads')"
 sec 'first feature of a fresh epic is the walking skeleton' || fail "R1: section does not make the first feature of a fresh epic the walking skeleton"
 sec 'thinnest[^.]{0,40}end-to-end' || fail "R1: section does not define the skeleton as the thinnest end-to-end path"
 sec 'lowest[^.]{0,20}F##' || fail "R1: section does not tie the skeleton to the lowest F##"
@@ -181,6 +183,8 @@ wsec() { grep -qiE -e "$1" "$WS"; }
 wsecF() { grep -qF -- "$1" "$WS"; }
 wsec 'product boundary[^.]{0,120}HTTP[^.]{0,40}CLI[^.]{0,40}UI[^.]{0,40}file[^.]{0,40}exit code' \
   || fail "R9: section does not state the product-boundary clause"
+wsec 'a UI interaction, a file a user or client reads or an exit code' \
+  || fail "R9: section counts an internal storage file as observable (must be 'a file a user or client reads')"
 wsec 'first feature of a fresh epic is the walking skeleton' || fail "R9: section does not state the walking-skeleton clause"
 wsec 'internal[^.]{0,80}merged[^.]{0,40}consum' || fail "R9: section does not state the merge-into-consumer clause"
 wsec 'beginning `Observable-slice exemption:`' || fail "R9: section does not state the Observable-slice exemption: Notes line"

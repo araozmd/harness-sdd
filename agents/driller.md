@@ -127,7 +127,7 @@ have. `max_requirements` remains the size proxy; this is the shape rule beside i
 nothing about count.
 
 **Every feature you seed names at least one behavior observable at the product boundary** — an
-HTTP response, a CLI invocation, a UI interaction, a file output or an exit code. A feature
+HTTP response, a CLI invocation, a UI interaction, a file a user or client reads or an exit code. A feature
 whose outcome is only a table, a module, an interface, a migration, a schema or a config key
 is not a slice: nothing can be exercised until some later feature lands.
 
