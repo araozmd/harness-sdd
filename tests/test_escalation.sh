@@ -1708,4 +1708,62 @@ F182_R11_installer_summary_line() {
 }
 F182_R11_installer_summary_line
 
+# ── F182-R12: VERSION ↔ CHANGELOG, and the installed docs state the per-front-end rule ──
+# Every doc anchor AND every negative runs on the FOLDED file: the source wraps the old
+# phrases across lines ("disables escalation\neverywhere"), so an unfolded negative would
+# pass vacuously. No version literal is asserted — VERSION is read, never frozen.
+F182_R12_docs_version_changelog() {
+  _v="$(cat "$SRC/VERSION")"
+  [ -n "$_v" ] || fail "F182-R12 setup: VERSION is empty"
+  _top="$(grep -m 1 '^## \[' "$SRC/CHANGELOG.md")"
+  case "$_top" in "## [$_v]"*) : ;; *) fail "F182-R12: the newest CHANGELOG heading '$_top' is not VERSION $_v" ;; esac
+  # Historical anchor: SOME release section names the feature, the flag and the tool — so this
+  # row survives later releases being prepended above it.
+  awk '/^## \[/ { if (b ~ /E99-F182/ && b ~ /--frontend/ && b ~ /tools\/host-frontend\.sh/) f = 1; b = ""; next }
+       { b = b "\n" $0 }
+       END { if (b ~ /E99-F182/ && b ~ /--frontend/ && b ~ /tools\/host-frontend\.sh/) f = 1; exit !f }' "$SRC/CHANGELOG.md" \
+    || fail "F182-R12: no CHANGELOG section names E99-F182, --frontend and tools/host-frontend.sh together"
+
+  _t="$T/f182-r12"; install_to "$_t" "$T/ch-f182-r12" --agents=claude
+  _wf="$(tr '\n' ' ' < "$_t/.harness/docs/WORKFLOW.md" | tr -s ' ')"
+  _in="$(tr '\n' ' ' < "$_t/.harness/docs/INSTALL.md" | tr -s ' ')"
+  _rd="$(tr '\n' ' ' < "$SRC/README.md" | tr -s ' ')"
+  [ -n "$_wf" ] && [ -n "$_in" ] || fail "F182-R12 setup: the installed WORKFLOW.md / INSTALL.md is missing"
+
+  printf '%s' "$_wf" | grep -qE "reads that front-end's own line[^.]{0,40}ADR-0011" \
+    || fail "F182-R12: installed WORKFLOW.md does not say builder-role.sh reads that front-end's own line (ADR-0011)"
+  printf '%s' "$_wf" | grep -qE 'empty key[^.]{0,120}falls back to the first line' \
+    || fail "F182-R12: installed WORKFLOW.md does not say an empty key falls back to the first line"
+  # Literal, not `[^.]{0,N}`: the sentence names `.harness/.escalation-arming`, whose dots a
+  # dot-free gap could never cross.
+  printf '%s' "$_wf" | grep -qF "an \`armed\` first line in \`.harness/.escalation-arming\` — or, when the host is known, the host's own \`<key>=raise\` line (ADR-0011). Either one alone routes to \`builder\`." \
+    || fail "F182-R12: installed WORKFLOW.md's two-yeses bullet does not name the host's own <key>=raise line"
+  printf '%s' "$_wf" | grep -qE 'A .blocked. first line still lets a host whose own line is .raise. escalate' \
+    || fail "F182-R12: installed WORKFLOW.md does not say a blocked first line still lets a raise host escalate"
+  printf '%s' "$_wf" | grep -qF 'disables escalation everywhere' \
+    && fail "F182-R12: installed WORKFLOW.md still says one front-end disables escalation everywhere"
+  printf '%s' "$_wf" | grep -qF 'verdict **UNARMED** even when Claude alone is armed' \
+    && fail "F182-R12: installed WORKFLOW.md still says the combined verdict is UNARMED even when Claude alone is armed"
+  printf '%s' "$_wf" | grep -qE 'armed. verdict in .\.harness/\.escalation-arming.\. Either one alone' \
+    && fail "F182-R12: installed WORKFLOW.md's two-yeses bullet still names only an armed verdict"
+
+  printf '%s' "$_in" | grep -qE "host's own[^.]{0,20}<key>=raise[^.]{0,80}ADR-0011" \
+    || fail "F182-R12: installed INSTALL.md does not say the host's own <key>=raise line fires escalation (ADR-0011)"
+  printf '%s' "$_in" | grep -qE 'an empty key falls back to the first line' \
+    || fail "F182-R12: installed INSTALL.md does not say an empty key falls back to the first line"
+  printf '%s' "$_in" | grep -qE 'codex=raise. line[^.]{0,60}ADR-0011' \
+    || fail "F182-R12: installed INSTALL.md's E99-F163 paragraph does not name the codex=raise line (ADR-0011)"
+  printf '%s' "$_in" | grep -qF 'Escalation fires only while that file reads' \
+    && fail "F182-R12: installed INSTALL.md still says escalation fires only while the file reads armed"
+  printf '%s' "$_in" | grep -qF 'an `armed` verdict even when neither tier' \
+    && fail "F182-R12: installed INSTALL.md's E99-F163 paragraph still requires an armed verdict"
+
+  printf '%s' "$_rd" | grep -qF 'combined source escalation is **UNARMED**' \
+    && fail "F182-R12: README.md still says combined source escalation is UNARMED"
+  printf '%s' "$_rd" | grep -qE 'Claude Code sessions[^.]{0,60}claude=raise' \
+    || fail "F182-R12: README.md does not say Claude Code sessions escalate on claude=raise"
+  pass "VERSION matches the newest CHANGELOG section; installed docs and README state the per-front-end rule (F182-R12)"
+}
+F182_R12_docs_version_changelog
+
 echo "test_escalation.sh: all cases passed"

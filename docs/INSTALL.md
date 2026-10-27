@@ -1058,8 +1058,10 @@ Two things worth knowing:
   exactly when the build is struggling. So `harness-install.sh` asks its own resolvers what
   `builder` and `builder-heavy` resolve to — the whole resolved stamp, `model` plus, on
   Codex, `model_reasoning_effort`, and on pi, `thinking` — on every front-end it stamps, and records the comparison
-  in `.harness/.escalation-arming`. Escalation fires only while that file reads `armed`;
-  otherwise the harness declines and names the front-end to fix. **Re-run the installer
+  in `.harness/.escalation-arming`. Escalation fires while that file's first line reads
+  `armed`, or — when the Orchestrator's host is known — while the host's own `<key>=raise`
+  line is present (ADR-0011); an empty key falls back to the first line. Otherwise the
+  harness declines and names the front-end to fix. **Re-run the installer
   after changing a tier or a pin** — the verdict is computed at install time.
   What it does **not** check: that the **stamp** is *stronger*, or that it exists. The
   harness has no model list and invents none. See `docs/WORKFLOW.md` → "Which Builder runs".
@@ -1153,8 +1155,8 @@ effort values are ever written.
 **Escalation counts it (E99-F163).** `escalation_verdict` compares the whole resolved stamp
 — `model` plus, on Codex, `model_reasoning_effort` — so a Codex operator who sets
 `builder: standard` / `builder-heavy: reasoning` gets genuinely differentiated roles on disk
-(`medium` vs `high` effort) **and** an `armed` verdict even when neither tier carries a
-`model` pin: an effort difference alone is enough. A distinct `model` pin is needed only when
+(`medium` vs `high` effort) **and** a `codex=raise` line — an `armed` verdict for a Codex
+session (ADR-0011) — even when neither tier carries a `model` pin: an effort difference alone is enough. A distinct `model` pin is needed only when
 you also want distinct `model` ids, not to arm. Because the comparison is over the whole
 stamp, a role that resolves to nothing on either axis (`inherit` on both, or a tier that
 stamps no model and no effort) still reads `neither`/`none` as before, so the downgrade guard

@@ -4,6 +4,37 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.105.0] — 2026-10-27
+
+### Added — per-front-end escalation gate (E99-F182, ADR-0011)
+- `tools/builder-role.sh` accepts `--frontend <key>`. With a key, the arming gate opens iff
+  `.harness/.escalation-arming`'s first line is exactly `armed` or `blocked` **and** the first
+  line starting `<key>=` is exactly `<key>=raise` — so a Claude Code session in this repo
+  (`blocked` / `claude=raise` / `codex=neither` / …) now escalates, while its Codex, OpenCode
+  and pi sessions do not, and each path says why. A non-`raise` line names `<key>=<verdict>`;
+  a key with no line says `no verdict is recorded for front-end '<key>'` and never falls back
+  to the first line. Matching is whole-key and raw (no whitespace or `\r` normalization),
+  first line wins on a duplicate, and absent / symlinked / unreadable / garbage files stay
+  shut on every path. A value that is not `^[a-z][a-z0-9-]*$` is a usage error (exit 4).
+- **An empty key is the old rule.** No `--frontend`, or `--frontend ''`, decides from the
+  first line byte for byte as before, so every existing caller and every `armed` target is
+  unchanged.
+- New `tools/host-frontend.sh` (installed executable) prints the front-end this session runs
+  inside — from `HARNESS_HOST_AGENT` when it is exactly one marker-row key, else from the
+  session markers — or nothing when there is no marker or two front-ends' markers
+  (`ambiguous` on stderr). Always exit 0, no files. Its `HOST_MARKERS` rows are a
+  parity-tested copy of the installer's.
+- `agents/orchestrator.md` → *Which Builder*: the call passes
+  `--frontend "$(sh "$HARNESS_DIR/tools/host-frontend.sh")"`; the Orchestrator never types a key.
+- `init.sh` prints `ℹ️  escalation: ARMED per front-end on: <keys> … not on: <keys>` instead of
+  the DISARMED warning when the first line is `blocked` but some line is `raise` (three
+  `LC_ALL=C` awk reads — no `producer | head` under `pipefail`, no `eval`, keys filtered). The
+  installer's summary names the same split. **The arming file format is unchanged.**
+- `docs/WORKFLOW.md`, `docs/INSTALL.md` and `README.md` no longer say one misconfigured
+  front-end disables escalation everywhere. New suite `tests/test_host_frontend.sh`; new
+  `F182-R*` cases in `tests/test_escalation.sh`, `tests/test_self_mode.sh` and
+  `tests/test_install.sh`.
+
 ## [0.104.1] — 2026-10-27
 
 ### Fixed — board writes and the init.sh gate no longer pay ~0.7 s for an unused grammar
