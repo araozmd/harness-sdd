@@ -714,6 +714,22 @@ grep -qxF '⚠️  plan-cite: E01-F02 check did not run: no *.plan.md in specs/e
   || fail "R7_init_no_plan_did_not_run: a feature with no plan is not reported ($(both))"
 pass "R7_init_no_plan_did_not_run"
 
+# A warn-only lint never fails the gate, however much it prints: 2000 generated uncited rows
+# (~180 KB of findings, past any pipe buffer) must not let a `printf | head` pipeline take
+# SIGPIPE under `set -euo pipefail` and kill init.sh with 141 (review round 1, F1). The
+# fixture is generated here, never committed.
+init_case E01-F01 spec-ready true F01-good
+awk 'BEGIN { for (i = 1; i <= 2000; i++) printf "| `big%d.py` | an uncited generated row |\n", i }' > "$T/big.md"
+insert_before "$I/specs/epics/E01-x/F01-good/E01-F01.plan.md" '## Deferred' "$T/big.md"
+[ "$(grep -c '^| `big[0-9]*\.py` |' "$I/specs/epics/E01-x/F01-good/E01-F01.plan.md")" -eq 2000 ] \
+  || fail "R7_init_large_output_never_fails: precondition: the 2000 generated rows were not inserted"
+init_run; init_ok R7_init_large_output_never_fails
+grep -qF '⚠️  plan-cite: E01-F01 uncited-row specs/epics/E01-x/F01-good/E01-F01.plan.md:' "$T/out" \
+  || fail "R7_init_large_output_never_fails: no warn line naming the first uncited row ($(both))"
+grep -qF ' Files to change (+1999 more; warn-only — Reviewer check 8 rejects)' "$T/out" \
+  || fail "R7_init_large_output_never_fails: the warn line does not count the other 1999 findings ($(both))"
+pass "R7_init_large_output_never_fails"
+
 # The lint resolves ADRs against the harness specs/ tree (--specs-dir specs), not against the
 # nearest directory named specs above the plan.
 init_case E01-F01 spec-ready true specs/F01-good; rm "$I/specs/adr/0003-deferred-no-trigger.md"

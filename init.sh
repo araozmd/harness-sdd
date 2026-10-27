@@ -448,9 +448,14 @@ fi
 #     finding WARNS and NEVER fails the gate — the Reviewer's check 8 owns the verdict, as
 #     2c leaves the ADR-citation verdict to the Reviewer. Exit 2 from the tool is "the check
 #     did not run", reported as such, never as clean. The board is read, never written.
-#     Under `set -euo pipefail` every call that may exit non-zero is captured with `|| rc=$?`.
+#     Under `set -euo pipefail` every call that may exit non-zero is captured with `|| rc=$?`,
+#     and a first/last line is taken by parameter expansion, never `printf | head`: a consumer
+#     that exits early SIGPIPEs the writer once the output passes the pipe buffer, and the
+#     pipeline's 141 would kill this warn-only block (E36-F04 review round 1, F1).
 if [ -f tools/plan-cite-check.py ] && [ -f state/tasks.json ]; then
   PC_WARN=0; PC_PLANS=0
+  pc_nl='
+'
   pc_rc=0
   PC_FEATURES="$(python3 - state/tasks.json <<'PY' 2>&1
 import json, sys
@@ -466,7 +471,7 @@ for epic in board.get("epics", []) if isinstance(board, dict) else []:
 PY
 )" || pc_rc=$?
   if [ "$pc_rc" -ne 0 ]; then
-    echo "⚠️  plan-cite: board read failed: $(printf '%s\n' "$PC_FEATURES" | tail -n 1) (warn-only)"
+    echo "⚠️  plan-cite: board read failed: ${PC_FEATURES##*"$pc_nl"} (warn-only)"
     PC_WARN=$((PC_WARN+1)); PC_FEATURES=""
   fi
   while IFS="$(printf '\t')" read -r pc_id pc_dir; do
@@ -479,11 +484,12 @@ PY
       pc_out="$(python3 tools/plan-cite-check.py "$pc_plan" --spec "${pc_plan%.plan.md}.spec.md" --specs-dir specs 2>&1)" || pc_rc=$?
       case "$pc_rc" in
         0) ;;
-        1) pc_n="$(printf '%s\n' "$pc_out" | grep -c '^plan-cite-check: ' || true)"
-           pc_first="$(printf '%s\n' "$pc_out" | head -n 1 | sed 's/^plan-cite-check: //')"
+        1) pc_n="$(printf '%s\n' "$pc_out" | grep -c '^plan-cite-check: ' || true)"  # grep reads all: no SIGPIPE
+           pc_first="${pc_out%%"$pc_nl"*}"; pc_first="${pc_first#plan-cite-check: }"
            echo "⚠️  plan-cite: $pc_id $pc_first (+$((pc_n-2)) more; warn-only — Reviewer check 8 rejects)"
            PC_WARN=$((PC_WARN+1)) ;;
-        *) echo "⚠️  plan-cite: $pc_id check did not run: $(printf '%s\n' "$pc_out" | head -n 1 | sed 's/^plan-cite-check: //') (warn-only)"
+        *) pc_first="${pc_out%%"$pc_nl"*}"; pc_first="${pc_first#plan-cite-check: }"
+           echo "⚠️  plan-cite: $pc_id check did not run: $pc_first (warn-only)"
            PC_WARN=$((PC_WARN+1)) ;;
       esac
     done
@@ -507,7 +513,8 @@ PCEOF
 $pc_out
 PCEOF
        ;;
-    *) echo "⚠️  plan-cite: sweep did not run: $(printf '%s\n' "$pc_out" | head -n 1 | sed 's/^plan-cite-check: //') (warn-only)"
+    *) pc_first="${pc_out%%"$pc_nl"*}"; pc_first="${pc_first#plan-cite-check: }"
+       echo "⚠️  plan-cite: sweep did not run: $pc_first (warn-only)"
        PC_WARN=$((PC_WARN+1)) ;;
   esac
   if [ "$PC_WARN" -eq 0 ]; then
