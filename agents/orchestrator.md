@@ -320,6 +320,27 @@ A wave worker is the targeted worker above with these differences, and only thes
   verdict (`pr-opened`, `runner-busy`, `interrupted` or `stopped: <reason>`) with the feature's
   last status, its branch, worktree, PR URL (or `-`) and transition records.
 
+### Test-runner lock
+
+Workers share one machine and one `tools/run-tests.sh` slot (one run per machine). A worker
+runs the full `verification.test_command` at most once per role phase, as a gate, and touched
+suites while iterating (`agents/builder.md` step 5). When the runner refuses with exit 5, the
+worker records `runner-busy`, does not re-invoke the runner, leaves the feature at its current
+status (the Reviewer never approves without a green gate) and returns. It never polls and
+never waits for the slot. Nothing here raises `--jobs`; the runner's cap stands.
+
+A worker whose sub-agent or tool call was cancelled or killed, or that returned without a
+verdict, is `interrupted`: a stop, never relaunched, never queued. A runner exit of 1 is a
+red suite and is never reclassified as a signal — the runner itself exits 1 on HUP/INT/TERM,
+so the distinction is observed at the worker boundary, not from the exit code.
+
+### W6 — exclusive pass
+
+After the parallel wave settles, the coordinator re-spawns each `runner-busy` worker one at a
+time in selection order (P6's guarded exclusive wave shape), with the same inputs; the worker
+resumes from its worktree board's status. This pass runs at most once per feature: a second
+`runner-busy` is the terminal verdict `stopped: runner-busy twice`.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is

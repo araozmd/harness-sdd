@@ -394,6 +394,40 @@ test_worker_identity_and_harness_dir() {
   end
 }
 
+# ── R8 — test-runner lock behaviour ────────────────────────────────────────────────────
+test_runner_lock_contract() {
+  begin test_runner_lock_contract
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'A worker runs the full `verification.test_command` at most once per role phase, as a gate, and touched suites while iterating'
+  has "wave section" "$_w" 'When the runner refuses with exit 5, the worker records `runner-busy`, does not re-invoke the runner, leaves the feature at its current status (the Reviewer never approves without a green gate) and returns.'
+  has "wave section" "$_w" 'Nothing here raises `--jobs`'
+  has "wave section" "$_w" 'A worker whose sub-agent or tool call was cancelled or killed, or that returned without a verdict, is `interrupted`: a stop, never relaunched, never queued.'
+  has "wave section" "$_w" 'A runner exit of 1 is a red suite and is never reclassified as a signal'
+  has "wave section" "$_w" 'the distinction is observed at the worker boundary, not from the exit code.'
+  has "wave section" "$_w" 'After the parallel wave settles, the coordinator re-spawns each `runner-busy` worker one at a time in selection order'
+  has "wave section" "$_w" 'with the same inputs; the worker resumes from its worktree board'"'"'s status.'
+  has "wave section" "$_w" 'This pass runs at most once per feature: a second `runner-busy` is the terminal verdict `stopped: runner-busy twice`.'
+  _d=$(subsection "$WORKFLOW" "$WF_H")
+  has "WORKFLOW wave subsection" "$_d" 'A worker whose full test gate is refused (exit 5) returns `runner-busy` and is re-run once, alone, after the wave settles; a cancelled or killed worker is `interrupted` and is never relaunched.'
+
+  # Executed: a live-pid lock in a PRIVATE TMPDIR makes the runner refuse with exit 5
+  # before any suite runs. The probe suite is a dummy (never this suite: a broken lock
+  # must not recurse into it), and the nested marker is unset for this one call.
+  _l="$TMP/lock"
+  mkdir -p "$_l"
+  printf '#!/bin/sh\necho "PROBE-SUITE-RAN"\n' >"$_l/test_lock_probe.sh"
+  printf '%s\n' "$$" >"$_l/harness-run-tests.lock"
+  _rc=0
+  env -u HARNESS_RUN_TESTS_NESTED TMPDIR="$_l" sh "$ROOT/tools/run-tests.sh" "$_l/test_lock_probe.sh" \
+    >"$_l/out" 2>"$_l/err" || _rc=$?
+  [ "$_rc" = 5 ] || fail "runner with a live-pid lock exited $_rc, not 5"
+  grep -qF 'another run-tests.sh' "$_l/err" || fail "runner refusal does not name another run-tests.sh: $(cat "$_l/err")"
+  grep -qF 'PROBE-SUITE-RAN' "$_l/out" "$_l/err" && fail "the runner ran a suite despite the lock"
+  [ "$(cat "$_l/harness-run-tests.lock")" = "$$" ] || fail "the refused runner disturbed the holder's lock"
+  rm -f "$_l/harness-run-tests.lock"
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
@@ -402,6 +436,7 @@ test_eligibility_order_and_cap
 test_slug_rule_prose
 test_manifest_contract
 test_worker_identity_and_harness_dir
+test_runner_lock_contract
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }

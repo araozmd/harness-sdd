@@ -427,6 +427,9 @@ targeted worker (`agents/orchestrator.md` → "Wave coordinator mode (/sdd-next 
 - **Manifest.** After provisioning and before any worker starts, the coordinator writes the
   manifest `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` with every record of the wave and,
   for each provisioned feature, its branch and worktree.
+- **Machine load.** Workers share one `tools/run-tests.sh` slot. A worker whose full test
+  gate is refused (exit 5) returns `runner-busy` and is re-run once, alone, after the wave
+  settles; a cancelled or killed worker is `interrupted` and is never relaunched.
 
 ## Diagnosing blocked selection
 
