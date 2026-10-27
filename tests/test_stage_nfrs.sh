@@ -2,7 +2,8 @@
 # test_stage_nfrs.sh — E36-F03: product stage and deferred-decision ADRs with triggers;
 # sticky vs bolt-on NFRs (ADR-0009 decisions 1-3).
 #
-# Pins SHAPES and PROSE, not a lint (enforcement is E36-F04). Every prose contract is a
+# Pins SHAPES and PROSE, not a lint (enforced by E36-F04's `tools/plan-cite-check.py`,
+# whose behavior tests/test_plan_cite.sh pins). Every prose contract is a
 # WHOLE-FILE grep on the INSTALLED copy under $I — the installed body is a cp -R of the
 # source, so the installed grep proves the shipped content. No heading slicer is used, so
 # nothing here is fence-blind. R3 reads this repo's own specs/product.md (project-owned,
@@ -121,7 +122,7 @@ R6_plan_template_deferred() {
 }
 R6_plan_template_deferred
 
-# R11 — SPEC-FORMAT states the citation grammar E36-F04 will lint. The section is bounded
+# R11 — SPEC-FORMAT states the citation grammar E36-F04's tools/plan-cite-check.py lints. The section is bounded
 # by LINE NUMBERS (its own heading .. the known next heading), not by a `^## ` slicer: its
 # fenced `## Deferred` example would truncate a fence-blind slicer.
 R11_spec_format_grammar_section() {
@@ -152,10 +153,13 @@ R11_spec_format_grammar_section() {
   for _k in '(regex `^- \*\*Status:\*\* deferred`)' '(regex `^- \*\*Trigger:\*\* \S`)'; do
     fold "$T/r11.sec" | grep -qF -- "$_k" || fail "R11: the grammar section does not state the exact header regex '$_k'"
   done
-  fold "$T/r11.sec" | grep -qE 'E36-F04`[^.]{0,20}will turn this grammar into an exit code[^.]{0,200}not yet enforced' \
-    || fail "R11: the grammar section does not say E36-F04 WILL turn the grammar into an exit code (not yet enforced)"
-  fold "$T/r11.sec" | grep -qE 'E36-F04[^.]{0,80}lint' \
-    || fail "R11: the grammar section does not name E36-F04 as the lint that enforces it"
+  # E36-F04 shipped: the enforcement sentence is present tense, from its subject (the tool)
+  # through its verb to its object, and the section no longer says "not yet enforced".
+  fold "$T/r11.sec" | grep -qF '`tools/plan-cite-check.py <plan> --spec <spec>` (E36-F04) turns this grammar into an exit code (0 ok, 1 violation, 2 usage/input error)' \
+    || fail "R11: the grammar section does not say tools/plan-cite-check.py (E36-F04) turns the grammar into an exit code 0/1/2"
+  fold "$T/r11.sec" | grep -qF "the Reviewer's check 8 rejects on exit 1. This section is the schema it lints." \
+    || fail "R11: the grammar section does not say the Reviewer's check 8 rejects on exit 1 and that the section is the schema the tool lints"
+  grep -qF 'not yet enforced' "$T/r11.sec" && fail "R11: the grammar section still says 'not yet enforced'"
   # The `## Deferred` example heading sits INSIDE a fenced block (``` toggles).
   awk 'index($0,"```")==1{fz=!fz; next} index($0,"## Deferred")==1 && fz {ok=1} END{exit !ok}' "$T/r11.sec" \
     || fail "R11: the grammar section's '## Deferred' example is not inside a fenced code block"
@@ -189,9 +193,12 @@ R7_architect_stage_section() {
   done
   _f="$(fold "$T/r7.sec")"
   printf '%s\n' "$_f" | grep -qiE 'absent or unrecognized[^.]{0,40}production' || fail "R7: the Stage section does not say an absent OR unrecognized stage means production"
-  # E36-F04 is not shipped: the prose must not claim an enforcement that does not exist yet.
-  printf '%s\n' "$_f" | grep -qE 'E36-F04`[^.]{0,20}will enforce it[^.]{0,6}not yet enforced' \
-    || fail "R7: the Stage section does not say E36-F04 WILL enforce the grammar (not yet enforced)"
+  # E36-F04 shipped: the tool enforces the grammar and the Architect runs it before hand-off.
+  printf '%s\n' "$_f" | grep -qF '`tools/plan-cite-check.py` enforces it (E36-F04).' \
+    || fail "R7: the Stage section does not say tools/plan-cite-check.py enforces the grammar (E36-F04)"
+  printf '%s\n' "$_f" | grep -qF 'Run `python3 "$HARNESS_DIR/tools/plan-cite-check.py" <feature>.plan.md --spec <feature>.spec.md` before hand-off; it must exit 0' \
+    || fail "R7: the Stage section does not tell the Architect to run the tool before hand-off and that it must exit 0"
+  grep -qF 'not yet enforced' "$T/r7.sec" && fail "R7: the Stage section still says 'not yet enforced'"
   printf '%s\n' "$_f" | grep -qiE 'bolt-on[^.]{0,80}without[^.]{0,40}R-id' || fail "R7: the Stage section does not say never add a bolt-on without an R-id"
   # The discovery/pilot branch and its citation target are single-sentence anchors: both
   # tokens also occur elsewhere in the section, so a bare per-token grep has a second producer.
@@ -286,6 +293,11 @@ R10_workflow_stage_section() {
   _f="$(fold "$T/r10.sec")"
   printf '%s\n' "$_f" | grep -qiE 'absent[^.]{0,60}production' || fail "R10: the WORKFLOW Stage section does not say absent means production"
   printf '%s\n' "$_f" | grep -qE '[Ee]nforcement[^.]{0,160}E36-F04' || fail "R10: the WORKFLOW Stage section does not name E36-F04 as the enforcement"
+  printf '%s\n' "$_f" | grep -qF 'Enforcement is `E36-F04`: `tools/plan-cite-check.py` turns the grammar into an exit code' \
+    || fail "R10: the WORKFLOW Stage section does not say enforcement IS E36-F04's tools/plan-cite-check.py"
+  printf '%s\n' "$_f" | grep -qF 'and the Reviewer rejects on exit 1 (check 8); a plan written before the tool merged is flagged, not rejected.' \
+    || fail "R10: the WORKFLOW Stage section does not say the Reviewer rejects on exit 1 (check 8) and grandfathers older plans"
+  grep -qF 'not yet enforced' "$T/r10.sec" && fail "R10: the WORKFLOW Stage section still says 'not yet enforced'"
   pass "WORKFLOW Stage section: stage field + default, sticky/bolt-on table, deferred-ADR and ## Deferred forms, enforcement is E36-F04 (R10) [R10_workflow_stage_section]"
 }
 R10_workflow_stage_section

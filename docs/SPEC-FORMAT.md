@@ -159,8 +159,9 @@ or, when nothing is deferred:
 Deferred: none — stage is production
 ```
 
-`E36-F04` will turn this grammar into an exit code (the plan-row citation lint, the trigger
-sweep, the Reviewer gate) — not yet enforced; this section is the schema it will lint.
+`tools/plan-cite-check.py <plan> --spec <spec>` (E36-F04) turns this grammar into an exit code
+(0 ok, 1 violation, 2 usage/input error); `--sweep <specs-dir>` is the trigger sweep `init.sh`
+runs warn-only, and the Reviewer's check 8 rejects on exit 1. This section is the schema it lints.
 
 ## Architecture alignment — cite the ADRs you touch
 

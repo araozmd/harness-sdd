@@ -724,6 +724,41 @@ has R9_doc_critic_section "$T/dc.txt" 'These findings are advisory like every ot
 grep -qF 'never block' "$_dc" || fail "R9_doc_critic_section: the role's never-block rule is gone"
 pass "R9_doc_critic_section"
 
-# @@R10@@
+# ── R10: the template's Data-model R-id column; the three enforcement sentences, present tense ─
+slice "$I/specs/_templates/feature.plan.md" '## Data model' > "$T/tdm.txt"
+grep -qxF '| Entity | Field | Type | Notes | R-id |' "$T/tdm.txt" \
+  || fail "R10_template_data_model_rid_column: the installed template's ## Data model header has no R-id column"
+grep -qxF '|---|---|---|---|---|' "$T/tdm.txt" || fail "R10_template_data_model_rid_column: the separator does not have five cells"
+grep -qxF '| <Table> | <field> | <type> | <constraint> | R# |' "$T/tdm.txt" \
+  || fail "R10_template_data_model_rid_column: the placeholder row does not end in an R# cell"
+grep -qxF '| Entity | Field | Type | Notes |' "$I/specs/_templates/feature.plan.md" \
+  && fail "R10_template_data_model_rid_column: the four-cell header survives"
+pass "R10_template_data_model_rid_column"
+
+# span <file> <start-heading> <end-heading> <out> — by line number (fence-proof), as
+# tests/test_stage_nfrs.sh bounds the same sections.
+lineno() { awk -v s="$2" 'index($0,s)==1{print NR; f=1; exit} END{if(!f) print 0}' "$1"; }
+span() {
+  _sa="$(lineno "$1" "$2")"; _sb="$(lineno "$1" "$3")"
+  [ "$_sa" -gt 0 ] && [ "$_sb" -gt "$_sa" ] || fail "span: '$2' .. '$3' not found in order in $1"
+  sed -n "${_sa},${_sb}p" "$1" > "$4"
+}
+span "$I/agents/architect.md" '## Stage and NFRs (ADR-0009)' '## Principles' "$T/a.sec"
+has R10_prose_present_tense "$T/a.sec" '`tools/plan-cite-check.py` enforces it (E36-F04).'
+has R10_prose_present_tense "$T/a.sec" 'Run `python3 "$HARNESS_DIR/tools/plan-cite-check.py" <feature>.plan.md --spec <feature>.spec.md` before hand-off; it must exit 0 — the Reviewer rejects on exit 1 (check 8).'
+grep -qF 'not yet enforced' "$T/a.sec" && fail "R10_prose_present_tense: architect.md's Stage section still says 'not yet enforced'"
+span "$I/docs/SPEC-FORMAT.md" '## Plan rows cite an R-id or an ADR' '## Architecture alignment' "$T/s.sec"
+has R10_prose_present_tense "$T/s.sec" '`tools/plan-cite-check.py <plan> --spec <spec>` (E36-F04) turns this grammar into an exit code (0 ok, 1 violation, 2 usage/input error); `--sweep <specs-dir>` is the trigger sweep `init.sh` runs warn-only'
+has R10_prose_present_tense "$T/s.sec" "the Reviewer's check 8 rejects on exit 1. This section is the schema it lints."
+grep -qF 'not yet enforced' "$T/s.sec" && fail "R10_prose_present_tense: SPEC-FORMAT's grammar section still says 'not yet enforced'"
+span "$I/docs/WORKFLOW.md" '## Stage and NFRs (ADR-0009)' '## Doc-critic checkpoints' "$T/w.sec"
+has R10_prose_present_tense "$T/w.sec" 'Enforcement is `E36-F04`: `tools/plan-cite-check.py` turns the grammar into an exit code, `init.sh` runs it and the deferred-ADR trigger sweep warn-only at session start, the doc-critic reports it at the `feature-spec` checkpoint, and the Reviewer rejects on exit 1 (check 8)'
+grep -qF 'not yet enforced' "$T/w.sec" && fail "R10_prose_present_tense: WORKFLOW's Stage section still says 'not yet enforced'"
+grep -qF 'This section declares and records only.' "$T/w.sec" && fail "R10_prose_present_tense: WORKFLOW still says the section only declares and records"
+grep -qF 'enforces it (E36-F04)' "$ROOT/tests/test_stage_nfrs.sh" || fail "R10_prose_present_tense: test_stage_nfrs.sh R7 does not pin the present-tense sentence"
+grep -qF 'will enforce it' "$ROOT/tests/test_stage_nfrs.sh" && fail "R10_prose_present_tense: test_stage_nfrs.sh still pins the future tense"
+pass "R10_prose_present_tense"
+
+# @@R11@@
 
 echo "all plan-cite checks passed"
