@@ -57,6 +57,43 @@ PARK_GATES = {"owner", "merge"}   # `merge` (E99-F130): approved, PR open, await
 LANDED_VERIFIED = {"ancestor", "unchecked", "declared"}
 
 
+def _schema_uses_format(node):
+    """True iff the schema carries a `format` keyword anywhere (format checking needs it)."""
+    if isinstance(node, dict):
+        if "format" in node:
+            return True
+        return any(_schema_uses_format(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_schema_uses_format(v) for v in node)
+    return False
+
+
+# jsonschema's format module imports the optional `rfc3987_syntax` package at import time,
+# and that package compiles a lark grammar for IRI formats: ~0.65 s of the ~1.2 s every
+# `tasks-lock.py` write and every `init.sh` gate paid. Draft7Validator here runs with NO
+# format checker, and the board schema has no `format` keyword, so that grammar is never
+# used. While the schema needs no format checking, the package is hidden from jsonschema's
+# import only (jsonschema treats it as absent, exactly as on a machine without it) and the
+# sentinel is removed afterwards so nothing else in the process is affected.
+_SLOW_FORMAT_DEPS = ("rfc3987_syntax",)
+
+
+def _import_jsonschema(schema):
+    if "jsonschema" in sys.modules or _schema_uses_format(schema):
+        import jsonschema  # type: ignore
+        return jsonschema
+    hidden = [m for m in _SLOW_FORMAT_DEPS if m not in sys.modules]
+    for m in hidden:
+        sys.modules[m] = None  # import of a None entry raises ImportError
+    try:
+        import jsonschema  # type: ignore
+    finally:
+        for m in hidden:
+            if sys.modules.get(m, 0) is None:
+                del sys.modules[m]
+    return jsonschema
+
+
 def validate(data, schema):
     """Validate `data` against `schema`. Return a list of error strings (empty = valid).
 
@@ -64,7 +101,7 @@ def validate(data, schema):
     complete zero-dependency structural check. Same acceptance surface either way.
     """
     try:
-        import jsonschema  # type: ignore
+        jsonschema = _import_jsonschema(schema)
     except ImportError:
         return _fallback_errors(data) + duplicate_id_errors(data)
 
