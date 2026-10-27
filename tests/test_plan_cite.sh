@@ -801,6 +801,45 @@ _mode="$(git -C "$ROOT" ls-files -s tools/plan-cite-check.py | cut -c1-6)"
 [ "$_mode" = "100755" ] || fail "R11_source_mode_100755: git mode of tools/plan-cite-check.py is '$_mode'"
 pass "R11_source_mode_100755"
 
+# ── grammar in step: the tool's patterns ARE the bytes docs/SPEC-FORMAT.md states ────────
+# The grammar section (its heading .. `## Architecture alignment`, by line number) is the
+# source of truth. Each string is extracted from the sentence that states it and compared
+# with the tool's compiled pattern, so an edit to EITHER side reds this row — the
+# validator-vs-schema divergence the harness has paid for (lessons 2026-09-05, 2026-09-16).
+python3 - "$TOOL" "$ROOT/docs/SPEC-FORMAT.md" <<'PY' || fail "R1_grammar_in_step_with_spec_format: see the message above"
+import importlib.util, re, sys
+spec = importlib.util.spec_from_file_location("plan_cite_check", sys.argv[1])
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+lines = open(sys.argv[2], encoding="utf-8").read().split("\n")
+start = next(i for i, l in enumerate(lines) if l.startswith("## Plan rows cite an R-id or an ADR"))
+end = next(i for i, l in enumerate(lines) if i > start and l.startswith("## Architecture alignment"))
+text = " ".join(" ".join(lines[start:end]).split())  # folded: one space between words
+def grab(rx, what):
+    m = re.search(rx, text)
+    if not m:
+        sys.exit("SPEC-FORMAT's grammar section no longer states %s (pattern %s)" % (what, rx))
+    return m.groups()
+checks = []
+(stage,) = grab(r"matching `(\^stage: [^`]+)`", "the stage line")
+checks.append(("STAGE_RE", mod.STAGE_RE.pattern, stage))
+status, trigger = grab(r"\(regex `([^`]+)`\) \*\*and\*\* a line `- \*\*Trigger:\*\*` followed by a non-empty observable condition \(regex `([^`]+)`\)", "the deferred-ADR header regexes")
+checks.append(("STATUS_DEFERRED_RE", mod.STATUS_DEFERRED_RE.pattern, status))
+checks.append(("TRIGGER_RE", mod.TRIGGER_RE.pattern, trigger))
+heads = grab(r"under a `\.plan\.md`'s `## ([^`]+)`, `## ([^`]+)`, `## ([^`]+)` and `## ([^`]+)` headings carries an `([^`]+)` token or an `([^`]+)` token", "the plan-row rule")
+checks.append(("CHECKED_RE", mod.CHECKED_RE.pattern, r"^## (" + "|".join(heads[:4]) + r")(\s|$)"))
+checks.append(("RID_TOKEN_RE", mod.RID_TOKEN_RE.pattern, r"(?<![A-Za-z0-9])" + heads[4]))
+checks.append(("ADR_TOKEN_RE", mod.ADR_TOKEN_RE.pattern, heads[5]))
+(bolt,) = grab(r"a table headed `(\|[^`]+\|)`", "the Bolt-on table header")
+checks.append(("BOLT_ON_HEADER", "| " + " | ".join(mod.BOLT_ON_HEADER) + " |", bolt))
+(none,) = grab(r"the single line `(Deferred: none — )<why>`", "the none line")
+checks.append(("NONE_LINE_RE", mod.NONE_LINE_RE.pattern, "^" + none + r"\S"))
+bad = [(n, got, want) for n, got, want in checks if got != want]
+for n, got, want in bad:
+    sys.stderr.write("  %s is %r but SPEC-FORMAT states %r\n" % (n, got, want))
+sys.exit(1 if bad else 0)
+PY
+pass "R1_grammar_in_step_with_spec_format"
+
 # ── R12: VERSION ↔ newest CHANGELOG heading (read at runtime, no literal); ledger row C10 ─
 _v="$(cat "$ROOT/VERSION")"
 [ -n "$_v" ] || fail "R12_version_changelog_ledger: VERSION is empty"
