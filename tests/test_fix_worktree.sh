@@ -860,6 +860,13 @@ test_wave_ids_accepted_e99_fence_widened() {
     E1-F2x E1-Fx2 ' E1-F2' 'E1-F2 ' E1--F2 EE1-F2 E1-FF2 1-F2 E12; do
     assert_create_fails_without_mutation "invalid fix id" "$_id" slug
   done
+  # A first character other than `E` with an otherwise-valid tail (E36-F07 round 2, N02):
+  # the parse must reject the id on its leading `E` alone. `1-F2` above cannot see this —
+  # its empty epic half rejects it through a second path — so stripping ANY first
+  # character in place of `E` would accept every one of these as `E1-F2`.
+  for _id in x1-F2 e1-F2 /1-F2 .1-F2 '~1-F2'; do
+    assert_create_fails_without_mutation "invalid fix id" "$_id" slug
+  done
   for _slug in '' Bad -x x- a--b a/b 'a b'; do
     assert_create_fails_without_mutation "invalid slug" E1-F3 "$_slug"
   done
