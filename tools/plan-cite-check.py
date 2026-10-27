@@ -25,7 +25,8 @@ import re
 import sys
 
 PFX = "plan-cite-check: "
-USAGE = ("usage: plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>] [--specs-dir <dir>]")
+USAGE = ("usage: plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>] [--specs-dir <dir>]\n"
+         "       plan-cite-check.py --sweep <specs-dir>")
 
 CHECKED_RE = re.compile(r"^## (Data model|API / interface|Files to change|Deferred)(\s|$)")
 CLOSE_RE = re.compile(r"^##? ")
@@ -47,6 +48,7 @@ BOLT_ON_HEADER = ["Bolt-on", "Deferred by", "Trigger"]
 NONE_LINE_RE = re.compile(r"^Deferred: none — \S")
 STATUS_DEFERRED_RE = re.compile(r"^- \*\*Status:\*\* deferred")
 TRIGGER_RE = re.compile(r"^- \*\*Trigger:\*\* \S")
+STAGE_RE = re.compile(r"^stage: (discovery|pilot|production)$")
 WRAPPERS = "*`\"'"
 
 
@@ -392,6 +394,47 @@ def main_lint(args):
     return 0
 
 
+def sweep(specs_dir):
+    """[(finding)], stage value-or-'absent', ADR count — the two sweeps F03 handed over."""
+    index = discover_namespaces(specs_dir)
+    adrs = sorted(p for tok in index for paths in index[tok].values() for p in paths)
+    out = []
+    for p in adrs:
+        lines = _read(p)
+        if any(STATUS_DEFERRED_RE.match(ln) for ln in lines) and \
+                not any(TRIGGER_RE.match(ln) for ln in lines):
+            out.append("deferred-no-trigger %s" % p)
+    stage = "absent"
+    product = os.path.join(specs_dir, "product.md")
+    if os.path.lexists(product):
+        lines = _read(product)
+        if lines and lines[0] == "---":
+            for n, ln in enumerate(lines[1:], 2):
+                if ln == "---":
+                    break
+                if ln.startswith("stage:"):
+                    m = STAGE_RE.match(ln)
+                    if m:
+                        stage = m.group(1) if stage == "absent" else stage
+                    else:
+                        out.append("stage-unrecognized %s:%d %s" % (product, n, ln))
+    return out, stage, len(adrs)
+
+
+def main_sweep(args):
+    _opts, pos = parse_args(args, {})
+    if len(pos) != 1:
+        raise InputError("--sweep expects exactly one <specs-dir>")
+    findings, stage, n_adrs = sweep(pos[0])
+    if findings:
+        for f in findings:
+            print(PFX + f)
+        print("%sFAIL %d finding(s)" % (PFX, len(findings)))
+        return 1
+    print("%sok sweep %d ADR(s), stage: %s" % (PFX, n_adrs, stage))
+    return 0
+
+
 def main_grandfathered(args):
     opts, pos = parse_args(args, {"--base": "a ref"})
     if len(pos) != 1:
@@ -405,6 +448,10 @@ def main(argv):
         print(USAGE)
         return 0
     try:
+        if "--grandfathered" in args and "--sweep" in args:
+            raise InputError("--grandfathered and --sweep are separate modes")
+        if "--sweep" in args:
+            return main_sweep([a for a in args if a != "--sweep"])
         if "--grandfathered" in args:
             return main_grandfathered([a for a in args if a != "--grandfathered"])
         return main_lint(args)

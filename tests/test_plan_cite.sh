@@ -468,6 +468,118 @@ grep -q '^usage: ' "$T/out" || fail "R6_help_exit0: no usage on stdout ($(both))
 [ ! -s "$T/err" ] || fail "R6_help_exit0: stderr not empty ($(both))"
 pass "R6_help_exit0"
 
-# @@R7@@
+# ── R7: --sweep (deferred-no-trigger, stage-unrecognized) and init.sh 2d, warn-only ──────
+expect_sweep_fail() {
+  [ "$rc" -eq 1 ] || fail "$1: expected rc 1, got $rc ($(both))"
+  tail -n 1 "$T/out" | grep -qE '^plan-cite-check: FAIL [0-9]+ finding\(s\)$' || fail "$1: no 'FAIL <n> finding(s)' last line ($(both))"
+  [ ! -s "$T/err" ] || fail "$1: stderr is not empty ($(both))"
+}
+fresh r7
+run_tool --sweep "$S"; expect_sweep_fail R7_sweep_deferred_no_trigger
+[ "$(count '^plan-cite-check: deferred-no-trigger ')" -eq 1 ] || fail "R7_sweep_deferred_no_trigger: expected exactly one deferred-no-trigger ($(both))"
+grep -qxF "plan-cite-check: deferred-no-trigger $S/adr/0003-deferred-no-trigger.md" "$T/out" \
+  || fail "R7_sweep_deferred_no_trigger: the deferred ADR with no Trigger: line was not reported ($(both))"
+[ "$(wc -l < "$T/out" | tr -d ' ')" -eq 2 ] || fail "R7_sweep_deferred_no_trigger: expected one finding and the FAIL line ($(both))"
+pass "R7_sweep_deferred_no_trigger"
+
+fresh r7stage
+rm "$S/adr/0003-deferred-no-trigger.md"
+printf '%s\n' '---' 'stage: pilot   # why' '---' '# Product' > "$S/product.md"
+run_tool --sweep "$S"; expect_sweep_fail R7_sweep_stage_unrecognized
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R7_sweep_stage_unrecognized: expected one finding and the FAIL line ($(both))"
+grep -qxF "plan-cite-check: stage-unrecognized $S/product.md:2 stage: pilot   # why" "$T/out" \
+  || fail "R7_sweep_stage_unrecognized: an inline comment on the stage line was not reported ($(both))"
+printf '%s\n' '---' 'status: draft' 'stage: Pilot' '---' > "$S/product.md"
+run_tool --sweep "$S"; expect_sweep_fail R7_sweep_stage_unrecognized
+grep -qxF "plan-cite-check: stage-unrecognized $S/product.md:3 stage: Pilot" "$T/out" || fail "R7_sweep_stage_unrecognized: 'stage: Pilot' was not reported ($(both))"
+pass "R7_sweep_stage_unrecognized"
+
+fresh r7absent
+rm "$S/adr/0003-deferred-no-trigger.md"
+printf '%s\n' '---' 'status: draft' '---' '# Product' '' 'stage: bogus — outside the frontmatter, not a stage line' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_absent_ok
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: absent' "$T/out" || fail "R7_sweep_stage_absent_ok: ok line ($(both))"
+rm "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_absent_ok
+printf '%s\n' '# Product with no frontmatter' 'stage: bogus' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_absent_ok
+pass "R7_sweep_stage_absent_ok"
+
+fresh r7clean
+rm "$S/adr/0003-deferred-no-trigger.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_clean
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: pilot' "$T/out" || fail "R7_sweep_clean: ok line does not count 3 ADRs and stage pilot ($(both))"
+pass "R7_sweep_clean"
+
+run_tool --sweep "$T/nope-specs"; chk_exit2 R7_sweep_dir_unreadable_exit2 'not a directory'
+run_tool --sweep; chk_exit2 R7_sweep_dir_unreadable_exit2 '--sweep expects exactly one <specs-dir>'
+fresh r7lock
+mkdir "$S/locked"; chmod 000 "$S/locked"
+run_tool --sweep "$S"; chmod 755 "$S/locked"; chk_exit2 R7_sweep_dir_unreadable_exit2 'cannot read specs dir'
+fresh r7bad8
+printf '\377\n' >> "$S/adr/0001-accepted.md"
+run_tool --sweep "$S"; chk_exit2 R7_sweep_dir_unreadable_exit2 "$S/adr/0001-accepted.md"
+
+# init.sh 2d — one fresh install (CODEX_HOME/HOME sandboxed); each case plants a one-feature
+# board and the fixture tree under the installed .harness/specs, then runs the installed init.sh.
+mkdir -p "$T/tgt" "$T/ch" "$T/home"
+CODEX_HOME="$T/ch" HOME="$T/home" sh "$ROOT/harness-install.sh" --agents=claude "$T/tgt" \
+  >"$T/install.out" 2>"$T/install.err" || fail "setup: fresh install exited non-zero: $(cat "$T/install.err")"
+I="$T/tgt/.harness"
+# init_case <feature-id> <status> <sdd> <feature-dir> — plant board + specs, run init.sh.
+init_case() {
+  rm -rf "$I/specs/adr" "$I/specs/bookings" "$I/specs/epics/E01-x"
+  cp -R "$FX/specs/adr" "$FX/specs/bookings" "$I/specs/"; cp -R "$FX/specs/epics/E01-x" "$I/specs/epics/"
+  printf '{"$schema": "../store/tasks.schema.json", "project": "fx", "epics": [{"id": "E01", "title": "Fixture", "status": "in-progress", "features": [{"id": "%s", "title": "Fixture feature", "status": "%s", "sdd": %s, "autonomous": false, "depends_on": [], "spec_path": "specs/epics/E01-x/%s/"}]}]}\n' \
+    "$1" "$2" "$3" "$4" > "$I/state/tasks.json"
+}
+init_run() { set +e; (cd "$T/tgt" && bash "$I/init.sh") >"$T/out" 2>"$T/err"; rc=$?; set -e; }
+init_ok() {
+  [ "$rc" -eq 0 ] || fail "$1: init.sh exited $rc — the 2d block must never fail the gate ($(both))"
+  grep -qF '✅ environment ready' "$T/out" || fail "$1: init.sh did not reach its final ok line ($(both))"
+}
+init_case E01-F02 spec-ready true F02-bad; init_run; init_ok R7_init_warns_on_bad_plan
+grep -qF "⚠️  plan-cite: E01-F02 uncited-row specs/epics/E01-x/F02-bad/E01-F02.plan.md:8 Data model (+6 more; warn-only — Reviewer check 8 rejects)" "$T/out" \
+  || fail "R7_init_warns_on_bad_plan: no warn line naming E01-F02 and its first finding ($(both))"
+grep -qF '✅ plan citations' "$T/out" && fail "R7_init_warns_on_bad_plan: the clean line printed beside a warning ($(both))"
+pass "R7_init_warns_on_bad_plan"
+grep -qxF "⚠️  plan-cite: deferred-no-trigger specs/adr/0003-deferred-no-trigger.md (warn-only)" "$T/out" \
+  || fail "R7_init_sweep_warns_deferred_no_trigger: no sweep warn line for the trigger-less deferred ADR ($(both))"
+pass "R7_init_sweep_warns_deferred_no_trigger"
+
+init_case E01-F01 spec-ready true F01-good; rm "$I/specs/adr/0003-deferred-no-trigger.md"; init_run; init_ok R7_init_ok_on_good_plan
+grep -qxF '✅ plan citations and deferred ADRs clean (1 plan(s) checked)' "$T/out" \
+  || fail "R7_init_ok_on_good_plan: no clean line counting 1 plan ($(both))"
+grep -qF 'plan-cite:' "$T/out" && fail "R7_init_ok_on_good_plan: a warn line on a clean plan ($(both))"
+pass "R7_init_ok_on_good_plan"
+
+# The spec must stay on disk (init.sh section 2 rejects an sdd feature with no spec before
+# 2d runs), so the exit-2 cause is a spec that declares no R-id.
+init_case E01-F02 spec-ready true F02-bad
+grep -v '^- \*\*R' "$I/specs/epics/E01-x/F02-bad/E01-F02.spec.md" > "$T/zero.md"; mv "$T/zero.md" "$I/specs/epics/E01-x/F02-bad/E01-F02.spec.md"
+init_run; init_ok R7_init_exit2_reported_as_did_not_run
+grep -qF "⚠️  plan-cite: E01-F02 check did not run: error: no R-ids found in specs/epics/E01-x/F02-bad/E01-F02.spec.md" "$T/out" \
+  || fail "R7_init_exit2_reported_as_did_not_run: an exit-2 lint is not reported as 'check did not run' ($(both))"
+pass "R7_init_exit2_reported_as_did_not_run"
+
+for _st in in-review in-progress; do
+  init_case E01-F02 "$_st" true F02-bad; init_run; init_ok "R7_init_in_review_swept[$_st]"
+  grep -qF '⚠️  plan-cite: E01-F02 uncited-row ' "$T/out" || fail "R7_init_in_review_swept: a '$_st' feature's plan was not linted ($(both))"
+done
+for _st in done pending; do
+  init_case E01-F02 "$_st" true F02-bad; init_run; init_ok "R7_init_in_review_swept[$_st]"
+  grep -qF 'plan-cite: E01-F02' "$T/out" && fail "R7_init_in_review_swept: a '$_st' feature's plan was linted ($(both))"
+done
+init_case E01-F02 spec-ready false F02-bad; init_run; init_ok R7_init_sdd_false_exempt
+grep -qF 'plan-cite: E01-F02' "$T/out" && fail "R7_init_sdd_false_exempt: an sdd: false feature was linted ($(both))"
+pass "R7_init_in_review_swept"
+pass "R7_init_sdd_false_exempt"
+
+init_case E01-F02 spec-ready true F02-bad; rm "$I/tools/plan-cite-check.py"; init_run; init_ok R7_init_silent_without_tool
+grep -qF 'plan-cite' "$T/out" && fail "R7_init_silent_without_tool: 2d printed without the tool ($(both))"
+pass "R7_init_silent_without_tool"
+cp "$TOOL" "$I/tools/plan-cite-check.py"
+
+# @@R8@@
 
 echo "all plan-cite checks passed"
