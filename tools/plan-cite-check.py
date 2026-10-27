@@ -31,6 +31,11 @@ CHECKED_RE = re.compile(r"^## (Data model|API / interface|Files to change|Deferr
 CLOSE_RE = re.compile(r"^##? ")
 SEP_CELL_RE = re.compile(r"^:?-+:?$")
 CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+# The grammar's tokens.  `R[0-9]+` read from a non-alphanumeric left boundary (the tool's
+# reading where the grammar is silent): `PR304` / `CR12` are not citations.
+RID_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])R[0-9]+")
+ADR_TOKEN_RE = re.compile(r"ADR-[0-9]{4}")
+WRAPPERS = "*`\"'"
 
 
 class InputError(Exception):
@@ -136,6 +141,41 @@ def parse_sections(lines):
     return sections
 
 
+def strip_wrappers(text):
+    for ch in WRAPPERS:
+        text = text.replace(ch, "")
+    return text
+
+
+def cites(row):
+    """Return (r_tokens, has_adr_token) for one data row (wrappers stripped first)."""
+    text = strip_wrappers(row)
+    rids = []
+    for tok in RID_TOKEN_RE.findall(text):
+        if tok not in rids:
+            rids.append(tok)
+    return rids, bool(ADR_TOKEN_RE.search(text))
+
+
+def data_rows(sections):
+    for sec in sections:
+        for table in sec["tables"]:
+            for n, text, kind in table:
+                if kind == "data":
+                    yield sec, n, text
+
+
+def check_plan(plan, sections):
+    """Pure: return [(line, finding)] in file order (finding without the prefix)."""
+    out = []
+    for sec, n, text in data_rows(sections):
+        rids, has_adr = cites(text)
+        if not rids and not has_adr:
+            out.append((n, "uncited-row %s:%d %s" % (plan, n, sec["name"])))
+    out.sort(key=lambda v: v[0])
+    return out
+
+
 def main(argv):
     args = argv[1:]
     if any(a in ("-h", "--help") for a in args):
@@ -165,7 +205,13 @@ def main(argv):
     except InputError as exc:
         sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
         return 2
-    rows = sum(1 for s in sections for t in s["tables"] for r in t if r[2] == "data")
+    violations = check_plan(plan, sections)
+    if violations:
+        for _n, v in violations:
+            print(PFX + v)
+        print("%sFAIL %d violation(s)" % (PFX, len(violations)))
+        return 1
+    rows = sum(1 for _ in data_rows(sections))
     print("%sok %s: %d row(s) cited, spec: %s" % (PFX, plan, rows,
                                                  "not checked" if spec is None else "given"))
     return 0

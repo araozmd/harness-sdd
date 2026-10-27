@@ -105,6 +105,72 @@ F03D="$ROOT/specs/epics/E36-emergent-slices/F03-stage-deferred-adrs"
 run_tool "$F03D/E36-F03.plan.md" --spec "$F03D/E36-F03.spec.md"; expect_ok R1_dogfood_f03_plan
 pass "R1_dogfood_f03_plan"
 
-# @@R2@@
+# ── R2: an uncited data row under one of the four headings ⇒ exit 1 uncited-row ─────────
+fresh r1fencectl
+insert_before "$GP" '## Deferred' "$T/decoys.md"
+# R1_ok_fenced_decoys control: the same decoys with their fence delimiters removed are live
+# rows, so the row above is green because the fences hid them, not because nothing is checked.
+grep -vE '^ *(```|~~~)' "$GP" > "$GP.live"
+run_tool "$GP.live" --spec "$GS"; expect_fail "R1_ok_fenced_decoys control"
+[ "$(count '^plan-cite-check: uncited-row ')" -eq 3 ] \
+  || fail "R1_ok_fenced_decoys control: unfenced decoys did not each give an uncited-row ($(both))"
+pass "R1_ok_fenced_decoys control"
+
+fresh r2
+run_tool "$BP" --spec "$BS"; expect_fail R2_uncited_row
+[ "$(count '^plan-cite-check: uncited-row ')" -eq 1 ] || fail "R2_uncited_row: expected exactly one uncited-row line ($(both))"
+grep -qxF "plan-cite-check: uncited-row $BP:8 Data model" "$T/out" \
+  || fail "R2_uncited_row: no 'uncited-row <plan>:8 Data model' line for the planted row ($(both))"
+pass "R2_uncited_row"
+
+fresh r2hdr
+# The header names no R-id at all, and the separator carries alignment colons: both stay
+# exempt because the header is found by POSITION (the row before a separator), not by text.
+sed -e 's/^| Entity | Field | Type | Notes | R-id |$/| Entity | Field | Type | Notes | Ref |/' \
+    -e '/^| Entity | Field /{n;s/^|---|---|---|---|---|$/|:---|---:|:---:|---|---|/;}' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+grep -qxF '| Entity | Field | Type | Notes | Ref |' "$GP" && grep -qxF '|:---|---:|:---:|---|---|' "$GP" \
+  || fail "R2_header_separator_exempt: precondition: the header/separator rewrite did not apply"
+run_tool "$GP" --spec "$GS"; expect_ok R2_header_separator_exempt
+pass "R2_header_separator_exempt"
+
+fresh r2other
+grep -qF '| `fx run` |' "$GP" && grep -qF '| a pipe row under DO NOT TOUCH |' "$GP" && grep -qF '| an uncited row under an unchecked heading |' "$GP" \
+  || fail "R2_other_headings_ignored: precondition: the positive plan lost its unchecked-heading rows"
+run_tool "$GP" --spec "$GS"; expect_ok R2_other_headings_ignored
+# control: the same CLI row moved under a checked heading is a finding
+sed 's/^## CLI \/ interface$/## API \/ interface/' "$GP" > "$GP.ctl"
+run_tool "$GP.ctl" --spec "$GS"; expect_fail "R2_other_headings_ignored control"
+grep -qE "^plan-cite-check: uncited-row .*:[0-9]+ API / interface$" "$T/out" || fail "R2_other_headings_ignored control: no uncited-row for the CLI row once under API / interface ($(both))"
+pass "R2_other_headings_ignored"
+
+fresh r2prose
+printf '%s\n' 'no citation here, just prose under the heading' '' > "$T/prose.md"
+insert_before "$GP" '| Entity | Field ' "$T/prose.md"
+grep -qF 'no citation here' "$GP" || fail "R2_prose_ignored: precondition: prose not inserted"
+run_tool "$GP" --spec "$GS"; expect_ok R2_prose_ignored
+pass "R2_prose_ignored"
+
+fresh r2serves
+grep -qxF '## Data model  (serves: R1, R2)' "$GP" || fail "R2_serves_suffix_not_citation: precondition: heading suffix changed"
+printf '%s\n' '| Booking | memo | text | free text |  |' > "$T/row.md"
+insert_before "$GP" '| Booking | ref |' "$T/row.md"
+_ln="$(grep -n '^| Booking | memo |' "$GP" | cut -d: -f1)"
+run_tool "$GP" --spec "$GS"; expect_fail R2_serves_suffix_not_citation
+[ "$(count '^plan-cite-check: uncited-row ')" -eq 1 ] || fail "R2_serves_suffix_not_citation: expected exactly one uncited-row ($(both))"
+grep -qxF "plan-cite-check: uncited-row $GP:$_ln Data model" "$T/out" \
+  || fail "R2_serves_suffix_not_citation: the '(serves: R1, R2)' heading suffix stood in for the row's citation ($(both))"
+pass "R2_serves_suffix_not_citation"
+
+fresh r2sub
+printf '%s\n' '| `f.py` | an uncited row after the level-3 heading |  |' > "$T/row.md"
+awk -v f="$T/row.md" '{ print } index($0, "| `e.py` |") == 1 { while ((getline l < f) > 0) print l }' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+_ln="$(grep -n '^| `f.py` |' "$GP" | cut -d: -f1)"
+[ -n "$_ln" ] || fail "R2_rows_after_subheading_checked: precondition: row not inserted"
+run_tool "$GP" --spec "$GS"; expect_fail R2_rows_after_subheading_checked
+grep -qxF "plan-cite-check: uncited-row $GP:$_ln Files to change" "$T/out" \
+  || fail "R2_rows_after_subheading_checked: a '### sub-heading' closed the '## Files to change' section ($(both))"
+pass "R2_rows_after_subheading_checked"
+
+# @@R3@@
 
 echo "all plan-cite checks passed"
