@@ -1508,7 +1508,7 @@
         {
           "id": "E99-F182",
           "title": "Escalation to builder-heavy can arm in self mode and per front-end",
-          "status": "spec-ready",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
