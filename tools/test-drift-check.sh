@@ -156,6 +156,8 @@ if [ -n "$headc" ]; then range="$mb $headc"; else range="$mb"; fi
 # a later rename pair is kept when either side is the branch's own. Each call's status is
 # checked separately: a failed merge-base is not "no merge base", and a failed diff must never
 # read as an empty scope (that would be a clean verdict from a check that never ran).
+# `-M` does not change the path SET (without it a rename is `D old` + `A new`; probed byte-
+# identical under diff.renames=true/false/copies); it only exercises the two-path framing below.
 suffix=""
 if [ "$fs_given" = 1 ]; then
   fsc="$(git rev-parse --verify --quiet "$fscope^{commit}" 2>/dev/null)" \
