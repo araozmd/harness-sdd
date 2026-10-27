@@ -132,6 +132,8 @@ csec '- `observable-behavior-missing` — [^.]{0,40}no `## Observable behavior` 
   || fail "R6: observable-behavior-missing trigger (no section / empty / placeholder) missing"
 csec '- `walking-skeleton-missing` — [^.]{0,40}fresh drill[^.]{0,40}lowest-numbered feature' \
   || fail "R6: walking-skeleton-missing trigger (fresh drill, lowest-numbered feature) missing"
+csec '- `walking-skeleton-missing` — [^.]{0,120}names no product-boundary surface' \
+  || fail "R6: walking-skeleton-missing trigger does not cover a brief whose observable behavior names no product-boundary surface"
 csec '- `walking-skeleton-missing` — [^.]{0,230}internal artifact' \
   || fail "R6: walking-skeleton-missing trigger does not cover an outcome that stops at an internal artifact"
 csec '- `walking-skeleton-missing` — [^.]{0,230}intra-epic `depends_on`' \
