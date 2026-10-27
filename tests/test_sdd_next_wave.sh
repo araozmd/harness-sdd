@@ -307,11 +307,24 @@ test_eligibility_order_and_cap() {
   end
 }
 
+# ── R5 — provisioning via the widened helper (the helper itself: test_fix_worktree.sh) ──
+test_slug_rule_prose() {
+  begin test_slug_rule_prose
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'the coordinator calls `tools/fix-worktree.sh create <id> <slug>` (installed: `.harness/tools/fix-worktree.sh`) once per selected feature, sequentially, before any manifest or board write'
+  has "wave section" "$_w" 'The helper accepts any `E<digits>-F<digits>` id and creates branch `feat/<id>-<slug>` and worktree `<primary>/.claude/worktrees/<id>-<slug>`.'
+  has "wave section" "$_w" 'The coordinator derives `<slug>` from the board'"'"'s `spec_path` for that feature, which it reads and never writes:'
+  has "wave section" "$_w" 'take the last path component (ignoring a trailing `/`), remove the leading `F<digits>-`, lowercase it, collapse every run of characters outside `[a-z0-9]` to one `-`, trim leading and trailing `-`, and use `wave` when the result is empty.'
+  has "wave section" "$_w" 'A feature whose `create` fails is classified `provisioning-failed: <helper stderr>`, stays `pending`, and does not stop its siblings.'
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
 test_wave_read_consumes_envelope
 test_eligibility_order_and_cap
+test_slug_rule_prose
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }

@@ -138,7 +138,6 @@ test_dirty_primary_fails_before_mutation() {
 
 test_invalid_inputs_are_non_mutating() {
   make_source_fixture invalid
-  assert_create_fails_without_mutation invalid E98-F1 slug
   assert_create_fails_without_mutation invalid E99-Fx slug
   assert_create_fails_without_mutation invalid E99-F107 Bad-Slug
   assert_create_fails_without_mutation invalid E99-F107 double--dash
@@ -835,6 +834,38 @@ test_helper_rejects_forced_or_recursive_cleanup() {
   pass "test_helper_rejects_forced_or_recursive_cleanup"
 }
 
+# E36-F07 R5: the id grammar widens from E99-F<n> to E<n>-F<n> by an EXPLICIT parse (a
+# wildcard glob would admit E1x-F1 and the path-injecting E1/../-F1). Accepted ids keep
+# the exact branch/worktree shapes; every rejected id mutates no ref or registration.
+test_wave_ids_accepted_e99_fence_widened() {
+  make_source_fixture wave_ids
+  _primary_abs="$(CDPATH= cd -- "$PRIMARY" && pwd -P)"
+  for _case in "E36-F07 wave-fanout" "E1-F2 x" "E01-F02 z" "E98-F1 slug"; do
+    set -- $_case
+    _out="$(cd "$PRIMARY" && tools/fix-worktree.sh create "$1" "$2")" ||
+      fail "widened id rejected by create: $1 $2"
+    [ "$_out" = "$_primary_abs/.claude/worktrees/$1-$2" ] || fail "create path mismatch for $1: $_out"
+    [ "$(git -C "$_out" symbolic-ref --short HEAD)" = "feat/$1-$2" ] || fail "create branch mismatch for $1"
+  done
+  _wt="$_primary_abs/.claude/worktrees/E1-F2-x"
+  _pwd="$(cd "$PRIMARY" && tools/fix-worktree.sh run E1-F2 x -- sh -c pwd)" ||
+    fail "run rejected a widened id"
+  [ "$(CDPATH= cd -- "$_pwd" && pwd -P)" = "$_wt" ] || fail "run E1-F2 did not run in its worktree: $_pwd"
+  (cd "$PRIMARY" && tools/fix-worktree.sh teardown E1-F2 x) >/dev/null ||
+    fail "teardown rejected a widened id"
+  [ ! -e "$_wt" ] || fail "teardown E1-F2 left its worktree"
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/E1-F2-x &&
+    fail "teardown E1-F2 left its branch"
+  for _id in E99-Fx E-F1 E1F2 e1-f2 E1-F E-F E1x-F1 E1-x-F1 E1-F2-F3 'E1/../-F1' \
+    E1-F2x E1-Fx2 ' E1-F2' 'E1-F2 ' E1--F2 EE1-F2 E1-FF2 1-F2 E12; do
+    assert_create_fails_without_mutation "invalid fix id" "$_id" slug
+  done
+  for _slug in '' Bad -x x- a--b a/b 'a b'; do
+    assert_create_fails_without_mutation "invalid slug" E1-F3 "$_slug"
+  done
+  pass "test_wave_ids_accepted_e99_fence_widened"
+}
+
 test_create_exact_branch_and_path
 test_default_and_explicit_base_resolution
 test_base_is_ref_not_ambient_head
@@ -859,3 +890,4 @@ test_teardown_refuses_dirty_wrong_branch_unmerged_and_wrong_primary_head
 test_clean_merged_teardown_removes_exact_resources
 test_teardown_idempotent_and_partial_safe
 test_helper_rejects_forced_or_recursive_cleanup
+test_wave_ids_accepted_e99_fence_widened

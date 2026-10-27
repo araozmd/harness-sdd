@@ -266,6 +266,20 @@ rest are `cap-deferred` and stay `pending` for the operator's next run. When the
 eligible record, the coordinator prints `no eligible feature in wave <N>` and exits 0 with no
 mutation.
 
+### W3 — provision
+
+Provisioning is `agents/fixer.md`'s P2 discipline with a feature in place of a fix: the
+coordinator calls `tools/fix-worktree.sh create <id> <slug>` (installed:
+`.harness/tools/fix-worktree.sh`) once per selected feature, sequentially, before any manifest
+or board write, while the primary is clean (the helper enforces it). The helper accepts any
+`E<digits>-F<digits>` id and creates branch `feat/<id>-<slug>` and worktree
+`<primary>/.claude/worktrees/<id>-<slug>`. The coordinator derives `<slug>` from the board's
+`spec_path` for that feature, which it reads and never writes: take the last path component
+(ignoring a trailing `/`), remove the leading `F<digits>-`, lowercase it, collapse every run of
+characters outside `[a-z0-9]` to one `-`, trim leading and trailing `-`, and use `wave` when
+the result is empty. A feature whose `create` fails is classified
+`provisioning-failed: <helper stderr>`, stays `pending`, and does not stop its siblings.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is
