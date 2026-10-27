@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""plan-cite-check — lint a feature .plan.md: every table row cites an R-id or an ADR.
+
+E36-F04 / ADR-0009 decision 4 ("an uncited plan row is a defect").  Usage:
+
+    plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>] [--specs-dir <dir>]
+
+Stdlib only; a pure function of the files named on argv.  The grammar is E36-F03's, copied
+byte-exactly from docs/SPEC-FORMAT.md "Plan rows cite an R-id or an ADR" — this tool lints it,
+it never redefines it:
+
+  * checked sections: `## Data model`, `## API / interface`, `## Files to change`,
+    `## Deferred` (a suffix after the name is ignored); a section runs to the next level-1 or
+    level-2 heading; `###` lines stay inside it.
+  * fenced code is invisible.  iter_unfenced() is a DELIBERATE second copy of the CommonMark
+    rule tests/lib/fence.awk encodes (as tools/tasks-pair-check.py carries one); the suite
+    feeds one edge corpus to both and requires identical output (R11_fence_parity).
+  * a table is a run of consecutive `^|` lines; its separator row has cells that are empty
+    or `:?-+:?`; the header row is the row right before a separator; every other row is a
+    data row.
+  * every line is read as strict UTF-8 and a trailing `\\r` (CRLF) is stripped first.
+"""
+import os
+import re
+import sys
+
+PFX = "plan-cite-check: "
+USAGE = ("usage: plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>] [--specs-dir <dir>]")
+
+CHECKED_RE = re.compile(r"^## (Data model|API / interface|Files to change|Deferred)(\s|$)")
+CLOSE_RE = re.compile(r"^##? ")
+SEP_CELL_RE = re.compile(r"^:?-+:?$")
+CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+
+
+class InputError(Exception):
+    pass
+
+
+def iter_unfenced(lines, numbered=False):
+    """Yield the lines outside fenced code blocks (delimiters excluded).
+
+    With numbered=True yield (1-based line number, line) pairs instead; the fence state
+    machine is the same one either way, so the parity test pins the numbered form too.
+    """
+    fence = False
+    f_char = ""
+    f_len = 0
+    for n, line in enumerate(lines, 1):
+        line = line.rstrip("\n")
+        ind = 0
+        while ind < 4 and line[ind:ind + 1] == " ":
+            ind += 1
+        delim = False
+        if ind <= 3:
+            ch = line[ind:ind + 1]
+            if ch and ch in "`~":  # guard: "" in "`~" is True
+                run = 0
+                while line[ind + run:ind + run + 1] == ch:
+                    run += 1
+                if run >= 3:
+                    tail = line[ind + run:]
+                    if fence:
+                        if ch == f_char and run >= f_len and not tail.strip(" \t"):
+                            fence = False
+                            delim = True
+                    elif not (ch == "`" and "`" in tail):
+                        fence = True
+                        f_char, f_len = ch, run
+                        delim = True
+        if delim or fence:
+            continue
+        yield (n, line) if numbered else line
+
+
+def _read(path):
+    """Return the file's lines: strict UTF-8, each line's trailing \\r then \\n stripped."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+        text = data.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise InputError("cannot read %s: %s" % (path, exc))
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [ln[:-1] if ln.endswith("\r") else ln for ln in lines]
+
+
+def cells(row):
+    parts = CELL_SPLIT_RE.split(row)
+    parts = parts[1:]  # the leading pipe
+    if parts and not parts[-1].strip():
+        parts = parts[:-1]  # the trailing pipe
+    return [c.strip() for c in parts]
+
+
+def is_separator(row):
+    cs = cells(row)
+    return bool(cs) and all(c == "" or SEP_CELL_RE.match(c) for c in cs) \
+        and any(SEP_CELL_RE.match(c) for c in cs)
+
+
+def parse_sections(lines):
+    """Return [{name, line, body: [(n, text)], tables: [[(n, text, kind)]]}] in file order.
+
+    kind is 'header', 'separator' or 'data'.  Only the four checked headings open a section.
+    """
+    sections = []
+    cur = None
+    for n, text in iter_unfenced(lines, numbered=True):
+        if CLOSE_RE.match(text):
+            cur = None
+            m = CHECKED_RE.match(text)
+            if m:
+                cur = {"name": m.group(1), "line": n, "body": [], "tables": []}
+                sections.append(cur)
+            continue
+        if cur is not None:
+            cur["body"].append((n, text))
+    for sec in sections:
+        run = []
+        for n, text in sec["body"] + [(None, "")]:
+            if text.startswith("|"):
+                run.append((n, text))
+                continue
+            if run:
+                kinds = ["data"] * len(run)
+                for i, (_n, t) in enumerate(run):
+                    if is_separator(t):
+                        kinds[i] = "separator"
+                        if i > 0 and kinds[i - 1] == "data":
+                            kinds[i - 1] = "header"
+                sec["tables"].append([(r[0], r[1], k) for r, k in zip(run, kinds)])
+                run = []
+    return sections
+
+
+def main(argv):
+    args = argv[1:]
+    if any(a in ("-h", "--help") for a in args):
+        print(USAGE)
+        return 0
+    try:
+        spec = specs_dir = None
+        pos = []
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a in ("--spec", "--specs-dir"):
+                if i + 1 >= len(args):
+                    raise InputError("%s needs a path" % a)
+                if a == "--spec":
+                    spec = args[i + 1]
+                else:
+                    specs_dir = args[i + 1]
+                i += 2
+            else:
+                pos.append(a)
+                i += 1
+        if len(pos) != 1:
+            raise InputError("expected exactly one <feature.plan.md>")
+        plan = pos[0]
+        sections = parse_sections(_read(plan))
+    except InputError as exc:
+        sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
+        return 2
+    rows = sum(1 for s in sections for t in s["tables"] for r in t if r[2] == "data")
+    print("%sok %s: %d row(s) cited, spec: %s" % (PFX, plan, rows,
+                                                 "not checked" if spec is None else "given"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
