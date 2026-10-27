@@ -10,8 +10,11 @@ E36-F04 / ADR-0009 decision 4 ("an uncited plan row is a defect").  Usage:
 Exit: 0 ok, 1 violation(s) / finding(s) / grandfather reject, 2 usage or input error (stderr
 `plan-cite-check: error: ...` plus the usage, nothing on stdout) or an unexpected exception
 (stderr `plan-cite-check: error: internal: <type>: <msg>`, no traceback) — exit 2 is "the
-check did not run", never a pass, and never the violation exit 1.  Stdlib only; a pure function of the paths named on argv, taken
-verbatim (no shlex, glob or ~ expansion).
+check did not run", never a pass, and never the violation exit 1.  `-h`/`--help` print the
+usage and exit 0 only as an option token: the word after --spec, --specs-dir or --base is
+that flag's value, never help (`--spec --help` reads a spec named `--help`, exit 2).  Stdlib
+only; a pure function of the paths named on argv, taken verbatim (no shlex, glob or ~
+expansion).
 
 The grammar is E36-F03's, copied byte-exactly from docs/SPEC-FORMAT.md "Plan rows cite an
 R-id or an ADR" — this tool lints it, it never redefines it.  Where the grammar is silent the
@@ -67,6 +70,10 @@ USAGE = ("usage: plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>]
          "       plan-cite-check.py --sweep <specs-dir>\n"
          "       plan-cite-check.py --grandfathered <feature.plan.md> [--base <ref>]")
 TOOL_PATHS = ("tools/plan-cite-check.py", ".harness/tools/plan-cite-check.py")
+HELP_FLAGS = ("-h", "--help")
+# Every flag that takes a value, across the three modes (parse_args' flag tables): the word
+# after one is its value, never an option.
+VALUE_FLAGS = ("--spec", "--specs-dir", "--base")
 BASE_FALLBACKS = ("origin/main", "main", "origin/master", "master", "origin/trunk", "trunk")
 
 CHECKED_RE = re.compile(r"^## (Data model|API / interface|Files to change|Deferred)(\s|$)")
@@ -561,9 +568,21 @@ def main_grandfathered(args):
     return 0 if flag else 1
 
 
+def wants_help(args):
+    """True iff `-h`/`--help` is an OPTION token: the argv walk steps over the word after each
+    value-taking flag (VALUE_FLAGS, `--flag value` form), so a flag's value is never help
+    (review round 1, A4).  `--flag=value` is one token and consumes nothing after it."""
+    i = 0
+    while i < len(args):
+        if args[i] in HELP_FLAGS:
+            return True
+        i += 2 if args[i] in VALUE_FLAGS else 1
+    return False
+
+
 def main(argv):
     args = argv[1:]
-    if any(a in ("-h", "--help") for a in args):
+    if wants_help(args):
         print(USAGE)
         return 0
     try:

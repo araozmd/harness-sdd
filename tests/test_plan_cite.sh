@@ -641,6 +641,26 @@ run_tool --help
 grep -q '^usage: ' "$T/out" || fail "R6_help_exit0: no usage on stdout ($(both))"
 [ ! -s "$T/err" ] || fail "R6_help_exit0: stderr not empty ($(both))"
 pass "R6_help_exit0"
+# Help is an OPTION, never a flag's value (review round 1, A4): `-h`/`--help` print the usage
+# and exit 0 only where the argv walk meets them as an option token. A word consumed as the
+# value of --spec / --specs-dir / --base is that flag's value — so `--spec --help` reads a
+# spec named `--help` and exits 2, never 0.
+fresh r6help
+_help_ok() { # _help_ok <row> <args...> — usage on stdout, exit 0, stderr empty
+  _r="$1"; shift; run_tool "$@"
+  [ "$rc" -eq 0 ] || fail "$_r: '$*' exited $rc, not 0 ($(both))"
+  grep -q '^usage: ' "$T/out" || fail "$_r: '$*' printed no usage on stdout ($(both))"
+  [ ! -s "$T/err" ] || fail "$_r: '$*' wrote to stderr ($(both))"
+}
+_help_ok R6_help_only_as_option -h
+_help_ok R6_help_only_as_option "$GP" --help
+_help_ok R6_help_only_as_option --spec "$GS" -h "$GP"
+_help_ok R6_help_only_as_option "--spec=$GS" --help
+run_tool "$GP" --spec --help; chk_exit2 R6_help_only_as_option 'cannot read --help: no such file'
+grep -q '^usage: ' "$T/out" && fail "R6_help_only_as_option: '--spec --help' printed the usage on stdout ($(both))"
+run_tool "$GP" --spec "$GS" --specs-dir -h; chk_exit2 R6_help_only_as_option 'specs dir is not a directory: -h'
+run_tool --grandfathered "$GP" --base --help; chk_exit2 R6_help_only_as_option 'not inside a git work tree'
+pass "R6_help_only_as_option"
 # An unexpected exception is "the check did not run" (exit 2), never exit 1 — which reads as a
 # violation or a grandfather reject (review round 1, A3). A real input reaches one: a clean
 # plan under a non-ASCII path, printed to an ASCII-only stdout (PYTHONIOENCODING=ascii), makes
