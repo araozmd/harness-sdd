@@ -65,6 +65,13 @@ section() {
     tr '\n' ' ' | tr -s ' \t' '  '
 }
 
+# subsection <file> <heading-line-prefix>: a `###` heading up to the next `##`/`###`, folded.
+subsection() {
+  awk -v h="$2" 'index($0, h) == 1 { k = 1; print; next } k && /^##+ / { k = 0 } k { print }' "$1" |
+    tr '\n' ' ' | tr -s ' \t' '  '
+}
+WF_H='### Fanning out a wave (`/sdd-next --wave`)'
+
 # has <label> <text> <exact clause>: the clause appears verbatim in the folded text.
 has() {
   case "$2" in
@@ -319,12 +326,25 @@ test_slug_rule_prose() {
   end
 }
 
+# ── R6 — manifest before dispatch ──────────────────────────────────────────────────────
+test_manifest_contract() {
+  begin test_manifest_contract
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'After every selected `create` has settled and before the first worker is spawned, the coordinator writes `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md`'
+  has "wave section" "$_w" 'Its header carries `wave: <N>`, `cap: <n> (<source>)` where the source is `--max`, `workflow.max_wave` or `default`,'
+  has "wave section" "$_w" 'one line per record of `waves[0]` — every record, none absent — with the record'"'"'s classification and, for a provisioned feature, its exact branch and worktree.'
+  _d=$(subsection "$WORKFLOW" "$WF_H")
+  has "WORKFLOW wave subsection" "$_d" 'the coordinator writes the manifest `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` with every record of the wave'
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
 test_wave_read_consumes_envelope
 test_eligibility_order_and_cap
 test_slug_rule_prose
+test_manifest_contract
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }

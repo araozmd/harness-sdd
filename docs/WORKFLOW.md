@@ -418,6 +418,16 @@ is written to the board, and there is no lane, lease or claim field.
   `<id>=missing` records and prints no wave at all (exit 0). A stale cycle (every
   dependency already `done`) is not invalid.
 
+### Fanning out a wave (`/sdd-next --wave`)
+
+On one machine, `/sdd-next --wave [--max N] [--epic E##]` turns the wave view into work: it
+runs each selected feature of one wave through the normal loop in its own worktree, as a
+targeted worker (`agents/orchestrator.md` → "Wave coordinator mode (/sdd-next --wave)").
+
+- **Manifest.** After provisioning and before any worker starts, the coordinator writes the
+  manifest `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` with every record of the wave and,
+  for each provisioned feature, its branch and worktree.
+
 ## Diagnosing blocked selection
 
 Dependency cycles and an empty `/sdd-next` result are planning diagnostics, not

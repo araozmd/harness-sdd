@@ -280,6 +280,16 @@ characters outside `[a-z0-9]` to one `-`, trim leading and trailing `-`, and use
 the result is empty. A feature whose `create` fails is classified
 `provisioning-failed: <helper stderr>`, stays `pending`, and does not stop its siblings.
 
+### W4 — manifest
+
+After every selected `create` has settled and before the first worker is spawned, the
+coordinator writes `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` under P3's completeness rule.
+Its header carries `wave: <N>`, `cap: <n> (<source>)` where the source is `--max`,
+`workflow.max_wave` or `default`, `scope:` (the epic, or the whole board) and `selector:` (the
+exact selector command run). Then it lists one line per record of `waves[0]` — every record,
+none absent — with the record's classification and, for a provisioned feature, its exact
+branch and worktree.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is
