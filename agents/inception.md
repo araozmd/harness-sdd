@@ -144,6 +144,7 @@ followed by body sections capturing:
 
 - **Problem / who** — the problem and the user it serves.
 - **Success outcome** — what "done" looks like.
+- **Observable behavior** — the surface (HTTP, CLI, UI, file, exit code) and what a user or client sees; one line.
 - **Scope / boundaries** — what is in and out.
 - **Chosen options** — any options the human picked during the Q&A.
 - **Constraints** — non-negotiables the Architect must honor.
