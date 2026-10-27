@@ -1528,4 +1528,47 @@ codex'; do
 }
 F182_R6_usage
 
+# ── F182-R9: the INSTALLED orchestrator passes the produced key, never a typed one ──
+# Slice = `### Which Builder` up to the next `### ` heading (a `###` sibling ends it; the
+# fenced call block has no `###` line, so the call stays inside the slice). Every anchor runs
+# on the slice — never the whole file — so the sentences cannot drift into another section
+# (M9c moves them below `### The pre-PR change-size handoff` and must red).
+# f182_which_builder <orchestrator.md> — the folded `### Which Builder` slice.
+f182_which_builder() {
+  awk 'f && /^### /{exit} /^### Which Builder/{f=1} f' "$1" | tr '\n' ' ' | tr -s ' '
+}
+F182_R9_orchestrator_prose() {
+  _t="$T/f182-r9"; install_to "$_t" "$T/ch-f182-r9" --agents=claude
+  _o="$_t/.harness/agents/orchestrator.md"
+  [ -f "$_o" ] || fail "F182-R9 setup: no installed orchestrator.md"
+  _raw="$(awk 'f && /^### /{exit} /^### Which Builder/{f=1} f' "$_o")"
+  _sl="$(f182_which_builder "$_o")"
+  [ -n "$_sl" ] || fail "F182-R9 setup: the '### Which Builder' section did not extract — the heading moved"
+  printf '%s\n' "$_raw" | grep -qF -- '--frontend "$(sh "$HARNESS_DIR/tools/host-frontend.sh")"' \
+    || fail "F182-R9: the Which Builder call does not pass --frontend \"\$(sh \"\$HARNESS_DIR/tools/host-frontend.sh\")\""
+  printf '%s' "$_sl" | grep -qE 'An empty key means the host could not be identified[^.]{0,120}all-front-ends rule' \
+    || fail "F182-R9: the Which Builder section does not say an empty key applies the all-front-ends rule"
+  printf '%s' "$_sl" | grep -qF 'You never supply the key by hand' \
+    || fail "F182-R9: the Which Builder section does not forbid supplying the key by hand"
+  printf '%s' "$_sl" | grep -qE "your host's own[^.]{0,40}=raise[^.]{0,40}ADR-0011" \
+    || fail "F182-R9: the TWO-yeses clause does not name your host's own <key>=raise line (ADR-0011)"
+  printf '%s' "$_sl" | grep -qE "That file decides[^.]{0,120}your host's own line when it is" \
+    || fail "F182-R9: 'That file decides' does not say the host's own line decides when the host is known"
+  # The superseded wording is gone from the slice.
+  printf '%s' "$_sl" | grep -qF 'That file decides. Do not read' \
+    && fail "F182-R9: the slice still says 'That file decides.' with no per-front-end qualifier"
+  printf '%s' "$_sl" | grep -qF '`.harness/.escalation-arming`. When either gate' \
+    && fail "F182-R9: the TWO-yeses clause still names only an armed verdict, no host line"
+  # Pre-existing anchors still hold, and the call block lost nothing.
+  for _a in 'builder-role.sh' 'builder-heavy round 3' 'never override the answer' '"phase":"builder","role":"builder-heavy"'; do
+    printf '%s' "$_sl" | grep -qF -- "$_a" || fail "F182-R9: the Which Builder section lost its pre-existing anchor: $_a"
+  done
+  printf '%s\n' "$_raw" | grep -qE '^[[:space:]]+--backend "<execution\.builder\.backend>"' \
+    || fail "F182-R9: the fenced call lost its --backend line"
+  printf '%s\n' "$_raw" | grep -qE '^[[:space:]]+--config "\$HARNESS_DIR/harness\.config\.yaml"' \
+    || fail "F182-R9: the fenced call lost its --config line"
+  pass "the installed orchestrator pipes host-frontend.sh into --frontend and never types a key (F182-R9)"
+}
+F182_R9_orchestrator_prose
+
 echo "test_escalation.sh: all cases passed"
