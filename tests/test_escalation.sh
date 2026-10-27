@@ -1362,4 +1362,39 @@ F182_R2_key_non_raise_shuts() {
 }
 F182_R2_key_non_raise_shuts
 
+# ── F182-R3: no line for the key shuts the gate — never a fallback to the first line ──
+# The decoys prove a WHOLE-key match: `codexx=raise`, `xcodex=raise` and `xclaude=raise`
+# each contain the key as a substring and none of them is that key's line.
+F182_R3_key_missing_line_shuts() {
+  for _first in armed blocked; do
+    for _decoy in claude=raise codexx=raise xcodex=raise; do
+      _f="$(mkfix "f182-r3-$_first-$_decoy" 2 "$_first" claude=raise "$_decoy")"
+      _got="$(role complex 1 --config "$_f" --frontend codex)"
+      [ "$_got" = builder ] \
+        || fail "F182-R3: $_first file with no codex= line (decoy $_decoy) printed '$_got' for --frontend codex"
+      [ "$(rc complex 1 --config "$_f" --frontend codex)" = 0 ] \
+        || fail "F182-R3: the missing-line path did not exit 0"
+      _e="$(err complex 1 --config "$_f" --frontend codex)"
+      [ "$(printf '%s\n' "$_e" | grep -c .)" = 1 ] \
+        || fail "F182-R3: the missing-line path wrote not exactly one advisory line: $_e"
+      printf '%s' "$_e" | grep -qF "no verdict is recorded for front-end 'codex'" \
+        || fail "F182-R3: $_first file (decoy $_decoy) lacks the no-verdict advisory for codex: $_e"
+      printf '%s' "$_e" | grep -qF 'blocked by:' \
+        && fail "F182-R3: the missing-line advisory took the no-key blocked-by branch: $_e"
+    done
+  done
+  _f="$(mkfix f182-r3-xclaude 2 blocked xclaude=raise)"
+  [ "$(role complex 1 --config "$_f" --frontend claude)" = builder ] \
+    || fail "F182-R3: an xclaude=raise line opened the gate for --frontend claude (substring match)"
+  err complex 1 --config "$_f" --frontend claude | grep -qF "no verdict is recorded for front-end 'claude'" \
+    || fail "F182-R3: blocked/xclaude=raise did not report a missing claude verdict"
+  # Boundary: an EMPTY verdict (`claude=`) is a recorded line, so it takes R2's branch.
+  _f="$(mkfix f182-r3-empty 2 blocked claude=)"
+  _e="$(err complex 1 --config "$_f" --frontend claude)"
+  printf '%s' "$_e" | grep -qF 'on this front-end (claude) the installer recorded claude= ' \
+    || fail "F182-R3: an empty claude= verdict was not reported as the recorded line: $_e"
+  pass "a key with no line of its own shuts the gate on armed and blocked, whole-key match (F182-R3)"
+}
+F182_R3_key_missing_line_shuts
+
 echo "test_escalation.sh: all cases passed"
