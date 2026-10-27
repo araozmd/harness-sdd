@@ -155,6 +155,16 @@ grep -qxF '| Entity | Field | Type | Notes | Ref |' "$GP" && grep -qxF '|:---|--
 run_tool "$GP" --spec "$GS"; expect_ok R2_header_separator_exempt
 pass "R2_header_separator_exempt"
 
+# GFM accepts a one-dash delimiter cell: `|-|` and `|:-|-:|` are separators too, so the
+# header above them (no R-id) and the separator itself stay exempt (N14: `-{3,}`).
+fresh r2dash
+sed -e 's/^| Entity | Field | Type | Notes | R-id |$/| Entity | Field | Type | Notes | Ref |/' \
+    -e '/^| Entity | Field /{n;s/^|---|---|---|---|---|$/|:-|-:|-|-|-|/;}' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+grep -qxF '| Entity | Field | Type | Notes | Ref |' "$GP" && grep -qxF '|:-|-:|-|-|-|' "$GP" \
+  || fail "R2_one_dash_separator_exempt: precondition: the one-dash separator rewrite did not apply"
+run_tool "$GP" --spec "$GS"; expect_ok R2_one_dash_separator_exempt
+pass "R2_one_dash_separator_exempt"
+
 fresh r2other
 grep -qF '| `fx run` |' "$GP" && grep -qF '| a pipe row under DO NOT TOUCH |' "$GP" && grep -qF '| an uncited row under an unchecked heading |' "$GP" \
   || fail "R2_other_headings_ignored: precondition: the positive plan lost its unchecked-heading rows"
@@ -285,6 +295,19 @@ grep -qxF "plan-cite-check: unresolved-adr $BP:16 bookings/ADR-0002 not-in-names
   || fail "R4_qualified_cross_namespace: bookings/ADR-0002 resolved outside the bookings namespace ($(both))"
 [ "$(count '^plan-cite-check: unresolved-adr ')" -eq 2 ] || fail "R4_qualified_cross_namespace: expected exactly two unresolved-adr lines on the negative plan ($(both))"
 pass "R4_qualified_cross_namespace"
+
+# `_` is legal in a namespace token (init.sh 2c: `my_product/`): the qualifier is the whole
+# `my_product`, never its `product` tail (N18). 0007 lives in my_product only, so a bare read
+# cannot resolve it either; the control proves the citation is looked up as qualified.
+fresh r4us
+mkdir -p "$S/my_product/adr"; printf '# ADR-0007\n\n- **Status:** accepted\n' > "$S/my_product/adr/0007-us.md"
+add_row "$GP" '| `us.py` | modify | my_product/ADR-0007 |'
+run_tool "$GP" --spec "$GS"; expect_ok R4_underscore_namespace_resolves
+add_row "$GP" '| `us2.py` | modify | my_product/ADR-0001 |'
+run_tool "$GP" --spec "$GS"; expect_fail R4_underscore_namespace_resolves
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_ln my_product/ADR-0001 not-in-namespace my_product" "$T/out" \
+  || fail "R4_underscore_namespace_resolves: my_product/ADR-0001 was not looked up in the my_product namespace only ($(both))"
+pass "R4_underscore_namespace_resolves"
 
 fresh r4unk
 add_row "$GP" '| `u.py` | modify | nowhere/ADR-0001 |'
