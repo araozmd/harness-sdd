@@ -208,6 +208,104 @@ grep -qxF "plan-cite-check: uncited-row $GP:$_ln Data model" "$T/out" \
   || fail "R3_pr_number_not_a_citation: with R2 removed, the PR304 row is not uncited — PR304 counted as a citation ($(both))"
 pass "R3_pr_number_not_a_citation"
 
-# @@R4@@
+# ── R4: ADR citations resolve under the namespace rule (init.sh 2c / agents/reviewer.md) ─
+# add_row <file> <row> — append a data row right after the positive plan's `d.py` row (inside
+# `## Files to change`); prints the new row's line number into $_ln.
+add_row() {
+  printf '%s\n' "$2" > "$T/row.md"
+  awk -v f="$T/row.md" '{ print } index($0, "| `d.py` |") == 1 { while ((getline l < f) > 0) print l }' "$1" > "$1.new"; mv "$1.new" "$1"
+  _ln="$(grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1)"
+  [ -n "$_ln" ] || fail "add_row: precondition: row '$2' not inserted"
+}
+fresh r4
+run_tool "$BP" --spec "$BS"; expect_fail R4_bare_unresolved
+grep -qxF "plan-cite-check: unresolved-adr $BP:15 ADR-0042 not-in-any-namespace" "$T/out" \
+  || fail "R4_bare_unresolved: no 'unresolved-adr <plan>:15 ADR-0042 not-in-any-namespace' ($(both))"
+pass "R4_bare_unresolved"
+grep -qxF "plan-cite-check: unresolved-adr $BP:16 bookings/ADR-0002 not-in-namespace bookings" "$T/out" \
+  || fail "R4_qualified_cross_namespace: bookings/ADR-0002 resolved outside the bookings namespace ($(both))"
+[ "$(count '^plan-cite-check: unresolved-adr ')" -eq 2 ] || fail "R4_qualified_cross_namespace: expected exactly two unresolved-adr lines on the negative plan ($(both))"
+pass "R4_qualified_cross_namespace"
+
+fresh r4unk
+add_row "$GP" '| `u.py` | modify | nowhere/ADR-0001 |'
+run_tool "$GP" --spec "$GS"; expect_fail R4_unknown_namespace
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_ln nowhere/ADR-0001 unknown-namespace nowhere" "$T/out" \
+  || fail "R4_unknown_namespace: an unknown '<ns>/' qualifier resolved ($(both))"
+pass "R4_unknown_namespace"
+
+fresh r4qual
+run_tool "$GP" --spec "$GS"; expect_ok R4_qualified_resolves
+# each qualified citation resolves in ITS namespace: remove the number from that space only
+_bl="$(grep -n '| platform/ADR-0001 |' "$GP" | cut -d: -f1)"; _cl="$(grep -n '| bookings/ADR-0001 |' "$GP" | cut -d: -f1)"
+rm "$S/adr/0001-accepted.md"
+sed 's/| ADR-0002 ADR-0001 |$/| ADR-0002 |/' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+run_tool "$GP" --spec "$GS"; expect_fail R4_qualified_resolves
+[ "$(count '^plan-cite-check: unresolved-adr ')" -eq 1 ] || fail "R4_qualified_resolves: expected one unresolved-adr with platform 0001 gone ($(both))"
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_bl platform/ADR-0001 not-in-namespace platform" "$T/out" \
+  || fail "R4_qualified_resolves: platform/ADR-0001 did not resolve against specs/adr/ only ($(both))"
+fresh r4qual2
+rm "$S/bookings/adr/0001-other.md"
+run_tool "$GP" --spec "$GS"; expect_fail R4_qualified_resolves
+[ "$(count '^plan-cite-check: unresolved-adr ')" -eq 1 ] || fail "R4_qualified_resolves: expected one unresolved-adr with bookings 0001 gone ($(both))"
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_cl bookings/ADR-0001 not-in-namespace bookings" "$T/out" \
+  || fail "R4_qualified_resolves: bookings/ADR-0001 did not resolve against specs/bookings/adr/ only ($(both))"
+pass "R4_qualified_resolves"
+
+fresh r4bare
+rm "$S/adr/0001-accepted.md"
+sed 's/| platform\/ADR-0001 |$/| ADR-0001 |/' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+grep -qF 'platform/ADR-0001' "$GP" && fail "R4_bare_resolves_other_namespace: precondition: the platform qualifier survived"
+run_tool "$GP" --spec "$GS"; expect_ok R4_bare_resolves_other_namespace
+pass "R4_bare_resolves_other_namespace"
+
+fresh r4wrap
+add_row "$GP" '| `w1.py` | modify | **platform** ADR-0001 |'
+add_row "$GP" '| `w2.py` | modify | `ADR-0002` |'
+run_tool "$GP" --spec "$GS"; expect_ok R4_wrapper_stripped
+add_row "$GP" '| `w3.py` | modify | **bookings** ADR-0002 |'
+run_tool "$GP" --spec "$GS"; expect_fail R4_wrapper_stripped
+[ "$(count '^plan-cite-check: unresolved-adr ')" -eq 1 ] || fail "R4_wrapper_stripped: expected exactly one unresolved-adr ($(both))"
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_ln bookings/ADR-0002 not-in-namespace bookings" "$T/out" \
+  || fail "R4_wrapper_stripped: '**bookings** ADR-0002' was read as a bare id — the emphasis wrapper was not stripped ($(both))"
+pass "R4_wrapper_stripped"
+
+fresh r4space
+add_row "$GP" '| `s1.py` | modify | the ADR-0001 |'
+run_tool "$GP" --spec "$GS"; expect_ok R4_space_qualifier_known_token
+add_row "$GP" '| `s2.py` | modify | bookings ADR-0002 |'
+run_tool "$GP" --spec "$GS"; expect_fail R4_space_qualifier_known_token
+[ "$(count '^plan-cite-check: unresolved-adr ')" -eq 1 ] || fail "R4_space_qualifier_known_token: expected exactly one unresolved-adr ($(both))"
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_ln bookings/ADR-0002 not-in-namespace bookings" "$T/out" \
+  || fail "R4_space_qualifier_known_token: 'bookings ADR-0002' (a known token, then a space) was not read as qualified ($(both))"
+pass "R4_space_qualifier_known_token"
+
+fresh r4case
+add_row "$GP" '| `k.py` | modify | Bookings/ADR-0001 |'
+run_tool "$GP" --spec "$GS"; expect_ok R4_qualifier_case_folded
+pass "R4_qualifier_case_folded"
+
+fresh r4none
+rm -rf "$S/adr" "$S/bookings"
+printf '%s\n' '# p' '' '## Files to change' '' '| File | Change | R-id |' '|---|---|---|' '| `a.py` | create | ADR-0001 |' \
+  '' '## Deferred' '' 'Deferred: none — x' > "$S/epics/E01-x/F01-good/adr.plan.md"
+run_tool "$S/epics/E01-x/F01-good/adr.plan.md" --spec "$GS"; expect_fail R4_no_namespaces_all_unresolved
+grep -qxF "plan-cite-check: unresolved-adr $S/epics/E01-x/F01-good/adr.plan.md:7 ADR-0001 not-in-any-namespace" "$T/out" \
+  || fail "R4_no_namespaces_all_unresolved: a bare id resolved with no adr/ namespace at all ($(both))"
+sed 's/| ADR-0001 |$/| R1 |/' "$S/epics/E01-x/F01-good/adr.plan.md" > "$S/epics/E01-x/F01-good/rid.plan.md"
+run_tool "$S/epics/E01-x/F01-good/rid.plan.md" --spec "$GS"; expect_ok R4_no_namespaces_all_unresolved
+pass "R4_no_namespaces_all_unresolved"
+
+fresh r4two
+_dl="$(grep -n '| ADR-0002 ADR-0001 |' "$GP" | cut -d: -f1)"
+run_tool "$GP" --spec "$GS"; expect_ok R4_two_cites_one_row
+rm "$S/adr/0002-deferred-waf.md"
+run_tool "$GP" --spec "$GS"; expect_fail R4_two_cites_one_row
+[ "$(count "^plan-cite-check: unresolved-adr .*:$_dl ")" -eq 1 ] || fail "R4_two_cites_one_row: expected exactly one unresolved-adr on the two-id row ($(both))"
+grep -qxF "plan-cite-check: unresolved-adr $GP:$_dl ADR-0002 not-in-any-namespace" "$T/out" \
+  || fail "R4_two_cites_one_row: the first of two back-to-back ids was never looked up on its own ($(both))"
+pass "R4_two_cites_one_row"
+
+# @@R5@@
 
 echo "all plan-cite checks passed"

@@ -38,6 +38,10 @@ ADR_TOKEN_RE = re.compile(r"ADR-[0-9]{4}")
 # A spec R-id line, copied from tools/tasks-pair-check.py's RID_RE: `- **R<n>** ...` or the
 # bold-title form `- **R<n> — Title.** ...`, outside fenced code.
 RID_RE = re.compile(r"^[ \t]*-[ \t]+\*\*(R[0-9]+)(?:\*\*|[ \t]+(?:—|–|-))")
+# The ADR-citation extractor, as init.sh 2c spells it: an optional `<qualifier><space-or-/>`
+# before the id.  A `|` is appended to every id first so a qualifier can never eat the
+# PREVIOUS citation (`ADR-0002 ADR-0001` is two citations, not one qualified by `ADR-0002`).
+ADR_CITE_RE = re.compile(r"(?:([A-Za-z0-9_-]+)([ /]))?ADR-([0-9]{4})")
 WRAPPERS = "*`\"'"
 
 
@@ -172,6 +176,73 @@ def cites(row):
     return rids, bool(ADR_TOKEN_RE.search(text))
 
 
+def specs_dir_for(plan):
+    """The nearest ancestor of the plan whose basename is `specs`."""
+    d = os.path.dirname(os.path.realpath(plan))
+    while True:
+        if os.path.basename(d) == "specs":
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            raise InputError("no ancestor of %s is named specs; pass --specs-dir" % plan)
+        d = parent
+
+
+def discover_namespaces(specs_dir):
+    """{token: {number: [adr paths]}} for every directory named `adr` under specs_dir.
+
+    The token is the adr/ dir's parent basename, `platform` for <specs-dir>/adr; only regular
+    `*.md` files directly inside count, numbered by the leading digits of the filename.
+    """
+    if not os.path.isdir(specs_dir):
+        raise InputError("specs dir is not a directory: %s" % specs_dir)
+
+    def onerror(exc):
+        raise InputError("cannot read specs dir %s: %s" % (specs_dir, exc))
+
+    root_adr = os.path.realpath(os.path.join(specs_dir, "adr"))
+    index = {}
+    for d, subdirs, files in os.walk(specs_dir, onerror=onerror):
+        subdirs.sort()
+        if os.path.basename(d) != "adr":
+            continue
+        token = "platform" if os.path.realpath(d) == root_adr else \
+            os.path.basename(os.path.dirname(d))
+        ns = index.setdefault(token.lower(), {})
+        for f in sorted(files):
+            p = os.path.join(d, f)
+            m = re.match(r"[0-9]+", f)
+            if not f.endswith(".md") or not m or not os.path.isfile(p):
+                continue
+            ns.setdefault(m.group(0), []).append(p)
+    return index
+
+
+def adr_citations(row, index):
+    """[(display, ns-or-None, number)] for one row; ns None = bare (any namespace)."""
+    text = ADR_TOKEN_RE.sub(lambda m: m.group(0) + "|", strip_wrappers(row))
+    out = []
+    for m in ADR_CITE_RE.finditer(text):
+        qual, sep, num = m.group(1), m.group(2), m.group(3)
+        if qual and (sep == "/" or qual.lower() in index):
+            c = ("%s/ADR-%s" % (qual, num), qual, num)
+        else:
+            c = ("ADR-%s" % num, None, num)
+        if c not in out:
+            out.append(c)
+    return out
+
+
+def resolve_adr(ns, num, index):
+    """Return (paths, reason): paths empty = unresolved, with the reason word(s)."""
+    if ns is None:
+        paths = [p for tok in sorted(index) for p in index[tok].get(num, [])]
+        return paths, "not-in-any-namespace"
+    if ns.lower() not in index:
+        return [], "unknown-namespace %s" % ns
+    return list(index[ns.lower()].get(num, [])), "not-in-namespace %s" % ns
+
+
 def data_rows(sections):
     for sec in sections:
         for table in sec["tables"]:
@@ -180,7 +251,7 @@ def data_rows(sections):
                     yield sec, n, text
 
 
-def check_plan(plan, sections, spec_rids=None):
+def check_plan(plan, sections, spec_rids=None, index=None):
     """Pure: return [(line, finding)] in file order (finding without the prefix).
 
     spec_rids None = no --spec: R-id existence is not checked.
@@ -194,6 +265,10 @@ def check_plan(plan, sections, spec_rids=None):
             for rid in rids:
                 if rid not in spec_rids:
                     out.append((n, "unknown-rid %s:%d %s" % (plan, n, rid)))
+        for display, ns, num in adr_citations(text, index or {}):
+            paths, reason = resolve_adr(ns, num, index or {})
+            if not paths:
+                out.append((n, "unresolved-adr %s:%d %s %s" % (plan, n, display, reason)))
     out.sort(key=lambda v: v[0])
     return out
 
@@ -225,10 +300,11 @@ def main(argv):
         plan = pos[0]
         sections = parse_sections(_read(plan))
         spec_rids = None if spec is None else read_rids(spec)
+        index = discover_namespaces(specs_dir if specs_dir is not None else specs_dir_for(plan))
     except InputError as exc:
         sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
         return 2
-    violations = check_plan(plan, sections, spec_rids)
+    violations = check_plan(plan, sections, spec_rids, index)
     if violations:
         for _n, v in violations:
             print(PFX + v)
