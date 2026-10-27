@@ -214,6 +214,27 @@ migrate_config() {
     fi
   fi
 
+  # --- workflow.max_wave (E36-F07 `/sdd-next --wave` worker cap) ---
+  # Insert under the top-level `workflow:` header (tolerating a trailing comment), else
+  # append a new `workflow:` header. The presence check is scoped to a `max_wave:` INSIDE
+  # the top-level `workflow:` section (_cfg_has_workflow_max_wave), so a same-named key
+  # under another section never suppresses the seed and an existing value is never touched.
+  # The seeded line is byte-identical to the source harness.config.yaml line. This runs
+  # BEFORE the identity seed below, so both arms here are reachable (the identity seed
+  # would otherwise always have created the header first).
+  if ! _cfg_has_workflow_max_wave "$_cfg"; then
+    if grep -Eq '^workflow:[[:space:]]*(#.*)?$' "$_cfg"; then
+      _mc_insert_after "$_cfg" '^workflow:[[:space:]]*(#.*)?$' \
+        '  max_wave: 3   # worker cap for `/sdd-next --wave` (E36-F07); `--max N` overrides it for one run'
+    else
+      {
+        printf '\n'
+        printf 'workflow:\n'
+        printf '%s\n' '  max_wave: 3   # worker cap for `/sdd-next --wave` (E36-F07); `--max N` overrides it for one run'
+      } >> "$_cfg"
+    fi
+  fi
+
   # --- workflow.identity (E10-F01 scoped `--mine` ownership) ---
   # Insert under the top-level `workflow:` header (tolerating a trailing comment).
   # Empty default ⇒ solo / board-wide, exactly today's behavior (owner ignored). A
@@ -679,6 +700,17 @@ _cfg_has_workflow_identity() {
     /^workflow:[[:space:]]*(#.*)?$/ { w=1; next }
     w && /^[^[:space:]#]/ { w=0 }
     w && /^[[:space:]]+identity:/ { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
+# _cfg_has_workflow_max_wave <file> — true (exit 0) iff a `max_wave:` key exists INSIDE
+# the top-level `workflow:` section (same awk shape as _cfg_has_workflow_identity).
+_cfg_has_workflow_max_wave() {
+  awk '
+    /^workflow:[[:space:]]*(#.*)?$/ { w=1; next }
+    w && /^[^[:space:]#]/ { w=0 }
+    w && /^[[:space:]]+max_wave:/ { found=1 }
     END { exit found ? 0 : 1 }
   ' "$1"
 }

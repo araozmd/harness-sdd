@@ -45,6 +45,11 @@ workflow:
   # else parent epic `owner`) equals this identity; it never claims unassigned work.
   identity: ""
 
+  # Worker cap for `/sdd-next --wave` (E36-F07): how many wave features run at once in their
+  # own worktrees. `--max N` overrides it for one run. Keep it small: workers share one
+  # machine and one `tools/run-tests.sh` slot (one run per machine, exit 5 otherwise).
+  max_wave: 3   # worker cap for `/sdd-next --wave` (E36-F07); `--max N` overrides it for one run
+
 # Builder execution backend. The installer ASKS for this — a follow-up prompt right after
 # the front-end picker, on a TTY — and takes --builder-backend=<in-session|delegate> or
 # HARNESS_BUILDER_BACKEND=<value> for scripted runs (the flag wins). RE-RUN the installer

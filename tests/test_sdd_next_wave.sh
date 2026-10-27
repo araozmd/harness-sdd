@@ -95,7 +95,75 @@ test_wave_token_in_generated_bodies() {
   end
 }
 
+# ── R10 — workflow.max_wave config key ─────────────────────────────────────────────────
+# in_section <file> <top-level-key>: the lines inside that top-level YAML section.
+in_section() {
+  awk -v k="$2" '$0 ~ "^" k ":[[:space:]]*(#.*)?$" { s = 1; next } s && /^[^[:space:]#]/ { s = 0 } s { print }' "$1"
+}
+
+# upgrade_with <config-text-file>: install fresh once into $TU (lazily), replace its config
+# with the given text, re-run the installer (the upgrade path), leave the result in $TU.
+TU="$TMP/upgrade"
+upgrade_with() {
+  if [ ! -d "$TU/.harness" ]; then
+    mkdir -p "$TU"
+    safe_git init -q "$TU" || { fail "upgrade fixture git init"; return 1; }
+    HOME="$TMP/home" CODEX_HOME="$TMP/codex" HARNESS_AGENTS="claude" \
+      sh "$ROOT/harness-install.sh" "$TU" >"$TMP/upgrade-fresh.log" 2>&1 ||
+      { fail "upgrade fixture fresh install failed"; return 1; }
+  fi
+  cp "$1" "$TU/.harness/harness.config.yaml"
+  HOME="$TMP/home" CODEX_HOME="$TMP/codex" HARNESS_AGENTS="claude" \
+    sh "$ROOT/harness-install.sh" "$TU" >"$TMP/upgrade.log" 2>&1 ||
+    { fail "upgrade run failed: $(tail -3 "$TMP/upgrade.log")"; return 1; }
+}
+
+test_max_wave_config_seed() {
+  begin test_max_wave_config_seed
+  # The source key line, which the installer must seed byte-for-byte.
+  _src_line=$(in_section "$ROOT/harness.config.yaml" workflow | grep -E '^[[:space:]]+max_wave:' || :)
+  [ "$(printf '%s\n' "$_src_line" | grep -c .)" = 1 ] || fail "source workflow: does not carry exactly one max_wave line"
+  printf '%s\n' "$_src_line" | grep -Eq '^[[:space:]]+max_wave:[[:space:]]+3([[:space:]]|$)' ||
+    fail "source max_wave is not 3: $_src_line"
+  has "source max_wave line" "$_src_line" '/sdd-next --wave'
+  # Fresh install.
+  in_section "$CFG" workflow | grep -Eq '^[[:space:]]+max_wave:[[:space:]]+3([[:space:]]|$)' ||
+    fail "fresh install: workflow: lacks max_wave: 3"
+
+  # Preserved config with workflow: but no max_wave gains exactly one, inside workflow:.
+  printf 'store:\n  tasks: local\nworkflow:\n  identity: ""\n  require_spec_approval: true\n' >"$TMP/cfg-lacks"
+  if upgrade_with "$TMP/cfg-lacks"; then
+    _got=$(in_section "$TU/.harness/harness.config.yaml" workflow | grep -E '^[[:space:]]+max_wave:' || :)
+    [ "$_got" = "$_src_line" ] || fail "preserved config lacking max_wave: workflow: got [$_got], want the source line"
+    [ "$(grep -cE '^[[:space:]]+max_wave:' "$TU/.harness/harness.config.yaml")" = 1 ] ||
+      fail "preserved config lacking max_wave: not exactly one max_wave line after upgrade"
+  fi
+  # A preserved config that already has it keeps its value and gains no second line.
+  printf 'workflow:\n  identity: ""\n  max_wave: 5   # mine\n' >"$TMP/cfg-has"
+  if upgrade_with "$TMP/cfg-has"; then
+    grep -qxF '  max_wave: 5   # mine' "$TU/.harness/harness.config.yaml" || fail "preserved max_wave: 5 was not kept verbatim"
+    [ "$(grep -cE '^[[:space:]]+max_wave:' "$TU/.harness/harness.config.yaml")" = 1 ] ||
+      fail "preserved config with max_wave gained a second max_wave line"
+  fi
+  # A same-named key under another top-level section never suppresses the workflow seed.
+  printf 'other:\n  max_wave: 9\nworkflow:\n  identity: ""\n' >"$TMP/cfg-other"
+  if upgrade_with "$TMP/cfg-other"; then
+    _got=$(in_section "$TU/.harness/harness.config.yaml" workflow | grep -E '^[[:space:]]+max_wave:' || :)
+    [ "$_got" = "$_src_line" ] || fail "an other.max_wave suppressed the workflow seed: got [$_got]"
+    in_section "$TU/.harness/harness.config.yaml" other | grep -qxF '  max_wave: 9' || fail "other.max_wave was altered"
+  fi
+  # No workflow: section at all: a new workflow: header carries the seed.
+  printf 'store:\n  tasks: local\n' >"$TMP/cfg-none"
+  if upgrade_with "$TMP/cfg-none"; then
+    [ "$(grep -cE '^workflow:' "$TU/.harness/harness.config.yaml")" = 1 ] || fail "no-workflow config: not exactly one workflow: header"
+    in_section "$TU/.harness/harness.config.yaml" workflow | grep -qxF -- "$_src_line" ||
+      fail "no-workflow config: the appended workflow: lacks the seed line"
+  fi
+  end
+}
+
 test_wave_token_in_generated_bodies
+test_max_wave_config_seed
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }
