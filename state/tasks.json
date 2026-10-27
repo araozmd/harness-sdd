@@ -526,7 +526,7 @@
         {
           "id": "E36-F07",
           "title": "/sdd-next --wave fans out one wave into isolated worktrees",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
