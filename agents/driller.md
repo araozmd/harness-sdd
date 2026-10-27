@@ -78,7 +78,8 @@ These are the inputs to the feature breakdown — you read them, you do not rewr
 ## Stage (ADR-0009)
 
 Read the product's stage with the design artifacts above. Take the literal from
-`specs/product.md` frontmatter: `sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'`
+`specs/product.md` frontmatter (the `---` block that starts on line 1; a later `---` block is
+not frontmatter): `sed -n '1{/^---$/!q;};1,/^---$/p' specs/product.md | grep '^stage:'`
 — one of `discovery`, `pilot`, `production`; when the line is absent or unrecognized, the
 stage is `production`. You never write `specs/product.md`.
 

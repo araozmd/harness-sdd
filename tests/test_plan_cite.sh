@@ -98,6 +98,23 @@ printf '%s\n' '# No tables' '' '## Data model' '' 'No stored state.' '' '## API 
 run_tool "$NP" --spec "$GS"; expect_ok R1_ok_no_tables
 pass "R1_ok_no_tables"
 
+# A UTF-8 BOM (U+FEFF, bytes EF BB BF) before line 1 is stripped — ONE of them — before any
+# file is parsed (review round 1, A1): a BOM'd plan whose line 1 is `## Deferred` keeps that
+# heading. Two BOMs are not one BOM: the second stays, so line 1 is no heading.
+fresh r1bom
+_bom="$(printf '\357\273\277')"
+BOMP="$S/epics/E01-x/F01-good/bom.plan.md"
+printf '%s\n' "${_bom}## Deferred" '' 'Deferred: none — x' > "$BOMP"
+[ "$(head -c 3 "$BOMP" | od -An -tx1 | tr -d ' \n')" = efbbbf ] || fail "R1_bom_plan_line1_heading: precondition: the plan does not start with a BOM"
+run_tool "$BOMP" --spec "$GS"; expect_ok R1_bom_plan_line1_heading
+grep -qE '^plan-cite-check: ok .*: 0 row\(s\) cited, deferred: none, spec: 4 R-ids$' "$T/out" \
+  || fail "R1_bom_plan_line1_heading: the ok line does not read the BOM'd line-1 '## Deferred' none form ($(both))"
+printf '%s\n' "${_bom}${_bom}## Deferred" '' 'Deferred: none — x' > "$BOMP"
+run_tool "$BOMP" --spec "$GS"; expect_fail R1_bom_plan_line1_heading
+grep -qxF "plan-cite-check: deferred-section-missing $BOMP" "$T/out" \
+  || fail "R1_bom_plan_line1_heading: with TWO BOMs the second was stripped too — only one leading BOM is stripped ($(both))"
+pass "R1_bom_plan_line1_heading"
+
 F04D="$ROOT/specs/epics/E36-emergent-slices/F04-plan-citation-gate"
 run_tool "$F04D/E36-F04.plan.md" --spec "$F04D/E36-F04.spec.md"; expect_ok R1_dogfood_own_plan
 pass "R1_dogfood_own_plan"
@@ -248,6 +265,14 @@ printf '%s\n' '# p' '' '## Files to change' '' '| File | Change | R-id |' '|---|
 run_tool "$S/epics/E01-x/F01-good/bold.plan.md" --spec "$T/r3bold.spec.md"; expect_ok R3_bold_title_rid_form
 grep -qE ', spec: 1 R-ids$' "$T/out" || fail "R3_bold_title_rid_form: the bold-title form '- **R1 — Title.**' was not read as R1 ($(both))"
 pass "R3_bold_title_rid_form"
+# A BOM'd spec whose line 1 is an R-id line still yields that R-id (review round 1, A1).
+fresh r3bom
+printf '%s\n' "$(printf '\357\273\277')- **R1** — The system shall do one." '- **R2** — The system shall do two.' > "$T/r3bom.spec.md"
+printf '%s\n' '# p' '' '## Files to change' '' '| File | Change | R-id |' '|---|---|---|' '| `a.py` | create | R1 |' \
+  '' '## Deferred' '' 'Deferred: none — x' > "$S/epics/E01-x/F01-good/bomspec.plan.md"
+run_tool "$S/epics/E01-x/F01-good/bomspec.plan.md" --spec "$T/r3bom.spec.md"; expect_ok R3_bom_spec_line1_rid
+grep -qE ', spec: 2 R-ids$' "$T/out" || fail "R3_bom_spec_line1_rid: the BOM'd spec's line-1 R1 was not read ($(both))"
+pass "R3_bom_spec_line1_rid"
 
 fresh r3pr
 grep -qF 'PR304 is a pull request' "$GP" || fail "R3_pr_number_not_a_citation: precondition: the PR304 row is gone"
@@ -286,19 +311,50 @@ add_row() {
   _ln="$(grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1)"
   [ -n "$_ln" ] || fail "add_row: precondition: row '$2' not inserted"
 }
-# Known limit (review round 1, A5; the tool docstring's "Known limits"): the spec reads an R
-# token from any non-alphanumeric left boundary, and `:` is one, so a cross-feature
-# `E36-F03:R1` counts as THIS spec's R1. Under --spec an id the spec does not declare still
-# surfaces as unknown-rid; one it does declare is a silent pass. Pinned so a change is deliberate.
+# Cross-feature citations (review round 1, A5; docs/SPEC-FORMAT.md grammar item 3): an R
+# token IMMEDIATELY preceded by `E<digits>-F<digits>:` cites ANOTHER feature's requirement.
+# It cites the row, but it is never checked against --spec's R-ids. A bare R token keeps its
+# reading. GS declares R1..R4 only, so R5/R9 are ids this spec does not have.
 fresh r3xf
 add_row "$GP" '| `xf.py` | modify | per E36-F03:R9 |'
-run_tool "$GP" --spec "$GS"; expect_fail R3_cross_feature_id_reads_as_local
-grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R9" "$T/out" || fail "R3_cross_feature_id_reads_as_local: E36-F03:R9 is not read as this spec's R9 ($(both))"
-[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_cross_feature_id_reads_as_local: expected exactly one finding ($(both))"
-fresh r3xf2
-add_row "$GP" '| `xf.py` | modify | per E36-F03:R1 |'
-run_tool "$GP" --spec "$GS"; expect_ok R3_cross_feature_id_reads_as_local
-pass "R3_cross_feature_id_reads_as_local"
+run_tool "$GP" --spec "$GS"; expect_ok R3_cross_feature_rid_cites_row
+grep -qE ', spec: 4 R-ids$' "$T/out" || fail "R3_cross_feature_rid_cites_row: the ok line does not say the spec was checked ($(both))"
+run_tool "$GP"; expect_ok R3_cross_feature_rid_cites_row
+pass "R3_cross_feature_rid_cites_row"
+fresh r3xfmix
+add_row "$GP" '| `xf.py` | modify | E36-F03:R5 R2 |'
+run_tool "$GP" --spec "$GS"; expect_ok R3_cross_feature_mixed_row
+# the bare id in a mixed row is still checked: R7 is unknown, the cross-feature R5 is not
+fresh r3xfmix2
+add_row "$GP" '| `xf.py` | modify | E36-F03:R5 R7 |'
+run_tool "$GP" --spec "$GS"; expect_fail R3_cross_feature_mixed_row
+grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R7" "$T/out" || fail "R3_cross_feature_mixed_row: the bare R7 beside E36-F03:R5 was not checked ($(both))"
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_cross_feature_mixed_row: expected exactly one finding, the bare R7 ($(both))"
+pass "R3_cross_feature_mixed_row"
+fresh r3xfbare
+add_row "$GP" '| `xf.py` | modify | R5 |'
+run_tool "$GP" --spec "$GS"; expect_fail R3_bare_rid_still_checked
+grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R5" "$T/out" || fail "R3_bare_rid_still_checked: a bare R5 the spec lacks is not unknown-rid ($(both))"
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_bare_rid_still_checked: expected exactly one finding ($(both))"
+pass "R3_bare_rid_still_checked"
+# Not a feature-id prefix ⇒ a bare R token: an alphanumeric before the `E` (XE36-F03:), a
+# space after the colon (E36-F03: R5), a lowercase id (e36-f03:).
+for _xr in 'XE36-F03:R5' 'E36-F03: R5' 'e36-f03:R5'; do
+  fresh r3xfnp
+  add_row "$GP" "| \`xf.py\` | modify | $_xr |"
+  run_tool "$GP" --spec "$GS"; expect_fail R3_feature_prefix_must_be_exact
+  grep -qxF "plan-cite-check: unknown-rid $GP:$_ln R5" "$T/out" || fail "R3_feature_prefix_must_be_exact: '$_xr' was read as a cross-feature citation, not a bare R5 ($(both))"
+  [ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_feature_prefix_must_be_exact: '$_xr': expected exactly one finding ($(both))"
+done
+pass "R3_feature_prefix_must_be_exact"
+# The cross-feature form needs an R token right after the colon: `E36-F03:PR304` is no
+# citation (the PR304 rule, R3_pr_number_not_a_citation, holds behind a feature prefix too).
+fresh r3xfpr
+add_row "$GP" '| `xf.py` | modify | E36-F03:PR304 |'
+run_tool "$GP" --spec "$GS"; expect_fail R3_cross_feature_pr_not_a_citation
+grep -qxF "plan-cite-check: uncited-row $GP:$_ln Files to change" "$T/out" || fail "R3_cross_feature_pr_not_a_citation: E36-F03:PR304 counted as a citation ($(both))"
+[ "$(count '^plan-cite-check: ')" -eq 2 ] || fail "R3_cross_feature_pr_not_a_citation: expected exactly one finding ($(both))"
+pass "R3_cross_feature_pr_not_a_citation"
 
 fresh r4
 run_tool "$BP" --spec "$BS"; expect_fail R4_bare_unresolved
@@ -616,6 +672,26 @@ run_tool --help
 grep -q '^usage: ' "$T/out" || fail "R6_help_exit0: no usage on stdout ($(both))"
 [ ! -s "$T/err" ] || fail "R6_help_exit0: stderr not empty ($(both))"
 pass "R6_help_exit0"
+# Help is an OPTION, never a flag's value (review round 1, A4): `-h`/`--help` print the usage
+# and exit 0 only where the argv walk meets them as an option token. A word consumed as the
+# value of --spec / --specs-dir / --base is that flag's value — so `--spec --help` reads a
+# spec named `--help` and exits 2, never 0.
+fresh r6help
+_help_ok() { # _help_ok <row> <args...> — usage on stdout, exit 0, stderr empty
+  _r="$1"; shift; run_tool "$@"
+  [ "$rc" -eq 0 ] || fail "$_r: '$*' exited $rc, not 0 ($(both))"
+  grep -q '^usage: ' "$T/out" || fail "$_r: '$*' printed no usage on stdout ($(both))"
+  [ ! -s "$T/err" ] || fail "$_r: '$*' wrote to stderr ($(both))"
+}
+_help_ok R6_help_only_as_option -h
+_help_ok R6_help_only_as_option "$GP" --help
+_help_ok R6_help_only_as_option --spec "$GS" -h "$GP"
+_help_ok R6_help_only_as_option "--spec=$GS" --help
+run_tool "$GP" --spec --help; chk_exit2 R6_help_only_as_option 'cannot read --help: no such file'
+grep -q '^usage: ' "$T/out" && fail "R6_help_only_as_option: '--spec --help' printed the usage on stdout ($(both))"
+run_tool "$GP" --spec "$GS" --specs-dir -h; chk_exit2 R6_help_only_as_option 'specs dir is not a directory: -h'
+run_tool --grandfathered "$GP" --base --help; chk_exit2 R6_help_only_as_option 'not inside a git work tree'
+pass "R6_help_only_as_option"
 # An unexpected exception is "the check did not run" (exit 2), never exit 1 — which reads as a
 # violation or a grandfather reject (review round 1, A3). A real input reaches one: a clean
 # plan under a non-ASCII path, printed to an ASCII-only stdout (PYTHONIOENCODING=ascii), makes
@@ -630,6 +706,30 @@ head -n 1 "$T/err" | grep -q '^plan-cite-check: error: internal: UnicodeEncodeEr
 grep -q 'Traceback' "$T/err" && fail "R6_internal_error_exit2: a traceback reached stderr instead of the error line ($(both))"
 [ ! -s "$T/out" ] || fail "R6_internal_error_exit2: stdout is not empty ($(both))"
 pass "R6_internal_error_exit2"
+# A second trigger, from a class OUTSIDE ValueError (review round 2, A7): UnicodeEncodeError
+# above IS a ValueError, so a catch narrowed to `except ValueError` stayed green on it. Here
+# stdout is a pipe with no reader left — a FIFO opened read-write on fd 4 (so the write open
+# on fd 5 does not block), then fd 4 closed — so the tool's write raises BrokenPipeError, an
+# OSError (Python ignores SIGPIPE). The plan's 400 uncited rows (> 16 KB of findings) overflow
+# the 8 KB stdout buffer, so the write — and the raise — happens INSIDE main(), not at exit-time
+# flush. No timing: the reader is gone before the tool starts.
+rm -rf "$T/r6pipe"; mkdir -p "$T/r6pipe"; cp -R "$FX/specs" "$T/r6pipe/specs"
+_pp="$T/r6pipe/specs/epics/E01-x/F01-good/big.plan.md"
+{ printf '%s\n' '# p' '' '## Files to change' '' '| File | Change |' '|---|---|'
+  _i=0; while [ "$_i" -lt 400 ]; do printf '| `f%d.py` | an uncited row |\n' "$_i"; _i=$((_i + 1)); done
+  printf '%s\n' '' '## Deferred' '' 'Deferred: none — x'; } > "$_pp"
+run_tool "$_pp"
+[ "$rc" -eq 1 ] && [ "$(wc -c < "$T/out" | tr -d ' ')" -gt 16384 ] \
+  || fail "R6_internal_error_exit2: precondition: the 400-row plan does not give exit 1 with > 16 KB of findings ($rc)"
+mkfifo "$T/r6pipe/fifo"
+exec 4<>"$T/r6pipe/fifo"; exec 5>"$T/r6pipe/fifo"; exec 4<&-
+set +e; python3 "$TOOL" "$_pp" >&5 2>"$T/err"; rc=$?; set -e
+exec 5>&-
+[ "$rc" -eq 2 ] || fail "R6_internal_error_exit2: a BrokenPipeError (OSError, not ValueError) exited $rc, not 2 ($(cat "$T/err" | tr '\n' '|'))"
+head -n 1 "$T/err" | grep -q '^plan-cite-check: error: internal: BrokenPipeError: ' \
+  || fail "R6_internal_error_exit2: stderr's first line is not 'plan-cite-check: error: internal: BrokenPipeError: …' ($(cat "$T/err" | tr '\n' '|'))"
+grep -q 'Traceback' "$T/err" && fail "R6_internal_error_exit2: a traceback reached stderr on the BrokenPipeError ($(cat "$T/err" | tr '\n' '|'))"
+pass "R6_internal_error_exit2 (OSError trigger)"
 
 # ── R7: --sweep (deferred-no-trigger, stage-unrecognized) and init.sh 2d, warn-only ──────
 expect_sweep_fail() {
@@ -667,12 +767,38 @@ run_tool --sweep "$S"; expect_ok R7_sweep_stage_absent_ok
 printf '%s\n' '# Product with no frontmatter' 'stage: bogus' > "$S/product.md"
 run_tool --sweep "$S"; expect_ok R7_sweep_stage_absent_ok
 pass "R7_sweep_stage_absent_ok"
+# Frontmatter is the `---` block that starts on LINE 1 (review round 1, A2; docs/SPEC-FORMAT.md
+# grammar item 1): a `---` block after a preamble, or a second block after line 1's, is not
+# frontmatter, so its `stage: pilot` is absent (production) and its `stage: Pilot` is no
+# stage-unrecognized. The documented sed reader is run on the same shapes by
+# tests/test_stage_nfrs.sh R1_stage_read_command_line1.
+fresh r7line1
+rm "$S/adr/0003-deferred-no-trigger.md"
+printf '%s\n' '# Product' '' '---' 'stage: pilot' '---' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_block_not_on_line1
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: absent' "$T/out" \
+  || fail "R7_sweep_stage_block_not_on_line1: a --- block after a preamble was read as frontmatter ($(both))"
+printf '%s\n' '---' 'status: draft' '---' '' '---' 'stage: pilot' '---' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_block_not_on_line1
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: absent' "$T/out" \
+  || fail "R7_sweep_stage_block_not_on_line1: a second --- block after line 1's was read as frontmatter ($(both))"
+printf '%s\n' '# Product' '---' 'stage: Pilot' '---' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_stage_block_not_on_line1
+pass "R7_sweep_stage_block_not_on_line1"
 
 fresh r7clean
 rm "$S/adr/0003-deferred-no-trigger.md"
 run_tool --sweep "$S"; expect_ok R7_sweep_clean
 grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: pilot' "$T/out" || fail "R7_sweep_clean: ok line does not count 3 ADRs and stage pilot ($(both))"
 pass "R7_sweep_clean"
+# A BOM'd product.md still opens with its `---` frontmatter (review round 1, A1).
+fresh r7bom
+rm "$S/adr/0003-deferred-no-trigger.md"
+printf '%s\n' "$(printf '\357\273\277')---" 'stage: discovery' '---' '# Product' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_bom_product
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: discovery' "$T/out" \
+  || fail "R7_sweep_bom_product: a BOM before line 1's '---' hid the frontmatter's stage: discovery ($(both))"
+pass "R7_sweep_bom_product"
 
 fresh r7empty
 rm "$S/adr/0003-deferred-no-trigger.md"; : > "$S/product.md"
@@ -1103,6 +1229,11 @@ heads = grab(r"under a `\.plan\.md`'s `## ([^`]+)`, `## ([^`]+)`, `## ([^`]+)` a
 checks.append(("CHECKED_RE", mod.CHECKED_RE.pattern, r"^## (" + "|".join(heads[:4]) + r")(\s|$)"))
 checks.append(("RID_TOKEN_RE", mod.RID_TOKEN_RE.pattern, r"(?<![A-Za-z0-9])" + heads[4]))
 checks.append(("ADR_TOKEN_RE", mod.ADR_TOKEN_RE.pattern, heads[5]))
+# Grammar item 3's cross-feature form (review round 1, A5): the stated feature-id prefix, the
+# R token after it, and what the form means — it cites the row, --spec never checks it.
+(xfeat,) = grab(r"An `R\[0-9\]\+` token immediately preceded by a feature id and a colon, `([^`]+)` \(as in `E36-F03:R5`\), is a \*\*cross-feature citation\*\*: it cites the row, but it is never checked against this feature's own spec R-ids\.", "the cross-feature citation form")
+checks.append(("XFEAT_RE", mod.XFEAT_RE.pattern, r"(?<![A-Za-z0-9])" + xfeat + "(" + heads[4] + ")"))
+grab(r"(A bare `R\[0-9\]\+` token is this feature's own R-id\.)", "that a bare R token is this feature's own R-id")
 (bolt,) = grab(r"a table headed `(\|[^`]+\|)`", "the Bolt-on table header")
 checks.append(("BOLT_ON_HEADER", "| " + " | ".join(mod.BOLT_ON_HEADER) + " |", bolt))
 (none,) = grab(r"the single line `(Deferred: none — )<why>`", "the none line")
