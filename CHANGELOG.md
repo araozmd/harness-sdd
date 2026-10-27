@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
-## [0.104.1] — 2026-10-27
+## [0.104.2] — 2026-10-27
 
 ### Fixed — the per-pair-commit drift check no longer reports main's own test edits (E36-F06)
 - `tools/test-drift-check.sh` gains `--feature-scope <default-ref>`. It restricts the examined
@@ -21,6 +21,18 @@ All notable changes to the harness body are recorded here. Versions follow
   saw 55 of them on each of 13 pair commits, and the E36-F02 and F03 Reviewers saw the same
   pattern. The merge-base run against the default branch is unchanged and is still the contract.
 - `tests/test_test_drift_check.sh` gains the `FS1`-`FS6` rows and new R11a pins.
+
+## [0.104.1] — 2026-10-27
+
+### Fixed — board writes and the init.sh gate no longer pay ~0.7 s for an unused grammar
+- `tools/validate-board.py` imports `jsonschema` with the optional `rfc3987_syntax` package
+  hidden while the schema carries no `format` keyword. jsonschema's format module imported it
+  at import time, and it compiles a lark grammar for IRI formats (~0.65 s). The validator runs
+  `Draft7Validator` with no format checker and the board schema has no `format`, so the grammar
+  was never used. Measured on this machine, one `tools/tasks-lock.py set-status` went from ~1.22 s
+  to ~0.47 s. A schema that does use `format` imports everything as before, and the sentinel is
+  removed afterwards. New `tests/test_validator_import.sh` pins all three, plus the schema's
+  format-free precondition.
 
 ## [0.104.0] — 2026-10-27
 
