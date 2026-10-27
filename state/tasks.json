@@ -1508,7 +1508,8 @@
         {
           "id": "E99-F182",
           "title": "Escalation to builder-heavy can arm in self mode and per front-end",
-          "status": "in-review",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "b41d5c9c0a354113ce81feff47f41ec63d34be96", "ref": "b41d5c9c0a354113ce81feff47f41ec63d34be96", "repo": "harness-sdd-chore-F182", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
