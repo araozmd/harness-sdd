@@ -440,6 +440,88 @@ if [ -n "$ADR_NS_DIRS" ]; then
   fi
 fi
 
+# 2d. Plan-row citation + deferred-ADR sweep (WARN-ONLY, E36-F04). ADR-0009 decision 4: an
+#     uncited plan row is a defect. tools/plan-cite-check.py lints every board feature in
+#     `spec-ready`, `in-progress` or `in-review` with `sdd: true` and a `spec_path` (each
+#     `*.plan.md` there, with its sibling `*.spec.md` as --spec), then runs `--sweep specs`
+#     (a `deferred` ADR with no `Trigger:` line, an unrecognized `stage:` value). Every
+#     finding WARNS and NEVER fails the gate — the Reviewer's check 8 owns the verdict, as
+#     2c leaves the ADR-citation verdict to the Reviewer. Exit 2 from the tool is "the check
+#     did not run", reported as such, never as clean. The board is read, never written.
+#     Under `set -euo pipefail` every call that may exit non-zero is captured with `|| rc=$?`,
+#     and a first/last line is taken by parameter expansion, never `printf | head`: a consumer
+#     that exits early SIGPIPEs the writer once the output passes the pipe buffer, and the
+#     pipeline's 141 would kill this warn-only block (E36-F04 review round 1, F1).
+if [ -f tools/plan-cite-check.py ] && [ -f state/tasks.json ]; then
+  PC_WARN=0; PC_PLANS=0
+  pc_nl='
+'
+  pc_rc=0
+  PC_FEATURES="$(python3 - state/tasks.json <<'PY' 2>&1
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as fh:
+    board = json.load(fh)
+for epic in board.get("epics", []) if isinstance(board, dict) else []:
+    for f in (epic.get("features", []) if isinstance(epic, dict) else []):
+        if not isinstance(f, dict):
+            continue
+        if f.get("status") in ("spec-ready", "in-progress", "in-review") \
+                and f.get("sdd") is True and f.get("spec_path"):
+            print("%s\t%s" % (f.get("id", "?"), f["spec_path"]))
+PY
+)" || pc_rc=$?
+  if [ "$pc_rc" -ne 0 ]; then
+    echo "⚠️  plan-cite: board read failed: ${PC_FEATURES##*"$pc_nl"} (warn-only)"
+    PC_WARN=$((PC_WARN+1)); PC_FEATURES=""
+  fi
+  while IFS="$(printf '\t')" read -r pc_id pc_dir; do
+    [ -n "$pc_id" ] || continue
+    pc_found=0
+    for pc_plan in "${pc_dir%/}"/*.plan.md; do
+      [ -e "$pc_plan" ] || continue
+      pc_found=1; PC_PLANS=$((PC_PLANS+1))
+      pc_rc=0
+      pc_out="$(python3 tools/plan-cite-check.py "$pc_plan" --spec "${pc_plan%.plan.md}.spec.md" --specs-dir specs 2>&1)" || pc_rc=$?
+      case "$pc_rc" in
+        0) ;;
+        1) pc_n="$(printf '%s\n' "$pc_out" | grep -c '^plan-cite-check: ' || true)"  # grep reads all: no SIGPIPE
+           pc_first="${pc_out%%"$pc_nl"*}"; pc_first="${pc_first#plan-cite-check: }"
+           echo "⚠️  plan-cite: $pc_id $pc_first (+$((pc_n-2)) more; warn-only — Reviewer check 8 rejects)"
+           PC_WARN=$((PC_WARN+1)) ;;
+        *) pc_first="${pc_out%%"$pc_nl"*}"; pc_first="${pc_first#plan-cite-check: }"
+           echo "⚠️  plan-cite: $pc_id check did not run: $pc_first (warn-only)"
+           PC_WARN=$((PC_WARN+1)) ;;
+      esac
+    done
+    if [ "$pc_found" -eq 0 ]; then
+      echo "⚠️  plan-cite: $pc_id check did not run: no *.plan.md in $pc_dir (warn-only)"
+      PC_WARN=$((PC_WARN+1))
+    fi
+  done <<PCEOF
+$PC_FEATURES
+PCEOF
+  pc_rc=0
+  pc_out="$(python3 tools/plan-cite-check.py --sweep specs 2>&1)" || pc_rc=$?
+  case "$pc_rc" in
+    0) ;;
+    1) while IFS= read -r pc_line; do
+         case "$pc_line" in
+           "plan-cite-check: FAIL "*) ;;
+           "plan-cite-check: "*) echo "⚠️  plan-cite: ${pc_line#plan-cite-check: } (warn-only)"; PC_WARN=$((PC_WARN+1)) ;;
+         esac
+       done <<PCEOF
+$pc_out
+PCEOF
+       ;;
+    *) pc_first="${pc_out%%"$pc_nl"*}"; pc_first="${pc_first#plan-cite-check: }"
+       echo "⚠️  plan-cite: sweep did not run: $pc_first (warn-only)"
+       PC_WARN=$((PC_WARN+1)) ;;
+  esac
+  if [ "$PC_WARN" -eq 0 ]; then
+    ok "plan citations and deferred ADRs clean ($PC_PLANS plan(s) checked)"
+  fi
+fi
+
 # 2z. Escalation visibility (2026-09-04). `escalation.after_rejections > 0` READS as
 #     active in the config, but the feature fires only when `.harness/.escalation-arming`
 #     says `armed` — and that file is written by the installer, so a target that set the

@@ -9,9 +9,9 @@
 - New dependencies: <… or "none">
 
 ## Data model  (serves: R#, R#)
-| Entity | Field | Type | Notes |
-|---|---|---|---|
-| <Table> | <field> | <type> | <constraint> |
+| Entity | Field | Type | Notes | R-id |
+|---|---|---|---|---|
+| <Table> | <field> | <type> | <constraint> | R# |
 
 ## API / interface  (serves: R#)
 | Method | Path | Request | Response | R-id |

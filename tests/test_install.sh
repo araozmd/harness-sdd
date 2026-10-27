@@ -616,6 +616,23 @@ test_tasks_pair_check_installed_contract() {
     fail "E36-F01: installed tasks template still has the layered write-tests task"
 }
 
+test_plan_cite_check_installed_contract() {
+  [ -x "$T/.harness/tools/plan-cite-check.py" ] ||
+    fail "E36-F04: installed plan-cite-check.py missing or not executable"
+  cmp -s "$SRC/tools/plan-cite-check.py" "$T/.harness/tools/plan-cite-check.py" ||
+    fail "E36-F04: installed plan-cite-check.py differs from source"
+  grep -qF 'chmod +x "$H/tools/plan-cite-check.py"' "$SRC/harness-install.sh" ||
+    fail "E36-F04: installer lacks explicit plan-cite-check executable wiring"
+  grep -qF 'tools/plan-cite-check.py' "$T/.harness/init.sh" ||
+    fail "E36-F04: installed init.sh does not run plan-cite-check (section 2d)"
+  grep -qF 'tools/plan-cite-check.py' "$T/.harness/agents/reviewer.md" ||
+    fail "E36-F04: installed reviewer does not name plan-cite-check (check 8)"
+  grep -qF 'tools/plan-cite-check.py' "$T/.harness/agents/doc-critic.md" ||
+    fail "E36-F04: installed doc-critic does not name plan-cite-check"
+  grep -qxF '| Entity | Field | Type | Notes | R-id |' "$T/.harness/specs/_templates/feature.plan.md" ||
+    fail "E36-F04: installed plan template's Data model header has no R-id column"
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -778,6 +795,7 @@ test_fix_worktree_helper_installed_executable
 test_sweep_scratch_helper_installed_executable
 test_dependency_diagnostics_installed_contract
 test_tasks_pair_check_installed_contract
+test_plan_cite_check_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
 test_e99_throughput_helpers_installed_contract

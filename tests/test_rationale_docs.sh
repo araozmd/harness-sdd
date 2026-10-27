@@ -49,10 +49,10 @@ ledger_shape() {
     fence_delim($0) { next }
     !fence && /^## Deletion ledger$/ { ledger=1; next }
     !fence && ledger && /^## / { exit }
-    ledger && /^\| (C[1-9]|D([1-9]|1[0-4])) / { count++ }
+    ledger && /^\| (C[1-9]|C10|D([1-9]|1[0-4])) / { count++ }
     END { print count+0 }
   ' "$DOC")"
-  [ "$_rows" -eq 23 ] || fail "ledger must contain exactly 23 C/D rows (found $_rows)"
+  [ "$_rows" -eq 24 ] || fail "ledger must contain exactly 24 C/D rows (found $_rows)"
   [ ! -e "$ROOT/docs/DELETION-LEDGER.md" ] || fail "sibling deletion ledger is forbidden"
   [ ! -e "$ROOT/docs/deletion-ledger.yaml" ] || fail "machine-readable YAML ledger is forbidden"
   [ ! -e "$ROOT/docs/deletion-ledger.json" ] || fail "machine-readable JSON ledger is forbidden"
@@ -69,12 +69,13 @@ compensation_inventory() {
     'C6 — Reviewer cross-file consistency audit' \
     'C7 — Multi-round Builder↔Reviewer correction' \
     'C8 — Model interpretation of prose `next()` routing' \
-    'C9 — Task-pair shape lint'
+    'C9 — Task-pair shape lint' \
+    'C10 — Plan-row citation lint'
   do
     has "$_label" "$DOC" "missing compensation row: $_label"
   done
-  [ "$(grep -Ec '^\| C[1-9] — .+ \| Capability compensation \|' "$DOC")" -eq 9 ] ||
-    fail "every C1-C9 row must use the capability-compensation layer"
+  [ "$(grep -Ec '^\| (C[1-9]|C10) — .+ \| Capability compensation \|' "$DOC")" -eq 10 ] ||
+    fail "every C1-C10 row must use the capability-compensation layer"
   pass "compensation_inventory"
 }
 
@@ -107,7 +108,7 @@ row_evidence_completeness() {
     fence_delim($0) { next }
     !fence && /^## Deletion ledger$/ { ledger=1; next }
     !fence && ledger && /^## / { exit }
-    ledger && /^\| (C[1-9]|D([1-9]|1[0-4])) / {
+    ledger && /^\| (C[1-9]|C10|D([1-9]|1[0-4])) / {
       n=split($0, cell, "|")
       if (n != 7) {
         print "malformed five-cell ledger row: " $0 > "/dev/stderr"
@@ -175,7 +176,7 @@ agents_and_harness_navigation() {
   has '| `docs/RATIONALE.md` |' "$ROOT/AGENTS.md" "AGENTS docs map lacks concise rationale row"
   has '[rationale and deletion ledger](RATIONALE.md)' "$ROOT/docs/HARNESS.md" \
     "HARNESS introduction lacks descriptive rationale link"
-  [ "$(grep -c '^| C[1-9] ' "$ROOT/AGENTS.md" || true)" -eq 0 ] ||
+  [ "$(grep -Ec '^\| (C[1-9]|C10) ' "$ROOT/AGENTS.md" || true)" -eq 0 ] ||
     fail "AGENTS must not duplicate compensation ledger"
   [ "$(grep -c '^| D[0-9]' "$ROOT/docs/HARNESS.md" || true)" -eq 0 ] ||
     fail "HARNESS must not duplicate durable ledger"

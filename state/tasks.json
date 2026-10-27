@@ -496,7 +496,7 @@
         {
           "id": "E36-F04",
           "title": "Uncited plan rows block: plan-cite-check tool + Reviewer gate",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [

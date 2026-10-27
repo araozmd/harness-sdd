@@ -191,6 +191,26 @@ saying "it works" means nothing until you prove it. AI-generated code is often
    `.tasks.md` is flagged. `sdd: false` items are exempt (they have no `.tasks.md`).
    Check #2's traceability text is unchanged; this item checks shape only.
 
+8. **Plan-row citations (E36-F04, ADR-0009 decision 4).** For an `sdd: true` feature, run
+   `python3 "$HARNESS_DIR/tools/plan-cite-check.py" "<dir>/<feature>.plan.md" --spec
+   "<dir>/<feature>.spec.md"` (the tool is `tools/plan-cite-check.py` in the harness source
+   repo and `.harness/tools/plan-cite-check.py` in an installed target). Exit 1 (an
+   `uncited-row`, `unknown-rid`, `unresolved-adr` or `deferred-*` violation) → reject, quoting
+   the tool's output in `progress/<run>/review.md`. Exit 2 means the check did not run (a
+   usage or input error): fix the invocation and run it again — never approve on an unrun
+   check. A plan-row `unresolved-adr` is a **reject**, because the citation is the row's
+   justification (ADR-0009 decision 4); the `## ADR-citation check` below keeps its soft-flag
+   posture for `.spec.md` citations, and both resolve ids with the same namespace rule.
+   **Grandfather rule:** on an exit-1 lint, run `python3
+   "$HARNESS_DIR/tools/plan-cite-check.py" --grandfathered "<dir>/<feature>.plan.md"` after
+   `git fetch origin`: exit 0 → flag ("add `## Deferred` and cite each row, or justify"),
+   exit 1 → reject, exit 2 → flag with "grandfather check did not run: <stderr>". The plan's
+   date is the author time of its first add and the tool's is its first-parent merge into the
+   default branch, so a plan written before this tool merged is flagged, not rejected. This
+   check judges citation presence and resolution only — whether a cited row is justified
+   stays the doc-critic's YAGNI finding. `sdd: false` items are exempt (they have no
+   `.plan.md`). Checks 2 and 7 are unchanged.
+
 ## ADR-citation check (architecture-aligned specs)
 
 This additive check fires **only where** the project has a recorded architecture **and**
