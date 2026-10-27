@@ -479,6 +479,19 @@ test_prose_surfaces() {
   end
 }
 
+# ── R12 — release record (durable facts only; never a literal VERSION, never "the top entry")
+test_release_record() {
+  begin test_release_record
+  _v=$(tr -d '[:space:]' <"$ROOT/VERSION")
+  _newest=$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$ROOT/CHANGELOG.md" | head -1)
+  [ -n "$_v" ] && [ "$_v" = "$_newest" ] || fail "VERSION ($_v) is not the newest CHANGELOG heading ($_newest)"
+  # Some `## [x.y.z]` entry body names both --wave and workflow.max_wave.
+  awk '/^## \[[0-9]/ { if (h && b ~ /--wave/ && b ~ /workflow\.max_wave/) f = 1; b = ""; h = 1; next } { b = b " " $0 }
+       END { if (h && b ~ /--wave/ && b ~ /workflow\.max_wave/) f = 1; exit f ? 0 : 1 }' "$ROOT/CHANGELOG.md" ||
+    fail "no CHANGELOG entry names both --wave and workflow.max_wave"
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
@@ -490,6 +503,7 @@ test_worker_identity_and_harness_dir
 test_runner_lock_contract
 test_summary_and_merge_plan
 test_prose_surfaces
+test_release_record
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }
