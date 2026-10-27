@@ -142,7 +142,7 @@ the merge would push the consumer over `max_requirements`, the size rule's split
 observable seams (a read-only surface, the one operation that commits state), not back into
 layers.
 
-**Record the exemption either way.** When you seed a feature whose outcome is nonetheless
+**Record the exemption in `epic.md`.** When you seed a feature whose outcome is nonetheless
 internal, or a fresh epic whose first feature is not end-to-end, write exactly one line per
 exempted feature under `## Notes` in the epic's `epic.md`, beginning
 `Observable-slice exemption:` and naming the feature id and why. For an epic whose only
