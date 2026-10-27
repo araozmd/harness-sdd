@@ -472,7 +472,9 @@ test_summary_and_merge_plan() {
   has "wave section" "$_w" '`VERSION` becomes the next MINOR over the then-current `main`;'
   has "wave section" "$_w" 'place this feature'"'"'s `CHANGELOG.md` entry above main'"'"'s newest entry under that version;'
   has "wave section" "$_w" 'keep both sides of `progress/history.md` and of `state/tasks.json`.'
-  has "wave section" "$_w" 'The coordinator runs no `/sdd-pr-loop`, performs no merge, writes no `done`, and tears down no worktree;'
+  # The owner of each half, subject included (round 2, N07): the coordinator runs none,
+  # the OPERATOR runs /sdd-pr-loop — an owner flip of the second clause must red.
+  has "wave section" "$_w" 'The coordinator runs no `/sdd-pr-loop`, performs no merge, writes no `done`, and tears down no worktree; the operator runs `/sdd-pr-loop` per PR in merge order, and `done` and teardown follow the normal post-merge path'
   has "wave section" "$_w" 'It exits 0 iff every selected feature'"'"'s verdict is `pr-opened`.'
   has "wave section" "$_w" 'Wave 2 is not automatic: after wave 1 merges, the operator re-runs `/sdd-next --wave`, which derives the next wave from the updated board.'
   has "sdd-next body" "$_b" 'it prints the summary table (verdicts `pr-opened`, `interrupted` or `stopped: <reason>`; a `runner-busy` worker is re-run once, alone)'
