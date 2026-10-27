@@ -459,8 +459,8 @@ targeted worker (`agents/orchestrator.md` → "Wave coordinator mode (/sdd-next 
   settles; a cancelled or killed worker is `interrupted` and is never relaunched.
 - **Workers stop at the PR.** Each worker opens its PR and leaves the feature `in-review`
   with verdict `pr-opened`; it never runs `/sdd-pr-loop` and never merges.
-- **Merge order.** The coordinator prints a `merge order:` line (the selection order). The
-  operator runs `/sdd-pr-loop` per PR in that order; before each PR after the first, merge the
+- **Merge order.** The coordinator prints a `merge order:` line: the opened PRs only, in
+  selection order. The operator runs `/sdd-pr-loop` per PR in that order; before each PR after the first, merge the
   updated `main` into its branch (one merge commit), set `VERSION` to the next MINOR over the
   then-current `main`, place its `CHANGELOG.md` entry above `main`'s newest, and keep both
   sides of `progress/history.md` and `state/tasks.json`.

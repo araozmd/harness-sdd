@@ -470,7 +470,10 @@ test_summary_and_merge_plan() {
   done
   has "wave section" "$_w" 'When every worker has settled, the coordinator prints a summary table with one row per selected feature, `feature | branch | PR | verdict`, where the verdict is one of `pr-opened`, `interrupted` or `stopped: <reason>`'
   has "wave section" "$_w" '`runner-busy` is a worker-return value consumed by W6 and never a final-table verdict.'
-  has "wave section" "$_w" 'a `merge order:` line listing the PRs in selection order'
+  # `merge order:` lists only the PRs that exist (review round 2 advisory): a stopped
+  # worker has no PR, so neither the rule nor the reference example may list it.
+  has "wave section" "$_w" 'It then prints the merge plan: a `merge order:` line listing only the PRs that were opened (verdict `pr-opened`), in selection order — a feature with no PR is absent from it —'
+  has "wave section example" "$_w" '| - | stopped: runner-busy twice merge order: E36-F04 ```'
   has "wave section" "$_w" 'Before `/sdd-pr-loop` on each PR after the first, integrate the updated `main` into that branch with one merge commit;'
   has "wave section" "$_w" '`VERSION` becomes the next MINOR over the then-current `main`;'
   has "wave section" "$_w" 'place this feature'"'"'s `CHANGELOG.md` entry above main'"'"'s newest entry under that version;'
@@ -482,7 +485,7 @@ test_summary_and_merge_plan() {
   has "wave section" "$_w" 'Wave 2 is not automatic: after wave 1 merges, the operator re-runs `/sdd-next --wave`, which derives the next wave from the updated board.'
   has "sdd-next body" "$_b" 'After the workers settle it prints the summary table (verdicts `pr-opened`, `interrupted` or `stopped: <reason>`; a `runner-busy` worker is re-run once, alone) and the `merge order:` plan of the opened PRs, in which each later PR takes the next MINOR `VERSION` over the then-current `main`. It runs no `/sdd-pr-loop`, merges nothing, writes no `done` and tears down no worktree.'
   has "WORKFLOW wave subsection" "$_d" 'Each worker opens its PR and leaves the feature `in-review` with verdict `pr-opened`; it never runs `/sdd-pr-loop` and never merges.'
-  has "WORKFLOW wave subsection" "$_d" 'The coordinator prints a `merge order:` line (the selection order).'
+  has "WORKFLOW wave subsection" "$_d" 'The coordinator prints a `merge order:` line: the opened PRs only, in selection order.'
   has "WORKFLOW wave subsection" "$_d" 'The operator runs `/sdd-pr-loop` per PR in that order;'
   has "WORKFLOW wave subsection" "$_d" 'set `VERSION` to the next MINOR over the then-current `main`'
   has "WORKFLOW wave subsection" "$_d" 'the operator retires the worktree with `tools/fix-worktree.sh teardown <id> <slug>` from a clean primary.'

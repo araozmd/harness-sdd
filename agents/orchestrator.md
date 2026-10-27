@@ -347,7 +347,8 @@ When every worker has settled, the coordinator prints a summary table with one r
 selected feature, `feature | branch | PR | verdict`, where the verdict is one of `pr-opened`,
 `interrupted` or `stopped: <reason>` — `runner-busy` is a worker-return value consumed by W6
 and never a final-table verdict. It then prints the merge plan: a `merge order:` line listing
-the PRs in selection order, and the per-PR integration rule, because `VERSION`,
+only the PRs that were opened (verdict `pr-opened`), in selection order — a feature with no
+PR is absent from it — and the per-PR integration rule, because `VERSION`,
 `CHANGELOG.md`, `progress/history.md` and `state/tasks.json` conflict between siblings every
 time. Before `/sdd-pr-loop` on each PR after the first, integrate the updated `main` into that
 branch with one merge commit; `VERSION` becomes the next MINOR over the then-current `main`;
@@ -360,7 +361,7 @@ Wave 2 (epic E36) — cap 3 (workflow.max_wave)
 feature  | branch                        | PR    | verdict
 E36-F04  | feat/E36-F04-plan-cite-check  | #310  | pr-opened
 E36-F07  | feat/E36-F07-wave-fanout      | -     | stopped: runner-busy twice
-merge order: E36-F04, E36-F07
+merge order: E36-F04
 ```
 
 The coordinator runs no `/sdd-pr-loop`, performs no merge, writes no `done`, and tears down
