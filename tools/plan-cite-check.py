@@ -33,7 +33,8 @@ readings below are the tool's own contract (E36-F04.plan.md, Data model):
     leading digits).  `<ns>/ADR-NNNN` (or a known `<ns> ADR-NNNN`) resolves there only, an
     unknown `<ns>/` never, a bare id in any namespace.  The specs tree is --specs-dir, else
     the plan's nearest ancestor named `specs`.
-  * every file is read as strict UTF-8 and each line's trailing `\r` (CRLF) is stripped first.
+  * every file is read as strict UTF-8, ONE leading UTF-8 BOM is dropped, and each line's
+    trailing `\r` (CRLF) is stripped first.
 
 Lint violations (one line each, file order, then `FAIL <n> violation(s)`): `uncited-row
 <plan>:<line> <heading>`, `unknown-rid <plan>:<line> R<n>` (only with --spec),
@@ -90,6 +91,7 @@ STATUS_DEFERRED_RE = re.compile(r"^- \*\*Status:\*\* deferred")
 TRIGGER_RE = re.compile(r"^- \*\*Trigger:\*\* \S")
 STAGE_RE = re.compile(r"^stage: (discovery|pilot|production)$")
 WRAPPERS = "*`\"'"
+BOM = "\ufeff"  # one is stripped from the head of every file read (_read)
 
 
 class InputError(Exception):
@@ -133,7 +135,9 @@ def iter_unfenced(lines, numbered=False):
 
 
 def _read(path):
-    """Return the file's lines: strict UTF-8, each line's trailing \\r then \\n stripped."""
+    """Return the file's lines: strict UTF-8, ONE leading BOM stripped, each line's trailing
+    \\r then \\n stripped.  The BOM (U+FEFF) is stripped before any parsing so a line-1
+    heading, R-id line or `---` stays what it is (review round 1, A1)."""
     if not os.path.isfile(path):
         raise InputError("cannot read %s: %s" % (
             path, "not a regular file" if os.path.exists(path) else "no such file"))
@@ -143,6 +147,8 @@ def _read(path):
         text = data.decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise InputError("cannot read %s: %s" % (path, exc))
+    if text.startswith(BOM):
+        text = text[1:]
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()

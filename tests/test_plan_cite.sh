@@ -98,6 +98,23 @@ printf '%s\n' '# No tables' '' '## Data model' '' 'No stored state.' '' '## API 
 run_tool "$NP" --spec "$GS"; expect_ok R1_ok_no_tables
 pass "R1_ok_no_tables"
 
+# A UTF-8 BOM (U+FEFF, bytes EF BB BF) before line 1 is stripped — ONE of them — before any
+# file is parsed (review round 1, A1): a BOM'd plan whose line 1 is `## Deferred` keeps that
+# heading. Two BOMs are not one BOM: the second stays, so line 1 is no heading.
+fresh r1bom
+_bom="$(printf '\357\273\277')"
+BOMP="$S/epics/E01-x/F01-good/bom.plan.md"
+printf '%s\n' "${_bom}## Deferred" '' 'Deferred: none — x' > "$BOMP"
+[ "$(head -c 3 "$BOMP" | od -An -tx1 | tr -d ' \n')" = efbbbf ] || fail "R1_bom_plan_line1_heading: precondition: the plan does not start with a BOM"
+run_tool "$BOMP" --spec "$GS"; expect_ok R1_bom_plan_line1_heading
+grep -qE '^plan-cite-check: ok .*: 0 row\(s\) cited, deferred: none, spec: 4 R-ids$' "$T/out" \
+  || fail "R1_bom_plan_line1_heading: the ok line does not read the BOM'd line-1 '## Deferred' none form ($(both))"
+printf '%s\n' "${_bom}${_bom}## Deferred" '' 'Deferred: none — x' > "$BOMP"
+run_tool "$BOMP" --spec "$GS"; expect_fail R1_bom_plan_line1_heading
+grep -qxF "plan-cite-check: deferred-section-missing $BOMP" "$T/out" \
+  || fail "R1_bom_plan_line1_heading: with TWO BOMs the second was stripped too — only one leading BOM is stripped ($(both))"
+pass "R1_bom_plan_line1_heading"
+
 F04D="$ROOT/specs/epics/E36-emergent-slices/F04-plan-citation-gate"
 run_tool "$F04D/E36-F04.plan.md" --spec "$F04D/E36-F04.spec.md"; expect_ok R1_dogfood_own_plan
 pass "R1_dogfood_own_plan"
@@ -248,6 +265,14 @@ printf '%s\n' '# p' '' '## Files to change' '' '| File | Change | R-id |' '|---|
 run_tool "$S/epics/E01-x/F01-good/bold.plan.md" --spec "$T/r3bold.spec.md"; expect_ok R3_bold_title_rid_form
 grep -qE ', spec: 1 R-ids$' "$T/out" || fail "R3_bold_title_rid_form: the bold-title form '- **R1 — Title.**' was not read as R1 ($(both))"
 pass "R3_bold_title_rid_form"
+# A BOM'd spec whose line 1 is an R-id line still yields that R-id (review round 1, A1).
+fresh r3bom
+printf '%s\n' "$(printf '\357\273\277')- **R1** — The system shall do one." '- **R2** — The system shall do two.' > "$T/r3bom.spec.md"
+printf '%s\n' '# p' '' '## Files to change' '' '| File | Change | R-id |' '|---|---|---|' '| `a.py` | create | R1 |' \
+  '' '## Deferred' '' 'Deferred: none — x' > "$S/epics/E01-x/F01-good/bomspec.plan.md"
+run_tool "$S/epics/E01-x/F01-good/bomspec.plan.md" --spec "$T/r3bom.spec.md"; expect_ok R3_bom_spec_line1_rid
+grep -qE ', spec: 2 R-ids$' "$T/out" || fail "R3_bom_spec_line1_rid: the BOM'd spec's line-1 R1 was not read ($(both))"
+pass "R3_bom_spec_line1_rid"
 
 fresh r3pr
 grep -qF 'PR304 is a pull request' "$GP" || fail "R3_pr_number_not_a_citation: precondition: the PR304 row is gone"
@@ -673,6 +698,14 @@ rm "$S/adr/0003-deferred-no-trigger.md"
 run_tool --sweep "$S"; expect_ok R7_sweep_clean
 grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: pilot' "$T/out" || fail "R7_sweep_clean: ok line does not count 3 ADRs and stage pilot ($(both))"
 pass "R7_sweep_clean"
+# A BOM'd product.md still opens with its `---` frontmatter (review round 1, A1).
+fresh r7bom
+rm "$S/adr/0003-deferred-no-trigger.md"
+printf '%s\n' "$(printf '\357\273\277')---" 'stage: discovery' '---' '# Product' > "$S/product.md"
+run_tool --sweep "$S"; expect_ok R7_sweep_bom_product
+grep -qxF 'plan-cite-check: ok sweep 3 ADR(s), stage: discovery' "$T/out" \
+  || fail "R7_sweep_bom_product: a BOM before line 1's '---' hid the frontmatter's stage: discovery ($(both))"
+pass "R7_sweep_bom_product"
 
 fresh r7empty
 rm "$S/adr/0003-deferred-no-trigger.md"; : > "$S/product.md"
