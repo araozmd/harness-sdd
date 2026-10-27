@@ -360,7 +360,11 @@ test_manifest_contract() {
   begin test_manifest_contract
   _w=$(section "$ORCH" "$WAVE_H")
   has "wave section" "$_w" 'After every selected `create` has settled and before the first worker is spawned, the coordinator writes `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md`'
-  has "wave section" "$_w" 'Its header carries `wave: <N>`, `cap: <n> (<source>)` where the source is `--max`, `workflow.max_wave` or `default`,'
+  # The header fields are the plan's data model (E36-F07.plan.md, manifest header row),
+  # pinned whole, `scope:` and `selector:` included (review round 2 advisory).
+  has "wave section" "$_w" 'Its header carries `wave: <N>`, `cap: <n> (<source>)` where the source is `--max`, `workflow.max_wave` or `default`, `scope:` (the epic, or the whole board) and `selector:` (the exact selector command run).'
+  # The plan's "printed, recorded in the manifest" (plan § Merge plan): W7 appends it.
+  has "wave section" "$_w" 'keep both sides of `progress/history.md` and of `state/tasks.json`. The plan is also appended to the manifest.'
   has "wave section" "$_w" 'one line per record of `waves[0]` — every record, none absent — with the record'"'"'s classification and, for a provisioned feature, its exact branch and worktree.'
   _d=$(subsection "$WORKFLOW" "$WF_H")
   has "WORKFLOW wave subsection" "$_d" 'the coordinator writes the manifest `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` with every record of the wave'
