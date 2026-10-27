@@ -57,18 +57,29 @@ WAVE_H='## Wave coordinator mode (/sdd-next --wave)'
 # fold <file>: the whole file on one line, runs of blanks squeezed (wrapped prose folds).
 fold_file() { tr '\n' ' ' <"$1" | tr -s ' \t' '  '; }
 
+# The ONE CommonMark fence rule (tests/lib/fence.awk, E99-F131): every heading slicer below
+# loads it, so a `#` line inside a fenced block is never read as a heading.
+FENCE_AWK="$(cat "$ROOT/tests/lib/fence.awk")"
+
 # section <file> <heading-line-prefix>: the heading and everything up to the next `## `
-# heading, folded. The wave section carries no fenced `## ` line, so a heading-bounded
-# extract reads all of it (the house extractor's fence-blindness cannot truncate it).
+# heading outside a fence, folded (its `###` subsections belong to it).
 section() {
-  awk -v h="$2" 'index($0, h) == 1 { k = 1; print; next } k && /^## / { k = 0 } k { print }' "$1" |
-    tr '\n' ' ' | tr -s ' \t' '  '
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
+    !fence && index($0, h) == 1 { k = 1; print; next }
+    !fence && k && /^## / { k = 0 }
+    k { print }
+  ' "$1" | tr '\n' ' ' | tr -s ' \t' '  '
 }
 
 # subsection <file> <heading-line-prefix>: a `###` heading up to the next `##`/`###`, folded.
 subsection() {
-  awk -v h="$2" 'index($0, h) == 1 { k = 1; print; next } k && /^##+ / { k = 0 } k { print }' "$1" |
-    tr '\n' ' ' | tr -s ' \t' '  '
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (k) print; next }
+    !fence && index($0, h) == 1 { k = 1; print; next }
+    !fence && k && /^#+ / { k = 0 }
+    k { print }
+  ' "$1" | tr '\n' ' ' | tr -s ' \t' '  '
 }
 WF_H='### Fanning out a wave (`/sdd-next --wave`)'
 
@@ -465,7 +476,11 @@ test_prose_surfaces() {
   begin test_prose_surfaces
   grep -qxF "$WAVE_H" "$ORCH" || fail "installed orchestrator.md lacks the heading line: $WAVE_H"
   # Placement: the wave section is the next `## ` section after the targeted worker mode.
-  _next=$(awk '/^## Targeted parallel-fix worker mode$/ { k = 1; next } k && /^## / { print; exit }' "$ORCH")
+  _next=$(awk "$FENCE_AWK"'
+    fence_delim($0) { next }
+    !fence && /^## Targeted parallel-fix worker mode$/ { k = 1; next }
+    !fence && k && /^## / { print; exit }
+  ' "$ORCH")
   [ "$_next" = "$WAVE_H" ] || fail "the wave section does not directly follow the targeted worker mode (next: $_next)"
   _w=$(section "$ORCH" "$WAVE_H")
   has "wave section" "$_w" 'It reuses the fix lane by reference, not by copy: provisioning, manifest completeness and fan-out discipline are `agents/fixer.md`'"'"'s "Parallel dispatch mode"'
