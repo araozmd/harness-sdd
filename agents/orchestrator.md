@@ -341,6 +341,34 @@ time in selection order (P6's guarded exclusive wave shape), with the same input
 resumes from its worktree board's status. This pass runs at most once per feature: a second
 `runner-busy` is the terminal verdict `stopped: runner-busy twice`.
 
+### W7 — report and merge plan
+
+When every worker has settled, the coordinator prints a summary table with one row per
+selected feature, `feature | branch | PR | verdict`, where the verdict is one of `pr-opened`,
+`interrupted` or `stopped: <reason>` — `runner-busy` is a worker-return value consumed by W6
+and never a final-table verdict. It then prints the merge plan: a `merge order:` line listing
+the PRs in selection order, and the per-PR integration rule, because `VERSION`,
+`CHANGELOG.md`, `progress/history.md` and `state/tasks.json` conflict between siblings every
+time. Before `/sdd-pr-loop` on each PR after the first, integrate the updated `main` into that
+branch with one merge commit; `VERSION` becomes the next MINOR over the then-current `main`;
+place this feature's `CHANGELOG.md` entry above main's newest entry under that version; keep
+both sides of `progress/history.md` and of `state/tasks.json`. The plan is also appended to
+the manifest.
+
+```text
+Wave 2 (epic E36) — cap 3 (workflow.max_wave)
+feature  | branch                        | PR    | verdict
+E36-F04  | feat/E36-F04-plan-cite-check  | #310  | pr-opened
+E36-F07  | feat/E36-F07-wave-fanout      | -     | stopped: runner-busy twice
+merge order: E36-F04, E36-F07
+```
+
+The coordinator runs no `/sdd-pr-loop`, performs no merge, writes no `done`, and tears down
+no worktree; the operator runs `/sdd-pr-loop` per PR in merge order, and `done` and teardown
+follow the normal post-merge path ("Writing `done`"). It exits 0 iff every selected feature's
+verdict is `pr-opened`. Wave 2 is not automatic: after wave 1 merges, the operator re-runs
+`/sdd-next --wave`, which derives the next wave from the updated board.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is

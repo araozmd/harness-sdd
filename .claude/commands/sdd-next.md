@@ -51,6 +51,10 @@ capability, on an `execution.builder.backend` other than `in-session` (`delegate
 unknown value), or on a non-empty `umbrella.manifest`. It selects the runnable, autonomous,
 `pending`, `route: architect` records of `waves[0]` up to `cap`, `critical_path[0]` first, and
 reports every other record as `cap-deferred` or `skipped: <reason>`.
+After the workers settle it prints the summary table (verdicts `pr-opened`, `interrupted` or
+`stopped: <reason>`; a `runner-busy` worker is re-run once, alone) and the `merge order:` plan,
+in which each later PR takes the next MINOR `VERSION` over the then-current `main`. It runs no
+`/sdd-pr-loop`, merges nothing, writes no `done` and tears down no worktree.
 
 Under `--mine`, use **scoped selection**: consider only features whose **effective owner**
   (feature `owner` else parent epic `owner`) equals the identity resolved from

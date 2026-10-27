@@ -428,6 +428,38 @@ test_runner_lock_contract() {
   end
 }
 
+# ── R9 — summary table and serialized merge plan ───────────────────────────────────────
+test_summary_and_merge_plan() {
+  begin test_summary_and_merge_plan
+  _w=$(section "$ORCH" "$WAVE_H")
+  _b=$(fold_file "$B_CLAUDE")
+  _d=$(subsection "$WORKFLOW" "$WF_H")
+  for _lit in pr-opened runner-busy interrupted 'next MINOR' 'merge order'; do
+    has "wave section" "$_w" "$_lit"
+    has "sdd-next body" "$_b" "$_lit"
+    has "WORKFLOW wave subsection" "$_d" "$_lit"
+  done
+  has "wave section" "$_w" 'When every worker has settled, the coordinator prints a summary table with one row per selected feature, `feature | branch | PR | verdict`, where the verdict is one of `pr-opened`, `interrupted` or `stopped: <reason>`'
+  has "wave section" "$_w" '`runner-busy` is a worker-return value consumed by W6 and never a final-table verdict.'
+  has "wave section" "$_w" 'a `merge order:` line listing the PRs in selection order'
+  has "wave section" "$_w" 'Before `/sdd-pr-loop` on each PR after the first, integrate the updated `main` into that branch with one merge commit;'
+  has "wave section" "$_w" '`VERSION` becomes the next MINOR over the then-current `main`;'
+  has "wave section" "$_w" 'place this feature'"'"'s `CHANGELOG.md` entry above main'"'"'s newest entry under that version;'
+  has "wave section" "$_w" 'keep both sides of `progress/history.md` and of `state/tasks.json`.'
+  has "wave section" "$_w" 'The coordinator runs no `/sdd-pr-loop`, performs no merge, writes no `done`, and tears down no worktree;'
+  has "wave section" "$_w" 'It exits 0 iff every selected feature'"'"'s verdict is `pr-opened`.'
+  has "wave section" "$_w" 'Wave 2 is not automatic: after wave 1 merges, the operator re-runs `/sdd-next --wave`, which derives the next wave from the updated board.'
+  has "sdd-next body" "$_b" 'it prints the summary table (verdicts `pr-opened`, `interrupted` or `stopped: <reason>`; a `runner-busy` worker is re-run once, alone)'
+  has "sdd-next body" "$_b" 'and the `merge order:` plan, in which each later PR takes the next MINOR `VERSION` over the then-current `main`.'
+  has "sdd-next body" "$_b" 'It runs no `/sdd-pr-loop`, merges nothing, writes no `done` and tears down no worktree.'
+  has "WORKFLOW wave subsection" "$_d" 'Each worker opens its PR and leaves the feature `in-review` with verdict `pr-opened`; it never runs `/sdd-pr-loop` and never merges.'
+  has "WORKFLOW wave subsection" "$_d" 'The coordinator prints a `merge order:` line (the selection order).'
+  has "WORKFLOW wave subsection" "$_d" 'The operator runs `/sdd-pr-loop` per PR in that order;'
+  has "WORKFLOW wave subsection" "$_d" 'set `VERSION` to the next MINOR over the then-current `main`'
+  has "WORKFLOW wave subsection" "$_d" 'the operator retires the worktree with `tools/fix-worktree.sh teardown <id> <slug>` from a clean primary.'
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
@@ -437,6 +469,7 @@ test_slug_rule_prose
 test_manifest_contract
 test_worker_identity_and_harness_dir
 test_runner_lock_contract
+test_summary_and_merge_plan
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }
