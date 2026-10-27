@@ -192,7 +192,7 @@ a branch it never looked at.
 
 The Reviewer's `sh tools/run-tests.sh` proves the assertions that still exist pass; it cannot
 see one that was weakened so it still passes. `tools/test-drift-check.sh <base-ref>
-[<head-ref>] [--tasks-md <feature.tasks.md>]` lists, for every touched test file (the same
+[<head-ref>] [--tasks-md <feature.tasks.md>] [--feature-scope <default-ref>]` lists, for every touched test file (the same
 classifier `tools/change-size.sh` uses), each removed or modified assertion line, each newly
 added skip/only/xfail marker and each test name present at base and absent at head. It reports
 and fails: exit `0` when none of those three kinds of finding is present (or all are waived),
@@ -203,6 +203,12 @@ It never judges whether an edit tightened or weakened an assertion — that look
 forces. A finding is waived per test, by exact name, with a `waive-test-drift: <test name> —
 <reason>` line in the feature's `.tasks.md`. Extra assertion patterns go in
 `change_size.assert_patterns`. It is an added check; `run-tests.sh` stays primary.
+The Reviewer runs it once against the default branch (the contract) and, when the branch
+carries pair commits, once per pair commit with `--feature-scope <default branch>`: on a branch
+that has merged the default branch, the pair baseline would otherwise report the default
+branch's own test changes, brought in by the merge, as drift. `--feature-scope` keeps only the
+test files the branch itself changed since its merge-base with that branch (a rename stays when
+either path is the branch's own), and the summary line then ends `(feature scope <short-sha>)`.
 
 ## Observable slices and the walking skeleton (ADR-0008)
 
@@ -271,7 +277,8 @@ the Builder/Reviewer (the consumers) — it is additive and distinct from the `/
 
 Non-functional requirements are stage-aware, so an MVP plan does not grow production
 machinery nobody asked for. The project declares its stage once, as a `stage:` line in
-`specs/product.md` frontmatter — `discovery`, `pilot` or `production`; when the line is
+`specs/product.md` frontmatter (the `---` block that starts on line 1) — `discovery`, `pilot`
+or `production`; when the line is
 absent or unrecognized, the stage is `production` (today's behavior). Only the human writes
 it. The Planner reads it before writing the architecture and ADRs, the Driller copies it
 into every inbox brief's `## Constraints` as `Stage: <value>`, and the Architect reads it

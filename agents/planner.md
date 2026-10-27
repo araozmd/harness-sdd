@@ -102,8 +102,9 @@ what an earlier epic's implementation taught, are F03's job — not yours.
 ## Stage (ADR-0009)
 
 Read the product's stage before you write `specs/architecture.md` and the ADRs, and scope
-the upfront NFR decisions to it. Take the literal from `specs/product.md` frontmatter:
-`sed -n '/^---$/,/^---$/p' specs/product.md | grep '^stage:'` — one of `discovery`, `pilot`,
+the upfront NFR decisions to it. Take the literal from `specs/product.md` frontmatter
+(the `---` block that starts on line 1; a later `---` block is not frontmatter):
+`sed -n '1{/^---$/!q;};1,/^---$/p' specs/product.md | grep '^stage:'` — one of `discovery`, `pilot`,
 `production`; when the line is absent or unrecognized, the stage is `production`.
 
 - A bolt-on NFR the stage excludes (encryption at rest, WAF, rate limits, backups, caching)

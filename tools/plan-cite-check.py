@@ -10,8 +10,11 @@ E36-F04 / ADR-0009 decision 4 ("an uncited plan row is a defect").  Usage:
 Exit: 0 ok, 1 violation(s) / finding(s) / grandfather reject, 2 usage or input error (stderr
 `plan-cite-check: error: ...` plus the usage, nothing on stdout) or an unexpected exception
 (stderr `plan-cite-check: error: internal: <type>: <msg>`, no traceback) — exit 2 is "the
-check did not run", never a pass, and never the violation exit 1.  Stdlib only; a pure function of the paths named on argv, taken
-verbatim (no shlex, glob or ~ expansion).
+check did not run", never a pass, and never the violation exit 1.  `-h`/`--help` print the
+usage and exit 0 only as an option token: the word after --spec, --specs-dir or --base is
+that flag's value, never help (`--spec --help` reads a spec named `--help`, exit 2).  Stdlib
+only; a pure function of the paths named on argv, taken verbatim (no shlex, glob or ~
+expansion).
 
 The grammar is E36-F03's, copied byte-exactly from docs/SPEC-FORMAT.md "Plan rows cite an
 R-id or an ADR" — this tool lints it, it never redefines it.  Where the grammar is silent the
@@ -27,13 +30,17 @@ readings below are the tool's own contract (E36-F04.plan.md, Data model):
     empty or `:?-+:?` (at least one not empty); the header row is the row right before a
     separator; every other row is a data row.  Cells split on unescaped `|`.
   * tokens: `R[0-9]+` from a non-alphanumeric left boundary (`PR304` is no citation) and
-    `ADR-[0-9]{4}`, after stripping the `*` `` ` `` `"` `'` wrappers.
+    `ADR-[0-9]{4}`, after stripping the `*` `` ` `` `"` `'` wrappers.  An `R[0-9]+` right
+    after a feature id and a colon (`E[0-9]+-F[0-9]+:`, the `E` itself on a non-alphanumeric
+    boundary, as in `E36-F03:R5`) is a cross-feature citation (grammar item 3): it cites the
+    row and is never checked against --spec's R-ids.
   * ADR namespaces are init.sh 2c's: every directory named `adr` under the specs tree (token
     = parent basename, `platform` for <specs-dir>/adr; `*.md` directly inside, numbered by
     leading digits).  `<ns>/ADR-NNNN` (or a known `<ns> ADR-NNNN`) resolves there only, an
     unknown `<ns>/` never, a bare id in any namespace.  The specs tree is --specs-dir, else
     the plan's nearest ancestor named `specs`.
-  * every file is read as strict UTF-8 and each line's trailing `\r` (CRLF) is stripped first.
+  * every file is read as strict UTF-8, ONE leading UTF-8 BOM is dropped, and each line's
+    trailing `\r` (CRLF) is stripped first.
 
 Lint violations (one line each, file order, then `FAIL <n> violation(s)`): `uncited-row
 <plan>:<line> <heading>`, `unknown-rid <plan>:<line> R<n>` (only with --spec),
@@ -48,11 +55,6 @@ with a non-empty `Trigger:`, or exactly one `Deferred: none — <why>` line):
 `stage-unrecognized <product.md>:<line> <text>` for a `stage:` line in product.md's first
 `---` block that is not `^stage: (discovery|pilot|production)$`.
 
-Known limits: a cross-feature id such as `E36-F03:R5` reads as this spec's `R5` (`:` is a
-non-alphanumeric boundary, the spec's own reading); under --spec an id the spec does not
-declare surfaces as `unknown-rid`, one it declares passes silently
-(R3_cross_feature_id_reads_as_local).
-
 --grandfathered: grandfather() below is a DELIBERATE second copy of tasks-pair-check's
 merge-time rule, keyed on THIS tool's paths (see its docstring).
 """
@@ -66,6 +68,10 @@ USAGE = ("usage: plan-cite-check.py <feature.plan.md> [--spec <feature.spec.md>]
          "       plan-cite-check.py --sweep <specs-dir>\n"
          "       plan-cite-check.py --grandfathered <feature.plan.md> [--base <ref>]")
 TOOL_PATHS = ("tools/plan-cite-check.py", ".harness/tools/plan-cite-check.py")
+HELP_FLAGS = ("-h", "--help")
+# Every flag that takes a value, across the three modes (parse_args' flag tables): the word
+# after one is its value, never an option.
+VALUE_FLAGS = ("--spec", "--specs-dir", "--base")
 BASE_FALLBACKS = ("origin/main", "main", "origin/master", "master", "origin/trunk", "trunk")
 
 CHECKED_RE = re.compile(r"^## (Data model|API / interface|Files to change|Deferred)(\s|$)")
@@ -75,6 +81,10 @@ CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 # The grammar's tokens.  `R[0-9]+` read from a non-alphanumeric left boundary (the tool's
 # reading where the grammar is silent): `PR304` / `CR12` are not citations.
 RID_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])R[0-9]+")
+# A cross-feature citation (docs/SPEC-FORMAT.md grammar item 3): an R token immediately after
+# `E<digits>-F<digits>:`, the feature id itself on a non-alphanumeric left boundary.  Group 1
+# is the R token; its start is how cites() tells it from a bare R token.
+XFEAT_RE = re.compile(r"(?<![A-Za-z0-9])E[0-9]+-F[0-9]+:(R[0-9]+)")
 ADR_TOKEN_RE = re.compile(r"ADR-[0-9]{4}")
 # A spec R-id line, copied from tools/tasks-pair-check.py's RID_RE: `- **R<n>** ...` or the
 # bold-title form `- **R<n> — Title.** ...`, outside fenced code.
@@ -90,6 +100,7 @@ STATUS_DEFERRED_RE = re.compile(r"^- \*\*Status:\*\* deferred")
 TRIGGER_RE = re.compile(r"^- \*\*Trigger:\*\* \S")
 STAGE_RE = re.compile(r"^stage: (discovery|pilot|production)$")
 WRAPPERS = "*`\"'"
+BOM = "\ufeff"  # one is stripped from the head of every file read (_read)
 
 
 class InputError(Exception):
@@ -133,7 +144,9 @@ def iter_unfenced(lines, numbered=False):
 
 
 def _read(path):
-    """Return the file's lines: strict UTF-8, each line's trailing \\r then \\n stripped."""
+    """Return the file's lines: strict UTF-8, ONE leading BOM stripped, each line's trailing
+    \\r then \\n stripped.  The BOM (U+FEFF) is stripped before any parsing so a line-1
+    heading, R-id line or `---` stays what it is (review round 1, A1)."""
     if not os.path.isfile(path):
         raise InputError("cannot read %s: %s" % (
             path, "not a regular file" if os.path.exists(path) else "no such file"))
@@ -143,6 +156,8 @@ def _read(path):
         text = data.decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise InputError("cannot read %s: %s" % (path, exc))
+    if text.startswith(BOM):
+        text = text[1:]
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
@@ -217,13 +232,18 @@ def strip_wrappers(text):
 
 
 def cites(row):
-    """Return (r_tokens, has_adr_token) for one data row (wrappers stripped first)."""
+    """Return (bare_r_tokens, has_cross_feature_r, has_adr_token) for one data row (wrappers
+    stripped first).  A cross-feature R token is left out of bare_r_tokens: it cites the row,
+    but --spec never checks it."""
     text = strip_wrappers(row)
+    cross = {m.start(1) for m in XFEAT_RE.finditer(text)}
     rids = []
-    for tok in RID_TOKEN_RE.findall(text):
-        if tok not in rids:
-            rids.append(tok)
-    return rids, bool(ADR_TOKEN_RE.search(text))
+    for m in RID_TOKEN_RE.finditer(text):
+        if m.start() in cross:
+            continue
+        if m.group(0) not in rids:
+            rids.append(m.group(0))
+    return rids, bool(cross), bool(ADR_TOKEN_RE.search(text))
 
 
 def specs_dir_for(plan):
@@ -369,8 +389,8 @@ def check_plan(plan, sections, spec_rids, index):
     """
     out = []
     for sec, n, text in data_rows(sections):
-        rids, has_adr = cites(text)
-        if not rids and not has_adr:
+        rids, has_xfeat, has_adr = cites(text)
+        if not rids and not has_xfeat and not has_adr:
             out.append((n, "uncited-row %s:%d %s" % (plan, n, sec["name"])))
         if spec_rids is not None:
             for rid in rids:
@@ -555,9 +575,21 @@ def main_grandfathered(args):
     return 0 if flag else 1
 
 
+def wants_help(args):
+    """True iff `-h`/`--help` is an OPTION token: the argv walk steps over the word after each
+    value-taking flag (VALUE_FLAGS, `--flag value` form), so a flag's value is never help
+    (review round 1, A4).  `--flag=value` is one token and consumes nothing after it."""
+    i = 0
+    while i < len(args):
+        if args[i] in HELP_FLAGS:
+            return True
+        i += 2 if args[i] in VALUE_FLAGS else 1
+    return False
+
+
 def main(argv):
     args = argv[1:]
-    if any(a in ("-h", "--help") for a in args):
+    if wants_help(args):
         print(USAGE)
         return 0
     try:

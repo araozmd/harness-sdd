@@ -35,6 +35,49 @@ All notable changes to the harness body are recorded here. Versions follow
   `F182-R*` cases in `tests/test_escalation.sh`, `tests/test_self_mode.sh` and
   `tests/test_install.sh`.
 
+## [0.104.3] — 2026-10-27
+
+### Fixed — plan-cite-check review advisories (E36-F04 A1, A2, A4, A5, A7); grammar addition
+- **Cross-feature R-id citations (grammar addition).** `docs/SPEC-FORMAT.md` grammar item 3
+  now defines an `R[0-9]+` token immediately preceded by a feature id and a colon,
+  `E[0-9]+-F[0-9]+:` (as in `E36-F03:R5`), as a **cross-feature citation**: it cites the row,
+  but `--spec` never checks it. Before, `E36-F03:R5` read as this spec's `R5` — a false
+  `unknown-rid`, or a false local match. A bare `R[0-9]+` keeps its reading; `XE36-F03:R5`,
+  `E36-F03: R5` and `PR304` are unchanged. `tools/plan-cite-check.py`'s `XFEAT_RE` is the
+  stated prefix, and the suite's grammar-in-step row compares the two.
+- **Stage frontmatter is the `---` block on line 1, for every reader.** The documented read
+  command `sed -n '/^---$/,/^---$/p'` printed every `---` block anywhere in
+  `specs/product.md`, so it disagreed with `--sweep` (which needs `---` on line 1). The grammar
+  item 1, the Architect, Planner and Driller Stage sections now give
+  `sed -n '1{/^---$/!q;};1,/^---$/p' specs/product.md | grep '^stage:'` and say a block that
+  starts later is not frontmatter, so its `stage:` is absent (`production`). WORKFLOW says the
+  same.
+- `tools/plan-cite-check.py` strips ONE leading UTF-8 BOM from every file it reads, so a BOM'd
+  plan whose line 1 is `## Deferred` no longer gets a false `deferred-section-missing` (and a
+  BOM'd spec or `product.md` keeps its line-1 R-id or `---`).
+- `-h`/`--help` print the usage only as an option token. As a flag's value
+  (`<plan> --spec --help`) it is that flag's value, so the run exits 2, never 0.
+- The internal-error catch-all (exit 2) is now pinned by a second trigger outside
+  `ValueError`: a `BrokenPipeError` from a stdout pipe with no reader.
+
+## [0.104.2] — 2026-10-27
+
+### Fixed — the per-pair-commit drift check no longer reports main's own test edits (E36-F06)
+- `tools/test-drift-check.sh` gains `--feature-scope <default-ref>`. It restricts the examined
+  test files to those the branch itself changed since `git merge-base <default-ref> <head>`
+  (`git diff --name-status -z -M`, plus untracked files in working-tree mode), plus every path a non-merge commit on the branch touched, so a feature test that a later branch commit reverted stays in scope). A rename stays
+  when either its old or its new path is in that set. The summary line then ends
+  `(feature scope <short-sha>)`. A missing, empty or repeated flag exits `2`. A ref that does
+  not resolve, a ref with no merge base, or a failed `git merge-base`, `git diff` or
+  `git rev-parse --short` (each named on stderr) exits `3`.
+- `agents/reviewer.md` and `docs/WORKFLOW.md`: the per-pair-commit run is now
+  `test-drift-check.sh <pair-sha> --tasks-md <same file> --feature-scope <default branch>`.
+  On a branch that had merged `main`, the `<pair-sha>..HEAD` diff carried every test edit the
+  merge brought in, and each one was reported as `DRIFT`, a false REJECT. The E36-F05 Reviewer
+  saw 55 of them on each of 13 pair commits, and the E36-F02 and F03 Reviewers saw the same
+  pattern. The merge-base run against the default branch is unchanged and is still the contract.
+- `tests/test_test_drift_check.sh` gains the `FS1`-`FS6` rows and new R11a pins.
+
 ## [0.104.1] — 2026-10-27
 
 ### Fixed — board writes and the init.sh gate no longer pay ~0.7 s for an unused grammar
