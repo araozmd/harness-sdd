@@ -78,6 +78,8 @@ c="$(ln "$DRILLER" '## Seed the feature entries')"
 range "$DRILLER" '## Observable slice' '## Seed the feature entries' | tr '\n' ' ' > "$T/driller-sec.txt"
 SEC="$T/driller-sec.txt"
 sec() { grep -qiE "$1" "$SEC"; }
+sec 'Every feature you seed names at least one behavior observable at the product boundary' \
+  || fail "R1: section does not say EVERY seeded feature names a behavior observable at the product boundary"
 sec 'product boundary[^.]{0,120}HTTP[^.]{0,40}CLI[^.]{0,40}UI[^.]{0,40}file[^.]{0,40}exit code' \
   || fail "R1: section does not name the product-boundary surfaces (HTTP, CLI, UI, file, exit code)"
 sec 'first feature of a fresh epic is the walking skeleton' || fail "R1: section does not make the first feature of a fresh epic the walking skeleton"
