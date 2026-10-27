@@ -4,7 +4,7 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
-## [0.103.0] — 2026-10-27
+## [0.104.0] — 2026-10-27
 
 ### Added — plan-row citation lint and Reviewer gate (E36-F04)
 - `tools/plan-cite-check.py` (stdlib Python, executable) lints a feature `.plan.md` against the
@@ -36,6 +36,34 @@ All notable changes to the harness body are recorded here. Versions follow
 - `docs/RATIONALE.md` gains ledger row `C10 — Plan-row citation lint` (capability compensation).
 - New suite `tests/test_plan_cite.sh` and fixtures `tests/fixtures/plan-cite/`;
   `harness-install.sh` marks the tool executable.
+
+## [0.103.0] — 2026-10-27
+
+### Added — `/sdd-next --wave` fans out one wave into isolated worktrees (E36-F07)
+- **Scope token.** `/sdd-next --wave [--max N] [--epic E##]` is a closed-scope token beside
+  `--mine` and `E##-F##` and cannot be combined with either; any other shape selects nothing
+  and prints the usage line. The generated `sdd-next` body (Claude, OpenCode, Codex/Antigravity
+  skill) maps it to the new `agents/orchestrator.md` → *Wave coordinator mode (/sdd-next
+  --wave)*.
+- **Coordinator W1–W7.** Preflight before any mutation (native concurrent sub-agents,
+  `execution.builder.backend: in-session`, empty `umbrella.manifest`); read `waves[0]` of
+  `node tools/next-task.mjs --waves --json` and branch on `outcome` (never re-derive a wave);
+  select runnable, autonomous, `pending`, `route: architect` features, critical path first, up
+  to the cap; provision each with `tools/fix-worktree.sh create`; write
+  `progress/wave-<stamp>/summary.md`; spawn every worker before awaiting any; re-run
+  `runner-busy` workers one at a time, once; print the summary table and the `merge order:`
+  plan. The coordinator runs no `/sdd-pr-loop`, merges nothing and writes no `done`.
+- **Wave workers.** The targeted worker mode admits one autonomous `sdd: true` feature from
+  `--wave`; a wave worker writes its transitions with `HARNESS_DIR` set to its own worktree,
+  commits them on its feature branch, resumes from that board's status, and stops after its PR.
+  A refused test gate (exit 5) is `runner-busy`, never retried by the worker; a cancelled or
+  killed worker is `interrupted` and never relaunched.
+- **Config.** `workflow.max_wave: 3` caps concurrent workers (`--max N` overrides it for one
+  run); the installer seeds the key into a preserved `workflow:` that lacks it.
+- **Helper.** `tools/fix-worktree.sh` accepts any `E<digits>-F<digits>` id by an explicit parse
+  (not a wildcard glob), so `E1x-F1` and `E1/../-F1` stay rejected; the E99 fix lane is
+  unchanged.
+- **Docs.** `docs/WORKFLOW.md` → *Fanning out a wave (`/sdd-next --wave`)*.
 
 ## [0.102.0] — 2026-10-26
 

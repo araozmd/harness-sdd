@@ -178,7 +178,8 @@ fresh human approval. Preserve receipts when stopping; report partial results ho
 Enter this fenced mode only when `/sdd-fix-parallel` supplies one exact autonomous E99
 `sdd: false` fix already atomically claimed `in-progress`, its inbox brief, dedicated
 pre-provisioned branch and worktree, canonical main `HARNESS_DIR`, and batch progress
-path. Pin every action to that identity; never call global `next()`, select another
+path, or when `/sdd-next --wave` supplies one exact autonomous `sdd: true` feature at
+`pending` (see "Wave coordinator mode" below for the wave variations). Pin every action to that identity; never call global `next()`, select another
 task, or mutate a sibling. The coordinator has already performed the one permitted
 F02 create; the targeted worker must not call `tools/fix-worktree.sh create`, replace
 those resources, or create another branch/worktree.
@@ -214,6 +215,161 @@ set the fix `done` and do not tear it down: after all siblings settle, the coord
 alone performs the locked final done write, bookkeeping PR merge, canonical-base
 fast-forward, and exact F02 teardown. This separation keeps the shared primary Git
 lifecycle serialized while worker board transitions remain lock-safe.
+
+## Wave coordinator mode (/sdd-next --wave)
+
+`/sdd-next --wave [--max N] [--epic E##]` fans out ONE wave of the derived dependency graph
+into isolated worktrees, one targeted worker per feature, each running this loop (Architect →
+Builder → Reviewer → PR). It reuses the fix lane by reference, not by copy: provisioning,
+manifest completeness and fan-out discipline are `agents/fixer.md`'s "Parallel dispatch mode"
+(P2 provisioning, P3 manifest, P5 fan-out before any wait, P6 exclusive wave, P7 aggregate
+exit), with the wave differences stated here. Nothing about a wave is written to the board
+(ADR-0010): no second scheduler, no stored plan, no lease field. The phases run in order,
+W1 to W7.
+
+### W1 — preflight
+
+W1 runs entirely before any mutation. The coordinator runs init, requires native in-session
+concurrent sub-agent delegation (otherwise it stops and names the missing native concurrency
+capability), requires `execution.builder.backend: in-session` (otherwise it stops and names
+the incompatible backend — `delegate` or any unknown value), and requires `umbrella.manifest`
+to be empty (umbrella coordinators are out of scope). It then resolves `cap`: `--max N` when
+given, else `workflow.max_wave` from `harness.config.yaml`, else `3`. When
+`workflow.max_wave` is present but not a positive integer, the coordinator stops and names the
+key `workflow.max_wave`. `cap` is the only brake on concurrent workers: there is no hard
+ceiling, and the operator owns any value above the default. Every W1 stop names its cause,
+points the operator to `/sdd-next <id>` and makes the coordinator exit non-zero with no
+worktree, branch, manifest or board change.
+
+### W2 — wave read
+
+The coordinator runs `node tools/next-task.mjs --waves --json` (installed:
+`node .harness/tools/next-task.mjs --waves --json`), forwarding `--epic E##` when given, and
+consumes that envelope exactly: it never re-derives a wave, a route or a blocker. It branches
+on `outcome` first. When `outcome` is `"error"` or `"blocked"`, the coordinator prints the
+envelope's `reason.detail` and every `blocked[]` record, mutates nothing and exits non-zero.
+When `outcome` is `"waves"` and `waves` is empty, it prints exactly `no runnable wave` and
+exits 0 with no mutation. Otherwise it fans out `waves[0]` — the first listed wave — and
+prints that wave's `wave` number, which can be above 1 under `--epic`; it never assumes
+wave 1.
+
+Classify every record of `waves[0].features` as exactly one of `selected`, `cap-deferred` or
+`skipped: <reason>`. A record is eligible iff
+`runnable == true && autonomous == true && status == "pending" && route == "architect"` —
+those four envelope fields and nothing else (a `pending` `sdd: false` fix routes to `builder`
+and belongs to `/sdd-fix-parallel`). A record that is not eligible is `skipped:` with the
+first failing predicate, checked in that order: `skipped: not-runnable [<code> …]` (its
+`blocked[]` codes), `skipped: not-autonomous`, `skipped: status:<status>`, or
+`skipped: route:<route>`; no record is silently dropped. Selection order is
+`critical_path[0]` first when it is eligible and in the wave, then the remaining eligible
+records in the envelope's listed order. The first `cap` eligible records are `selected`; the
+rest are `cap-deferred` and stay `pending` for the operator's next run. When the wave has no
+eligible record, the coordinator prints `no eligible feature in wave <N>` and exits 0 with no
+mutation.
+
+### W3 — provision
+
+Provisioning is `agents/fixer.md`'s P2 discipline with a feature in place of a fix: the
+coordinator calls `tools/fix-worktree.sh create <id> <slug>` (installed:
+`.harness/tools/fix-worktree.sh`) once per selected feature, sequentially, before any manifest
+or board write, while the primary is clean (the helper enforces it). The helper accepts any
+`E<digits>-F<digits>` id and creates branch `feat/<id>-<slug>` and worktree
+`<primary>/.claude/worktrees/<id>-<slug>`. The coordinator derives `<slug>` from the board's
+`spec_path` for that feature, which it reads and never writes: take the last path component
+(ignoring a trailing `/`), remove the leading `F<digits>-`, lowercase it, collapse every run of
+characters outside `[a-z0-9]` to one `-`, trim leading and trailing `-`, and use `wave` when
+the result is empty. A feature whose `create` fails is classified
+`provisioning-failed: <helper stderr>`, stays `pending`, and does not stop its siblings.
+
+### W4 — manifest
+
+After every selected `create` has settled and before the first worker is spawned, the
+coordinator writes `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` under P3's completeness rule.
+Its header carries `wave: <N>`, `cap: <n> (<source>)` where the source is `--max`,
+`workflow.max_wave` or `default`, `scope:` (the epic, or the whole board) and `selector:` (the
+exact selector command run). Then it lists one line per record of `waves[0]` — every record,
+none absent — with the record's classification and, for a provisioned feature, its exact
+branch and worktree.
+
+### W5 — fan-out
+
+The coordinator spawns every provisioned worker before awaiting any one of them, up to `cap`
+(P5's fan-out-before-wait rule). Each is a clean targeted Orchestrator worker in "Targeted
+parallel-fix worker mode", given exactly: its feature id; the primary's absolute path to its
+inbox brief, or `-` when `progress/inbox/<id>.md` is absent (the Architect then falls back to
+the TaskStore title); its pre-provisioned branch and worktree; `HARNESS_DIR` set to that worktree's harness
+directory — `<worktree>/.harness` in an installed target, the worktree itself in this harness
+source checkout; and the manifest path.
+
+### Wave worker variations
+
+A wave worker is the targeted worker above with these differences, and only these:
+
+- It starts at the Architect: `pending → spec-ready → in-progress`; `autonomous: true` skips
+  the human gate but still records the gate-span pair, then Builder and Reviewer rounds run as
+  usual.
+- A wave worker writes every board transition through
+  `HARNESS_DIR="<its worktree's harness dir>" python3 "$HARNESS_DIR/tools/tasks-lock.py"` and commits those
+  transitions on its own feature branch; the explicit `HARNESS_DIR` wins over the
+  linked-worktree remap, so where the targeted mode above says canonical main `HARNESS_DIR`, a
+  wave worker uses its own worktree's harness directory instead.
+- On entry it reads the feature's status from its own worktree board and resumes at that
+  phase, so a re-spawned worker never restarts the Architect.
+- A wave worker never stages, commits, switches, stashes, resets or cleans the primary.
+- It stops after opening its PR, with the feature left `in-review`: it never merges, never
+  runs `/sdd-pr-loop`, never writes `done` and never tears down its worktree. It returns a
+  verdict (`pr-opened`, `runner-busy`, `interrupted` or `stopped: <reason>`) with the feature's
+  last status, its branch, worktree, PR URL (or `-`) and transition records.
+
+### Test-runner lock
+
+Workers share one machine and one `tools/run-tests.sh` slot (one run per machine). A worker
+runs the full `verification.test_command` at most once per role phase, as a gate, and touched
+suites while iterating (`agents/builder.md` step 5). When the runner refuses with exit 5, the
+worker records `runner-busy`, does not re-invoke the runner, leaves the feature at its current
+status (the Reviewer never approves without a green gate) and returns. It never polls and
+never waits for the slot. Nothing here raises `--jobs`; the runner's cap stands.
+
+A worker whose sub-agent or tool call was cancelled or killed, or that returned without a
+verdict, is `interrupted`: a stop, never relaunched, never queued. A runner exit of 1 is a
+red suite and is never reclassified as a signal — the runner itself exits 1 on HUP/INT/TERM,
+so the distinction is observed at the worker boundary, not from the exit code.
+
+### W6 — exclusive pass
+
+After the parallel wave settles, the coordinator re-spawns each `runner-busy` worker one at a
+time in selection order (P6's guarded exclusive wave shape), with the same inputs; the worker
+resumes from its worktree board's status. This pass runs at most once per feature: a second
+`runner-busy` is the terminal verdict `stopped: runner-busy twice`.
+
+### W7 — report and merge plan
+
+When every worker has settled, the coordinator prints a summary table with one row per
+selected feature, `feature | branch | PR | verdict`, where the verdict is one of `pr-opened`,
+`interrupted` or `stopped: <reason>` — `runner-busy` is a worker-return value consumed by W6
+and never a final-table verdict. It then prints the merge plan: a `merge order:` line listing
+only the PRs that were opened (verdict `pr-opened`), in selection order — a feature with no
+PR is absent from it — and the per-PR integration rule, because `VERSION`,
+`CHANGELOG.md`, `progress/history.md` and `state/tasks.json` conflict between siblings every
+time. Before `/sdd-pr-loop` on each PR after the first, integrate the updated `main` into that
+branch with one merge commit; `VERSION` becomes the next MINOR over the then-current `main`;
+place this feature's `CHANGELOG.md` entry above main's newest entry under that version; keep
+both sides of `progress/history.md` and of `state/tasks.json`. The plan is also appended to
+the manifest.
+
+```text
+Wave 2 (epic E36) — cap 3 (workflow.max_wave)
+feature  | branch                        | PR    | verdict
+E36-F04  | feat/E36-F04-plan-cite-check  | #310  | pr-opened
+E36-F07  | feat/E36-F07-wave-fanout      | -     | stopped: runner-busy twice
+merge order: E36-F04
+```
+
+The coordinator runs no `/sdd-pr-loop`, performs no merge, writes no `done`, and tears down
+no worktree; the operator runs `/sdd-pr-loop` per PR in merge order, and `done` and teardown
+follow the normal post-merge path ("Writing `done`"). It exits 0 iff every selected feature's
+verdict is `pr-opened`. Wave 2 is not automatic: after wave 1 merges, the operator re-runs
+`/sdd-next --wave`, which derives the next wave from the updated board.
 
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 

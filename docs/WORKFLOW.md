@@ -447,6 +447,30 @@ is written to the board, and there is no lane, lease or claim field.
   `<id>=missing` records and prints no wave at all (exit 0). A stale cycle (every
   dependency already `done`) is not invalid.
 
+### Fanning out a wave (`/sdd-next --wave`)
+
+On one machine, `/sdd-next --wave [--max N] [--epic E##]` turns the wave view into work: it
+runs each selected feature of one wave through the normal loop in its own worktree, as a
+targeted worker (`agents/orchestrator.md` → "Wave coordinator mode (/sdd-next --wave)").
+
+- **Manifest.** After provisioning and before any worker starts, the coordinator writes the
+  manifest `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` with every record of the wave and,
+  for each provisioned feature, its branch and worktree.
+- **Machine load.** Workers share one `tools/run-tests.sh` slot. A worker whose full test
+  gate is refused (exit 5) returns `runner-busy` and is re-run once, alone, after the wave
+  settles; a cancelled or killed worker is `interrupted` and is never relaunched.
+- **Workers stop at the PR.** Each worker opens its PR and leaves the feature `in-review`
+  with verdict `pr-opened`; it never runs `/sdd-pr-loop` and never merges.
+- **Merge order.** The coordinator prints a `merge order:` line: the opened PRs only, in
+  selection order. The operator runs `/sdd-pr-loop` per PR in that order; before each PR after the first, merge the
+  updated `main` into its branch (one merge commit), set `VERSION` to the next MINOR over the
+  then-current `main`, place its `CHANGELOG.md` entry above `main`'s newest, and keep both
+  sides of `progress/history.md` and `state/tasks.json`.
+- **Wave 2 is a re-run.** After wave 1 merges, run `/sdd-next --wave` again; it derives the
+  next wave from the updated board. Nothing about a wave is stored.
+- **Teardown.** After a PR merges, `done` follows the normal post-merge path, and the operator
+  retires the worktree with `tools/fix-worktree.sh teardown <id> <slug>` from a clean primary.
+
 ## Diagnosing blocked selection
 
 Dependency cycles and an empty `/sdd-next` result are planning diagnostics, not
@@ -759,6 +783,9 @@ or force-deletes shared state. Recoverable failures preserve resources and do no
 cancel siblings. No ready work is a zero-mutation success; missing native concurrency
 or `execution.builder.backend: delegate` fails before manifest/provision/claim and
 points to serial `/sdd-fix`.
+
+The helper `tools/fix-worktree.sh` accepts any `E##-F##` id, so `/sdd-next --wave` provisions
+`sdd: true` features with it too; the E99 lane itself is unchanged.
 
 On OpenCode, the installer exposes `/sdd-fix-parallel` only after its concurrency
 capability marker or an explicit override enables it; the probe remains available.

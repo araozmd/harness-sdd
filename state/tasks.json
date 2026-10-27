@@ -527,7 +527,8 @@
         {
           "id": "E36-F07",
           "title": "/sdd-next --wave fans out one wave into isolated worktrees",
-          "status": "pending",
+          "status": "done",
+          "landed": {"base": "origin/main", "commit": "11c4add6cc77cfc0ce7f452c3ad414f88fb0b42d", "ref": "11c4add6cc77cfc0ce7f452c3ad414f88fb0b42d", "repo": "harness-sdd-E36-F07", "verified": "ancestor"},
           "sdd": true,
           "autonomous": true,
           "depends_on": [

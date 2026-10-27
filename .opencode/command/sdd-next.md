@@ -30,7 +30,28 @@ Map `$ARGUMENTS` to the selector's closed scope flags:
 - one valid positional feature id `E##-F##` → translate it to
   `node tools/next-task.mjs --json --feature E##-F##`; never forward the feature
   id as a selector positional token.
+- `--wave`, optionally followed by `--max N` and/or `--epic E##` in either order → **wave
+  coordinator mode** (below).
 - anything else is invalid and selects or changes nothing.
+
+`--wave` is a closed-scope token beside `--mine` and `E##-F##`: it cannot be combined with
+either. `--max` and `--epic` are valid only after `--wave`, each at most once; `N` must match
+`^[1-9][0-9]*$` and `E##` must match `^E[0-9]+$`. Any other argument shape (`--wave --mine`,
+`--wave E##-F##`, `--max N` or `--epic E##` without `--wave`, `--max 0`, `--epic E36-F01`,
+a repeated token) selects nothing, changes no state, and prints
+`usage: /sdd-next [--mine | E##-F## | --wave [--max N] [--epic E##]]`.
+
+Under `--wave`, act as the wave coordinator in `agents/orchestrator.md` →
+"## Wave coordinator mode (/sdd-next --wave)"; that section is the contract — its preflight
+stops, how `--epic E##` and `--max N` are used, selection, provisioning, fan-out, the
+test-runner lock and the merge plan — and this command only maps the scope. Its preflight
+stops before any mutation — naming the cause, pointing to `/sdd-next <id>` and exiting
+non-zero — on every condition that section lists, including an `execution.builder.backend`
+other than `in-session` (`delegate` or any unknown value). After the workers settle it
+prints the summary table (verdicts `pr-opened`, `interrupted` or `stopped: <reason>`; a
+`runner-busy` worker is re-run once, alone) and the `merge order:` plan of the opened PRs,
+in which each later PR takes the next MINOR `VERSION` over the then-current `main`. It runs
+no `/sdd-pr-loop`, merges nothing, writes no `done` and tears down no worktree.
 
 Under `--mine`, use **scoped selection**: consider only features whose **effective owner**
   (feature `owner` else parent epic `owner`) equals the identity resolved from
