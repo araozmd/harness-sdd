@@ -517,4 +517,21 @@ GITINO_AFTER="$(ls -di "$SRU/.git" 2>/dev/null | awk '{print $1}')"
 [ "$GITINO_BEFORE" = "$GITINO_AFTER" ] || fail "existing .git was re-initialized on re-run"
 pass "--shared-repo is append-only + idempotent, never re-inits an existing .git [shared_repo_idempotent]"
 
+# A user's last .gitignore line with NO trailing newline must not fuse with a child ignore
+# appended on a later run (the section heading already exists, so its leading blank line no
+# longer protects the append). A new child repo forces an append.
+printf 'my-last-entry' >> "$SRU/.gitignore"          # deliberately NO trailing newline
+mkdir -p "$SRU/new-svc/.git"
+_src_rc=0
+sh "$INSTALL" --umbrella "$SRU" --shared-repo >/dev/null 2>&1 || _src_rc=$?
+case "$_src_rc" in
+  0|3) : ;;
+  *) fail "--shared-repo re-run with a new child failed (exit $_src_rc)" ;;
+esac
+grep -qxF 'my-last-entry' "$SRU/.gitignore" \
+  || fail "umbrella-root child ignore fused onto the user's last line (no trailing newline): $(tail -n 3 "$SRU/.gitignore" | tr '\n' '|')"
+grep -qxF '/new-svc/' "$SRU/.gitignore" \
+  || fail "new child new-svc not ignored as its own line: $(tail -n 3 "$SRU/.gitignore" | tr '\n' '|')"
+pass "--shared-repo child ignores survive a user .gitignore with no trailing newline [shared_repo_append_newline]"
+
 echo "All cascade tests passed."

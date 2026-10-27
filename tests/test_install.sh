@@ -880,6 +880,16 @@ grep -qxF 'my-own-entry' "$_mb/.gitignore" \
   || fail "gitignore append fused onto a final line lacking a trailing newline (my-own-entry corrupted)"
 grep -q 'my-own-entry.claude' "$_mb/.gitignore" \
   && fail "gitignore append fused a harness pattern onto the user's last line"
+# The same guard on the .harness/.gitignore append: a user entry with no trailing newline, then
+# one seeded pattern removed so the upgrade must append it, never fuses.
+grep -vxF 'jira.pat' "$_mb/.harness/.gitignore" > "$_mb/hg.tmp" && mv "$_mb/hg.tmp" "$_mb/.harness/.gitignore"
+printf 'my-harness-entry' >> "$_mb/.harness/.gitignore"   # deliberately NO trailing newline
+CODEX_HOME="$T/codex-home" sh "$SRC/harness-install.sh" "$_mb" >/dev/null 2>"$_mb/.err2" \
+  || fail "harness-gitignore upgrade run failed: $(cat "$_mb/.err2")"
+grep -qxF 'my-harness-entry' "$_mb/.harness/.gitignore" \
+  || fail ".harness/.gitignore append fused onto a final line lacking a trailing newline: $(tail -n 3 "$_mb/.harness/.gitignore" | tr '\n' '|')"
+grep -qxF 'jira.pat' "$_mb/.harness/.gitignore" \
+  || fail ".harness/.gitignore upgrade did not re-append jira.pat on its own line"
 rm -rf "$_mb"
 pass "existing *.mutbak ignore preserved + warned about; gitignore appends survive a missing trailing newline"
 
