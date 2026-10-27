@@ -65,6 +65,8 @@ while [ $# -gt 0 ]; do
     --backend) [ $# -ge 2 ] || usage; _backend="$2"; shift 2 ;;
     --config)  [ $# -ge 2 ] || usage; _config="$2";  shift 2 ;;
     --arming)  [ $# -ge 2 ] || usage; _arming="$2";  shift 2 ;;
+    # An EMPTY value is "no key" (R4): host-frontend.sh prints nothing when it cannot tell,
+    # and `--frontend "$(…)"` must then behave exactly like a caller that never passed it.
     --frontend) [ $# -ge 2 ] || usage; _frontend="$2"; shift 2 ;;
     --help|-h) usage ;;
     --*) echo "builder-role.sh: unknown option '$1'" >&2; usage ;;

@@ -103,6 +103,9 @@ _f182_err="$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config
 printf '%s' "$_f182_err" | grep -qF 'codex=neither' \
   || fail "--frontend codex on the real artifact did not name codex=neither on stderr: $_f182_err (E99-F182 R2)"
 pass "the real --self artifact keeps a Codex session on builder, naming codex=neither (E99-F182 R2) [self_arming_per_frontend_codex]"
+[ "$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config.yaml" 2>/dev/null)" = builder ] \
+  || fail "builder-role.sh with no --frontend escalated on the real blocked --self artifact (E99-F182 R4)"
+pass "with no key the real --self artifact still decides from its blocked first line (E99-F182 R4) [self_arming_no_key]"
 
 # Disarmed arm: with NO recorded models anywhere, nothing resolves — the verdict file
 # is reclaimed, exactly as write_escalation_arming does for an unconfigured target.

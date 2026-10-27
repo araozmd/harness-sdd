@@ -1397,4 +1397,37 @@ F182_R3_key_missing_line_shuts() {
 }
 F182_R3_key_missing_line_shuts
 
+# ── F182-R4: no key, or an empty key, is today's rule byte for byte ──────────────
+# Every fixture shape the pre-feature rule distinguishes, both triggers. stdout AND stderr
+# of `… --frontend ''` must equal the no-flag run, and stdout must equal the pre-feature
+# expectation (`armed` ⇒ heavy, everything else ⇒ builder) — so an empty key that leaked
+# into the key path, or a no-key path that started reading detail lines, both red.
+F182_R4_no_key_unchanged() {
+  _armed_f="$(mkfix f182-r4-armed 2 armed claude=raise)"
+  _blk_f="$(mkfix f182-r4-blocked 2 blocked claude=raise codex=none)"
+  _abs_f="$(mkfix f182-r4-absent 2 '')"
+  _veto_f="$(mkfix f182-r4-veto 0 armed claude=raise)"
+  for _case in "armed:$_armed_f:" "blocked:$_blk_f:" "absent:$_abs_f:" "veto:$_veto_f:" "delegate:$_armed_f:delegate"; do
+    _name="${_case%%:*}"; _rest="${_case#*:}"; _cfg="${_rest%:*}"; _be="${_rest##*:}"
+    [ -n "$_be" ] || _be=in-session
+    for _trig in "complex 1" "standard 3"; do
+      # shellcheck disable=SC2086  # the trigger pair is two positional arguments
+      set -- $_trig
+      sh "$TOOL" "$1" "$2" --config "$_cfg" --backend "$_be" >"$T/r4-nokey.out" 2>"$T/r4-nokey.err" \
+        || fail "F182-R4: $_name/$_trig with no key exited non-zero"
+      sh "$TOOL" "$1" "$2" --config "$_cfg" --backend "$_be" --frontend '' >"$T/r4-empty.out" 2>"$T/r4-empty.err" \
+        || fail "F182-R4: $_name/$_trig with --frontend '' exited non-zero"
+      cmp -s "$T/r4-nokey.out" "$T/r4-empty.out" \
+        || fail "F182-R4: $_name/$_trig stdout differs between no key and --frontend ''"
+      cmp -s "$T/r4-nokey.err" "$T/r4-empty.err" \
+        || fail "F182-R4: $_name/$_trig stderr differs between no key and --frontend ''"
+      if [ "$_name" = armed ]; then _want=builder-heavy; else _want=builder; fi
+      [ "$(cat "$T/r4-empty.out")" = "$_want" ] \
+        || fail "F182-R4: $_name/$_trig with an empty key printed '$(cat "$T/r4-empty.out")', expected the pre-feature '$_want'"
+    done
+  done
+  pass "no key and an empty key decide from the first line exactly as before, stdout and stderr (F182-R4)"
+}
+F182_R4_no_key_unchanged
+
 echo "test_escalation.sh: all cases passed"
