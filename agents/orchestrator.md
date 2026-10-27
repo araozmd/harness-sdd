@@ -252,6 +252,20 @@ exits 0 with no mutation. Otherwise it fans out `waves[0]` — the first listed 
 prints that wave's `wave` number, which can be above 1 under `--epic`; it never assumes
 wave 1.
 
+Classify every record of `waves[0].features` as exactly one of `selected`, `cap-deferred` or
+`skipped: <reason>`. A record is eligible iff
+`runnable == true && autonomous == true && status == "pending" && route == "architect"` —
+those four envelope fields and nothing else (a `pending` `sdd: false` fix routes to `builder`
+and belongs to `/sdd-fix-parallel`). A record that is not eligible is `skipped:` with the
+first failing predicate, checked in that order: `skipped: not-runnable [<code> …]` (its
+`blocked[]` codes), `skipped: not-autonomous`, `skipped: status:<status>`, or
+`skipped: route:<route>`; no record is silently dropped. Selection order is
+`critical_path[0]` first when it is eligible and in the wave, then the remaining eligible
+records in the envelope's listed order. The first `cap` eligible records are `selected`; the
+rest are `cap-deferred` and stay `pending` for the operator's next run. When the wave has no
+eligible record, the coordinator prints `no eligible feature in wave <N>` and exits 0 with no
+mutation.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is

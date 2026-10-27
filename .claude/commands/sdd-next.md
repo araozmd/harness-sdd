@@ -48,7 +48,9 @@ Under `--wave`, act as the wave coordinator in `agents/orchestrator.md` →
 command only maps the scope. Its preflight stops before any mutation — naming the cause,
 pointing to `/sdd-next <id>` and exiting non-zero — on a missing native concurrent sub-agent
 capability, on an `execution.builder.backend` other than `in-session` (`delegate` or any
-unknown value), or on a non-empty `umbrella.manifest`.
+unknown value), or on a non-empty `umbrella.manifest`. It selects the runnable, autonomous,
+`pending`, `route: architect` records of `waves[0]` up to `cap`, `critical_path[0]` first, and
+reports every other record as `cap-deferred` or `skipped: <reason>`.
 
 Under `--mine`, use **scoped selection**: consider only features whose **effective owner**
   (feature `owner` else parent epic `owner`) equals the identity resolved from

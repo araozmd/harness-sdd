@@ -248,10 +248,70 @@ test_wave_read_consumes_envelope() {
   end
 }
 
+# ── R4 — eligibility, order and cap ────────────────────────────────────────────────────
+# classify <cap>: apply the spec's predicate and order rule to $SEL/out and print one
+# `id=classification` per record of waves[0], in envelope order.
+classify() {
+  python3 - "$1" "$SEL/out" <<'PY'
+import json, sys
+cap = int(sys.argv[1]); x = json.load(open(sys.argv[2]))
+recs = x["waves"][0]["features"]
+def why(r):
+    if r["runnable"] is not True: return "skipped: not-runnable"
+    if r["autonomous"] is not True: return "skipped: not-autonomous"
+    if r["status"] != "pending": return "skipped: status:" + r["status"]
+    if r["route"] != "architect": return "skipped: route:" + str(r["route"])
+    return None
+eligible = [r["id"] for r in recs if why(r) is None]
+cp0 = x["critical_path"][0] if x["critical_path"] else None
+order = ([cp0] if cp0 in eligible else []) + [i for i in eligible if i != cp0]
+sel = order[:cap]
+print(" ".join(order))
+for r in recs:
+    w = why(r)
+    print("%s=%s" % (r["id"], w if w else ("selected" if r["id"] in sel else "cap-deferred")))
+PY
+}
+
+test_eligibility_order_and_cap() {
+  begin test_eligibility_order_and_cap
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'Classify every record of `waves[0].features` as exactly one of `selected`, `cap-deferred` or `skipped: <reason>`.'
+  has "wave section" "$_w" 'A record is eligible iff `runnable == true && autonomous == true && status == "pending" && route == "architect"` — those four envelope fields and nothing else'
+  has "wave section" "$_w" '(a `pending` `sdd: false` fix routes to `builder` and belongs to `/sdd-fix-parallel`)'
+  has "wave section" "$_w" 'A record that is not eligible is `skipped:` with the first failing predicate, checked in that order: `skipped: not-runnable [<code> …]` (its `blocked[]` codes), `skipped: not-autonomous`, `skipped: status:<status>`, or `skipped: route:<route>`; no record is silently dropped.'
+  has "wave section" "$_w" 'Selection order is `critical_path[0]` first when it is eligible and in the wave, then the remaining eligible records in the envelope'"'"'s listed order.'
+  has "wave section" "$_w" 'The first `cap` eligible records are `selected`; the rest are `cap-deferred` and stay `pending` for the operator'"'"'s next run.'
+  has "wave section" "$_w" 'When the wave has no eligible record, the coordinator prints `no eligible feature in wave <N>` and exits 0 with no mutation.'
+  _b=$(fold_file "$B_CLAUDE")
+  has "sdd-next body" "$_b" 'It selects the runnable, autonomous, `pending`, `route: architect` records of `waves[0]` up to `cap`, `critical_path[0]` first, and reports every other record as `cap-deferred` or `skipped: <reason>`.'
+
+  # E1-F5 is critical_path[0] (E1-F9 depends on it) and numerically LATER than eligible
+  # E1-F2; E1-F3 is an autonomous sdd:false fix (route builder); E1-F4 is parked; E1-F6 is
+  # not autonomous; E1-F7 is spec-ready. Listed in non-canonical order.
+  _a='"autonomous":true'
+  _b=$(board "E1:$(feat E1-F9 pending '["E1-F5"]' "$_a"),$(feat E1-F7 spec-ready '[]' "$_a"),$(feat E1-F6 pending),$(feat E1-F5 pending '[]' "$_a"),$(feat E1-F4 pending '[]' "$_a,\"parked\":{\"reason\":\"vendor\"}"),$(feat E1-F3 pending '[]' "$_a,\"sdd\":false"),$(feat E1-F2 pending '[]' "$_a")")
+  if run_selector "$_b" --waves --json; then
+    [ "$(json_field 'x["critical_path"][0]' <"$SEL/out")" = E1-F5 ] || fail "fixture: critical_path[0] is not E1-F5"
+    [ "$(json_field '",".join(f["id"]+":"+str(f["route"]) for f in x["waves"][0]["features"])' <"$SEL/out")" = \
+      "E1-F2:architect,E1-F3:builder,E1-F4:architect,E1-F5:architect,E1-F6:architect,E1-F7:builder" ] ||
+      fail "envelope waves[0] ids/routes changed: $(json_field '[(f["id"],f["route"]) for f in x["waves"][0]["features"]]' <"$SEL/out")"
+    _got=$(classify 1 | tr '\n' ' ')
+    [ "$_got" = "E1-F5 E1-F2 E1-F2=cap-deferred E1-F3=skipped: route:builder E1-F4=skipped: not-runnable E1-F5=selected E1-F6=skipped: not-autonomous E1-F7=skipped: status:spec-ready " ] ||
+      fail "predicate over the envelope: got [$_got]"
+    [ "$(json_field '[c["code"] for f in x["waves"][0]["features"] if f["id"]=="E1-F4" for c in f["blocked"]]' <"$SEL/out")" = "['parked']" ] ||
+      fail "E1-F4 blocked[] codes are not ['parked']"
+  else
+    fail "eligibility fixture selector run exited non-zero"
+  fi
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
 test_wave_read_consumes_envelope
+test_eligibility_order_and_cap
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }
