@@ -240,6 +240,18 @@ ceiling, and the operator owns any value above the default. Every W1 stop names 
 points the operator to `/sdd-next <id>` and makes the coordinator exit non-zero with no
 worktree, branch, manifest or board change.
 
+### W2 — wave read
+
+The coordinator runs `node tools/next-task.mjs --waves --json` (installed:
+`node .harness/tools/next-task.mjs --waves --json`), forwarding `--epic E##` when given, and
+consumes that envelope exactly: it never re-derives a wave, a route or a blocker. It branches
+on `outcome` first. When `outcome` is `"error"` or `"blocked"`, the coordinator prints the
+envelope's `reason.detail` and every `blocked[]` record, mutates nothing and exits non-zero.
+When `outcome` is `"waves"` and `waves` is empty, it prints exactly `no runnable wave` and
+exits 0 with no mutation. Otherwise it fans out `waves[0]` — the first listed wave — and
+prints that wave's `wave` number, which can be above 1 under `--epic`; it never assumes
+wave 1.
+
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
 This section ADDS a **selection filter**; it does not replace anything above. It is

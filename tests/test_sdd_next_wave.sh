@@ -181,9 +181,77 @@ test_preflight_contract() {
   end
 }
 
+# ── selector fixtures (the INSTALLED selector; the live board is never read) ───────────
+SEL="$TMP/sel"
+mkdir -p "$SEL"
+printf 'workflow:\n  require_spec_approval: true\n  identity: ""\numbrella:\n  manifest: ""\n' >"$SEL/config.yaml"
+json_field() {
+  python3 -c 'import json,sys; x=json.load(sys.stdin); print(eval(sys.argv[1], {"x":x}))' "$1"
+}
+# run_selector <board-json> <args...>: writes the board, runs the installed selector into
+# $SEL/out, returns the selector's exit status.
+run_selector() {
+  printf '%s\n' "$1" >"$SEL/tasks.json"
+  shift
+  _rc=0
+  node "$T/.harness/tools/next-task.mjs" --tasks "$SEL/tasks.json" --config "$SEL/config.yaml" "$@" \
+    >"$SEL/out" 2>"$SEL/err" || _rc=$?
+  return "$_rc"
+}
+# feat <id> <status> [deps-json] [extra-json-members]
+feat() {
+  printf '{"id":"%s","title":"%s","status":"%s","sdd":true,"spec_path":"specs/%s/","depends_on":%s%s}' \
+    "$1" "$1" "$2" "$1" "${3:-[]}" "${4:+,$4}"
+}
+# board <epic-json>...: epics given as `E1:<features-json>`.
+board() {
+  _e=
+  for _x in "$@"; do
+    _e="$_e{\"id\":\"${_x%%:*}\",\"title\":\"t\",\"status\":\"planned\",\"features\":[${_x#*:}]},"
+  done
+  printf '{"project":"fixture","epics":[%s]}' "${_e%,}"
+}
+
+# ── R3 — wave read consumes the F05 envelope ───────────────────────────────────────────
+test_wave_read_consumes_envelope() {
+  begin test_wave_read_consumes_envelope
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'The coordinator runs `node tools/next-task.mjs --waves --json` (installed: `node .harness/tools/next-task.mjs --waves --json`), forwarding `--epic E##` when given, and consumes that envelope exactly: it never re-derives a wave, a route or a blocker.'
+  has "wave section" "$_w" 'It branches on `outcome` first.'
+  has "wave section" "$_w" 'When `outcome` is `"error"` or `"blocked"`, the coordinator prints the envelope'"'"'s `reason.detail` and every `blocked[]` record, mutates nothing and exits non-zero.'
+  has "wave section" "$_w" 'When `outcome` is `"waves"` and `waves` is empty, it prints exactly `no runnable wave` and exits 0 with no mutation.'
+  has "wave section" "$_w" 'Otherwise it fans out `waves[0]` — the first listed wave — and prints that wave'"'"'s `wave` number, which can be above 1 under `--epic`; it never assumes wave 1.'
+
+  # The first LISTED wave under --epic is wave 2 here: a consumer that assumed wave 1
+  # would find nothing. Features are listed in non-canonical order.
+  _b=$(board "E2:$(feat E2-F2 pending '["E2-F1"]'),$(feat E2-F1 pending '["E1-F1"]')" \
+    "E1:$(feat E1-F1 pending),$(feat E1-F0 done)")
+  if run_selector "$_b" --waves --json --epic E2; then
+    [ "$(json_field 'x["outcome"]' <"$SEL/out")" = waves ] || fail "--epic E2: outcome is not waves"
+    [ "$(json_field 'x["waves"][0]["wave"]' <"$SEL/out")" = 2 ] || fail "--epic E2: waves[0].wave is not 2"
+    [ "$(json_field '",".join(f["id"] for f in x["waves"][0]["features"])' <"$SEL/out")" = E2-F1 ] ||
+      fail "--epic E2: waves[0] is not exactly E2-F1"
+  else
+    fail "--epic E2 selector run exited non-zero"
+  fi
+  # An invalid graph (dangling depends_on) is outcome blocked with blocked[] records.
+  _b=$(board "E1:$(feat E1-F2 pending '["E1-F9"]'),$(feat E1-F1 pending)")
+  run_selector "$_b" --waves --json || :
+  [ "$(json_field 'x["outcome"]' <"$SEL/out")" = blocked ] || fail "dangling depends_on: outcome is not blocked"
+  [ "$(json_field 'len(x["blocked"]) > 0' <"$SEL/out")" = True ] || fail "dangling depends_on: blocked[] is empty"
+  [ -n "$(json_field 'x["reason"]["detail"]' <"$SEL/out")" ] || fail "dangling depends_on: reason.detail is empty"
+  # A missing epic is outcome error and carries no waves key at all.
+  _b=$(board "E1:$(feat E1-F1 pending)")
+  run_selector "$_b" --waves --json --epic E9 || :
+  [ "$(json_field 'x["outcome"]' <"$SEL/out")" = error ] || fail "--epic E9: outcome is not error"
+  [ "$(json_field '"waves" in x' <"$SEL/out")" = False ] || fail "--epic E9: an error envelope carries waves"
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
+test_wave_read_consumes_envelope
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }
