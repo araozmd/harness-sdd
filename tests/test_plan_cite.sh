@@ -306,6 +306,109 @@ grep -qxF "plan-cite-check: unresolved-adr $GP:$_dl ADR-0002 not-in-any-namespac
   || fail "R4_two_cites_one_row: the first of two back-to-back ids was never looked up on its own ($(both))"
 pass "R4_two_cites_one_row"
 
-# @@R5@@
+# ── R5: `## Deferred` is a Bolt-on table citing deferred-with-trigger ADRs, or one none line ─
+# set_deferred <plan> <body-file> — replace the body of the plan's `## Deferred` section (the
+# heading kept) with the body file; `-` as the body file deletes the whole section.
+set_deferred() {
+  awk -v f="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (!skip) print; next }
+    !fence && /^## / { if (skip) skip = 0
+                       if (index($0, "## Deferred") == 1) { skip = 1; if (f != "-") { print; while ((getline l < f) > 0) print l } ; next } }
+    !skip' "$1" > "$1.new"
+  mv "$1.new" "$1"
+}
+# one_deferred <row> <exact-line> — the run printed exactly one deferred-* line, and it is this.
+one_deferred() {
+  [ "$(count '^plan-cite-check: deferred-')" -eq 1 ] || fail "$1: expected exactly one deferred-* line ($(both))"
+  grep -qxF "$2" "$T/out" || fail "$1: expected '$2' ($(both))"
+}
+fresh r5miss
+set_deferred "$GP" -
+grep -qF '## Deferred' "$GP" && fail "R5_section_missing: precondition: the section survived"
+grep -qF '## DO NOT TOUCH' "$GP" || fail "R5_section_missing: precondition: the next section was eaten"
+run_tool "$GP" --spec "$GS"; expect_fail R5_section_missing
+one_deferred R5_section_missing "plan-cite-check: deferred-section-missing $GP"
+pass "R5_section_missing"
+
+fresh r5both
+run_tool "$BP" --spec "$BS"; expect_fail R5_form_both
+[ "$(count '^plan-cite-check: deferred-form ')" -eq 1 ] || fail "R5_form_both: expected one deferred-form line ($(both))"
+grep -qxF "plan-cite-check: deferred-form $BP both" "$T/out" || fail "R5_form_both: a table AND a none line is not 'both' ($(both))"
+pass "R5_form_both"
+
+fresh r5neither
+printf '%s\n' '' 'Stage: pilot' '' 'Nothing to say here.' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_fail R5_form_neither
+one_deferred R5_form_neither "plan-cite-check: deferred-form $GP neither"
+pass "R5_form_neither"
+
+fresh r5two
+printf '%s\n' '' 'Deferred: none — one' 'Deferred: none — two' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_fail R5_two_none_lines
+one_deferred R5_two_none_lines "plan-cite-check: deferred-form $GP 2-none-lines"
+pass "R5_two_none_lines"
+
+fresh r5empty
+printf '%s\n' '' '| Bolt-on | Deferred by | Trigger |' '|---|---|---|' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+_ln="$(grep -n '^| Bolt-on | Deferred by | Trigger |$' "$GP" | cut -d: -f1)"
+run_tool "$GP" --spec "$GS"; expect_fail R5_table_empty
+one_deferred R5_table_empty "plan-cite-check: deferred-table-empty $GP:$_ln"
+pass "R5_table_empty"
+
+fresh r5noadr
+printf '%s\n' '' '| Bolt-on | Deferred by | Trigger |' '|---|---|---|' '| WAF | none | R1 asks for it later |' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+_ln="$(grep -n '^| WAF | none |' "$GP" | cut -d: -f1)"
+run_tool "$GP" --spec "$GS"; expect_fail R5_row_no_adr
+one_deferred R5_row_no_adr "plan-cite-check: deferred-row-no-adr $GP:$_ln"
+[ "$(count '^plan-cite-check: uncited-row ')" -eq 0 ] || fail "R5_row_no_adr: the row cites R1, so it is not also uncited ($(both))"
+# the ADR id in the THIRD cell does not stand in for the Deferred-by (second) cell
+printf '%s\n' '' '| Bolt-on | Deferred by | Trigger |' '|---|---|---|' '| WAF | none | see ADR-0002 |' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_fail R5_row_no_adr
+one_deferred R5_row_no_adr "plan-cite-check: deferred-row-no-adr $GP:$_ln"
+pass "R5_row_no_adr"
+
+fresh r5notdef
+run_tool "$BP" --spec "$BS"; expect_fail R5_by_not_deferred
+[ "$(count '^plan-cite-check: deferred-by-not-deferred ')" -eq 1 ] || fail "R5_by_not_deferred: expected one deferred-by-not-deferred line ($(both))"
+grep -qxF "plan-cite-check: deferred-by-not-deferred $BP:22 ADR-0001 $S/adr/0001-accepted.md" "$T/out" \
+  || fail "R5_by_not_deferred: a Deferred-by cell citing an accepted ADR passed ($(both))"
+pass "R5_by_not_deferred"
+[ "$(count '^plan-cite-check: deferred-adr-no-trigger ')" -eq 1 ] || fail "R5_adr_no_trigger: expected one deferred-adr-no-trigger line ($(both))"
+grep -qxF "plan-cite-check: deferred-adr-no-trigger $BP:23 ADR-0003 $S/adr/0003-deferred-no-trigger.md" "$T/out" \
+  || fail "R5_adr_no_trigger: a Deferred-by cell citing a deferred ADR with no Trigger: line passed ($(both))"
+pass "R5_adr_no_trigger"
+
+fresh r5ok
+run_tool "$GP" --spec "$GS"; expect_ok R5_table_ok
+grep -qE ', deferred: table, ' "$T/out" || fail "R5_table_ok: the ok line does not say 'deferred: table' ($(both))"
+pass "R5_table_ok"
+
+fresh r5prose
+printf '%s\n' '' 'Stage: pilot' '' 'Deferred: none — stage is pilot and nothing applies' '' 'More prose beside it.' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_ok R5_none_with_prose_ok
+grep -qE ', deferred: none, ' "$T/out" || fail "R5_none_with_prose_ok: the ok line does not say 'deferred: none' ($(both))"
+pass "R5_none_with_prose_ok"
+
+fresh r5hyph
+printf '%s\n' '' 'Deferred: none - x' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_fail R5_hyphen_is_neither
+one_deferred R5_hyphen_is_neither "plan-cite-check: deferred-form $GP neither"
+pass "R5_hyphen_is_neither"
+
+fresh r5four
+printf '%s\n' '' '| Bolt-on | Deferred by | Trigger | Note |' '|---|---|---|---|' '| WAF | ADR-0002 | first regulated customer signs | n |' '' > "$T/body.md"; set_deferred "$GP" "$T/body.md"
+run_tool "$GP" --spec "$GS"; expect_fail R5_four_cell_header_is_neither
+one_deferred R5_four_cell_header_is_neither "plan-cite-check: deferred-form $GP neither"
+pass "R5_four_cell_header_is_neither"
+
+fresh r5trig
+sed 's/^- \*\*Trigger:\*\* first regulated customer signs$/- **Trigger:** /' "$S/adr/0002-deferred-waf.md" > "$T/adr.new"; mv "$T/adr.new" "$S/adr/0002-deferred-waf.md"
+grep -qx -- '- \*\*Trigger:\*\* ' "$S/adr/0002-deferred-waf.md" || fail "R5_trigger_empty_is_no_trigger: precondition: the Trigger: value was not emptied"
+_ln="$(grep -n '^| WAF | ADR-0002 |' "$GP" | cut -d: -f1)"
+run_tool "$GP" --spec "$GS"; expect_fail R5_trigger_empty_is_no_trigger
+one_deferred R5_trigger_empty_is_no_trigger "plan-cite-check: deferred-adr-no-trigger $GP:$_ln ADR-0002 $S/adr/0002-deferred-waf.md"
+pass "R5_trigger_empty_is_no_trigger"
+
+# @@R6@@
 
 echo "all plan-cite checks passed"

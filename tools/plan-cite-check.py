@@ -42,6 +42,11 @@ RID_RE = re.compile(r"^[ \t]*-[ \t]+\*\*(R[0-9]+)(?:\*\*|[ \t]+(?:—|–|-))")
 # before the id.  A `|` is appended to every id first so a qualifier can never eat the
 # PREVIOUS citation (`ADR-0002 ADR-0001` is two citations, not one qualified by `ADR-0002`).
 ADR_CITE_RE = re.compile(r"(?:([A-Za-z0-9_-]+)([ /]))?ADR-([0-9]{4})")
+# `## Deferred` (grammar item 4 / item 2, bytes from docs/SPEC-FORMAT.md).
+BOLT_ON_HEADER = ["Bolt-on", "Deferred by", "Trigger"]
+NONE_LINE_RE = re.compile(r"^Deferred: none — \S")
+STATUS_DEFERRED_RE = re.compile(r"^- \*\*Status:\*\* deferred")
+TRIGGER_RE = re.compile(r"^- \*\*Trigger:\*\* \S")
 WRAPPERS = "*`\"'"
 
 
@@ -177,8 +182,12 @@ def cites(row):
 
 
 def specs_dir_for(plan):
-    """The nearest ancestor of the plan whose basename is `specs`."""
-    d = os.path.dirname(os.path.realpath(plan))
+    """The nearest ancestor of the plan whose basename is `specs`.
+
+    Walked on the path as given (made absolute, symlinks NOT resolved) so the ADR paths the
+    tool prints read under the same prefix the caller passed.
+    """
+    d = os.path.dirname(os.path.abspath(plan))
     while True:
         if os.path.basename(d) == "specs":
             return d
@@ -236,11 +245,67 @@ def adr_citations(row, index):
 def resolve_adr(ns, num, index):
     """Return (paths, reason): paths empty = unresolved, with the reason word(s)."""
     if ns is None:
-        paths = [p for tok in sorted(index) for p in index[tok].get(num, [])]
+        order = sorted(index, key=lambda tok: (tok != "platform", tok))  # platform first
+        paths = [p for tok in order for p in index[tok].get(num, [])]
         return paths, "not-in-any-namespace"
     if ns.lower() not in index:
         return [], "unknown-namespace %s" % ns
     return list(index[ns.lower()].get(num, [])), "not-in-namespace %s" % ns
+
+
+def adr_state(path):
+    """'ok' (deferred with a trigger), 'no-trigger' (deferred, no Trigger:) or 'not-deferred'."""
+    lines = _read(path)
+    if not any(STATUS_DEFERRED_RE.match(ln) for ln in lines):
+        return "not-deferred"
+    return "ok" if any(TRIGGER_RE.match(ln) for ln in lines) else "no-trigger"
+
+
+def check_deferred(plan, sections, index):
+    """Pure but for reading cited ADR files: [(line, finding)] for grammar item 4."""
+    secs = [s for s in sections if s["name"] == "Deferred"]
+    if not secs:
+        return [(float("inf"), "deferred-section-missing %s" % plan)], None
+    out = []
+    bolt_tables = []
+    none_lines = 0
+    for sec in secs:
+        none_lines += sum(1 for _n, t in sec["body"] if NONE_LINE_RE.match(t))
+        for table in sec["tables"]:
+            header = [r for r in table if r[2] == "header"]
+            if header and cells(header[0][1]) == BOLT_ON_HEADER:
+                bolt_tables.append((header[0][0], [r for r in table if r[2] == "data"]))
+    form = "table" if bolt_tables and not none_lines else \
+        "none" if none_lines == 1 and not bolt_tables else None
+    head = secs[0]["line"]
+    if bolt_tables and none_lines:
+        out.append((head, "deferred-form %s both" % plan))
+    elif not bolt_tables and not none_lines:
+        out.append((head, "deferred-form %s neither" % plan))
+    elif none_lines > 1:
+        out.append((head, "deferred-form %s %d-none-lines" % (plan, none_lines)))
+    for hline, rows in bolt_tables:
+        if not rows:
+            out.append((hline, "deferred-table-empty %s:%d" % (plan, hline)))
+        for n, text, _k in rows:
+            cs = cells(text)
+            by = cs[1] if len(cs) > 1 else ""
+            if not ADR_TOKEN_RE.search(strip_wrappers(by)):
+                out.append((n, "deferred-row-no-adr %s:%d" % (plan, n)))
+                continue
+            for display, ns, num in adr_citations(by, index):
+                paths, _reason = resolve_adr(ns, num, index)
+                if not paths:
+                    continue  # the row rule already reported unresolved-adr
+                states = [(adr_state(p), p) for p in paths]
+                if any(st == "ok" for st, _p in states):
+                    continue
+                trig = [p for st, p in states if st == "no-trigger"]
+                if trig:
+                    out.append((n, "deferred-adr-no-trigger %s:%d %s %s" % (plan, n, display, trig[0])))
+                else:
+                    out.append((n, "deferred-by-not-deferred %s:%d %s %s" % (plan, n, display, paths[0])))
+    return out, form
 
 
 def data_rows(sections):
@@ -269,8 +334,10 @@ def check_plan(plan, sections, spec_rids=None, index=None):
             paths, reason = resolve_adr(ns, num, index or {})
             if not paths:
                 out.append((n, "unresolved-adr %s:%d %s %s" % (plan, n, display, reason)))
+    deferred, form = check_deferred(plan, sections, index or {})
+    out.extend(deferred)
     out.sort(key=lambda v: v[0])
-    return out
+    return out, form
 
 
 def main(argv):
@@ -304,15 +371,15 @@ def main(argv):
     except InputError as exc:
         sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
         return 2
-    violations = check_plan(plan, sections, spec_rids, index)
+    violations, form = check_plan(plan, sections, spec_rids, index)
     if violations:
         for _n, v in violations:
             print(PFX + v)
         print("%sFAIL %d violation(s)" % (PFX, len(violations)))
         return 1
     rows = sum(1 for _ in data_rows(sections))
-    print("%sok %s: %d row(s) cited, spec: %s" % (
-        PFX, plan, rows, "not checked" if spec_rids is None else "%d R-ids" % len(spec_rids)))
+    print("%sok %s: %d row(s) cited, deferred: %s, spec: %s" % (
+        PFX, plan, rows, form, "not checked" if spec_rids is None else "%d R-ids" % len(spec_rids)))
     return 0
 
 
