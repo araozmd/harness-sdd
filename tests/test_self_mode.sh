@@ -100,7 +100,7 @@ _f182_err="$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config
   || fail "builder-role.sh --frontend codex exited non-zero on the real --self artifact (E99-F182 R2)"
 [ "$(cat "$T/f182-codex.out")" = builder ] \
   || fail "--frontend codex on the real artifact (codex=neither) did not print builder (E99-F182 R2)"
-printf '%s' "$_f182_err" | grep -qF 'codex=neither' \
+printf '%s' "$_f182_err" | grep -qF 'on this front-end (codex) the installer recorded codex=neither' \
   || fail "--frontend codex on the real artifact did not name codex=neither on stderr: $_f182_err (E99-F182 R2)"
 pass "the real --self artifact keeps a Codex session on builder, naming codex=neither (E99-F182 R2) [self_arming_per_frontend_codex]"
 [ "$(sh "$F/tools/builder-role.sh" complex 1 --config "$F/harness.config.yaml" 2>/dev/null)" = builder ] \

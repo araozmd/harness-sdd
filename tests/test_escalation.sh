@@ -1398,6 +1398,12 @@ F182_R3_key_missing_line_shuts() {
     || fail "F182-R3: an xclaude=raise line opened the gate for --frontend claude (substring match)"
   err complex 1 --config "$_f" --frontend claude | grep -qF "no verdict is recorded for front-end 'claude'" \
     || fail "F182-R3: blocked/xclaude=raise did not report a missing claude verdict"
+  # Line 1 is never a verdict line: `--frontend blocked` on a `blocked` file must not read
+  # the first line as its recorded verdict (pins the NR > 1 clause).
+  _f="$(mkfix f182-r3-line1 2 blocked claude=raise)"
+  _e="$(err complex 1 --config "$_f" --frontend blocked)"
+  printf '%s' "$_e" | grep -qF "no verdict is recorded for front-end 'blocked'" \
+    || fail "F182-R3: --frontend blocked read line 1 as its verdict: $_e"
   # Boundary: an EMPTY verdict (`claude=`) is a recorded line, so it takes R2's branch.
   _f="$(mkfix f182-r3-empty 2 blocked claude=)"
   _e="$(err complex 1 --config "$_f" --frontend claude)"
