@@ -171,11 +171,26 @@ test_max_wave_config_seed() {
     [ "$_got" = "$_src_line" ] || fail "an other.max_wave suppressed the workflow seed: got [$_got]"
     in_section "$TU/.harness/harness.config.yaml" other | grep -qxF '  max_wave: 9' || fail "other.max_wave was altered"
   fi
-  # No workflow: section at all: a new workflow: header carries the seed.
-  printf 'store:\n  tasks: local\n' >"$TMP/cfg-none"
+  # No workflow: section at all: a new workflow: header carries the seed, APPENDED after
+  # every byte the user already had (review round 2, N03: `>` in place of `>>` wiped the
+  # whole config down to the new section). The fixture is the fresh install's own config
+  # with its workflow: section removed and a custom key added, so no other migration has
+  # anything to add and the preserved part must survive byte-for-byte.
+  awk '/^workflow:/ { s = 1; next } s && /^[^[:space:]#]/ { s = 0 } !s' "$CFG" >"$TMP/cfg-none"
+  printf 'my_custom:\n  keep: yes   # user data the installer does not know\n' >>"$TMP/cfg-none"
+  grep -q '^store:' "$TMP/cfg-none" || fail "no-workflow fixture lost its store: section"
   if upgrade_with "$TMP/cfg-none"; then
-    [ "$(grep -cE '^workflow:' "$TU/.harness/harness.config.yaml")" = 1 ] || fail "no-workflow config: not exactly one workflow: header"
-    in_section "$TU/.harness/harness.config.yaml" workflow | grep -qxF -- "$_src_line" ||
+    _post="$TU/.harness/harness.config.yaml"
+    _n=$(wc -c <"$TMP/cfg-none" | tr -d ' ')
+    head -c "$_n" "$_post" | cmp -s - "$TMP/cfg-none" ||
+      fail "no-workflow config: the preserved sections (store:, my_custom: …) did not survive the upgrade byte-for-byte"
+    tail -c "+$((_n + 1))" "$_post" >"$TMP/cfg-none-tail"
+    [ "$(sed -n 2p "$TMP/cfg-none-tail")" = workflow: ] && [ -z "$(sed -n 1p "$TMP/cfg-none-tail")" ] ||
+      fail "no-workflow config: what follows the preserved bytes is not a blank line then a new workflow: header"
+    sed -n '3,$p' "$TMP/cfg-none-tail" | grep -q '^[^[:space:]#]' &&
+      fail "no-workflow config: the upgrade appended a top-level key other than workflow:"
+    [ "$(grep -cE '^workflow:' "$_post")" = 1 ] || fail "no-workflow config: not exactly one workflow: header"
+    in_section "$_post" workflow | grep -qxF -- "$_src_line" ||
       fail "no-workflow config: the appended workflow: lacks the seed line"
   fi
   end
