@@ -110,6 +110,7 @@ grep -qF '## Observable behavior' "$DRILLER" || fail "R3: $DRILLER never names '
 sec '## Observable behavior' || fail "R3: '## Observable behavior' is not inside the observable-slice section"
 # one sentence: the fill instruction, the one-line shape, and the skeleton's end-to-end path.
 # (a looser 'walking skeleton ... end-to-end path' anchor is satisfied by the R1 sentence)
+sec 'In each per-feature brief you write, fill' || fail "R3: section does not apply the fill to EACH per-feature brief"
 sec 'fill the `## Observable behavior` section with one line — the surface and what a user or client sees' \
   || fail "R3: section does not tell the Driller to fill the brief's Observable behavior with one line (surface + what a user or client sees)"
 sec 'fill[^.]{0,250}for the walking-skeleton feature that line describes the end-to-end path' \
