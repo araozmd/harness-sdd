@@ -500,6 +500,10 @@ test_prose_surfaces() {
   ' "$ORCH")
   [ "$_next" = "$WAVE_H" ] || fail "the wave section does not directly follow the targeted worker mode (next: $_next)"
   _w=$(section "$ORCH" "$WAVE_H")
+  # ADR-0010, the first business rule (round 2, N09 / N13): nothing about a wave is stored,
+  # pinned from its subject in BOTH surfaces.
+  has "wave section" "$_w" 'Nothing about a wave is written to the board (ADR-0010): no second scheduler, no stored plan, no lease field.'
+  has "WORKFLOW wave subsection" "$(subsection "$WORKFLOW" "$WF_H")" 'After wave 1 merges, run `/sdd-next --wave` again; it derives the next wave from the updated board. Nothing about a wave is stored.'
   has "wave section" "$_w" 'It reuses the fix lane by reference, not by copy: provisioning, manifest completeness and fan-out discipline are `agents/fixer.md`'"'"'s "Parallel dispatch mode"'
   for _f in "$B_CLAUDE" "$B_OPENCODE" "$B_SKILL" "$ORCH" "$WORKFLOW"; do
     grep -qF '/sdd-next --wave' "$_f" || fail "${_f#"$T"/} lacks /sdd-next --wave"
