@@ -338,6 +338,62 @@ test_manifest_contract() {
   end
 }
 
+# ── R7 — worker identity and board writes ──────────────────────────────────────────────
+# status_of <board> <id>: the feature's status in that board file.
+status_of() {
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print([f["status"] for e in d["epics"] for f in e["features"] if f["id"]==sys.argv[2]][0])' "$1" "$2"
+}
+
+test_worker_identity_and_harness_dir() {
+  begin test_worker_identity_and_harness_dir
+  _w=$(section "$ORCH" "$WAVE_H")
+  has "wave section" "$_w" 'The coordinator spawns every provisioned worker before awaiting any one of them, up to `cap`'
+  has "wave section" "$_w" 'given exactly: its feature id; the primary'"'"'s absolute path to its inbox brief, or `-` when `progress/inbox/<id>.md` is absent'
+  has "wave section" "$_w" 'its pre-provisioned branch and worktree; `HARNESS_DIR` set to that worktree; and the manifest path.'
+  has "wave section" "$_w" 'It starts at the Architect: `pending → spec-ready → in-progress`; `autonomous: true` skips the human gate but still records the gate-span pair'
+  has "wave section" "$_w" 'A wave worker writes every board transition through `HARNESS_DIR="<its worktree>" python3 "$HARNESS_DIR/tools/tasks-lock.py"` and commits those transitions on its own feature branch'
+  has "wave section" "$_w" 'where the targeted mode above says canonical main `HARNESS_DIR`, a wave worker uses its own worktree instead.'
+  has "wave section" "$_w" 'On entry it reads the feature'"'"'s status from its own worktree board and resumes at that phase, so a re-spawned worker never restarts the Architect.'
+  has "wave section" "$_w" 'A wave worker never stages, commits, switches, stashes, resets or cleans the primary.'
+  has "wave section" "$_w" 'It stops after opening its PR, with the feature left `in-review`: it never merges, never runs `/sdd-pr-loop`, never writes `done` and never tears down its worktree.'
+  _g=$(section "$ORCH" '## Targeted parallel-fix worker mode')
+  has "targeted worker section" "$_g" 'or when `/sdd-next --wave` supplies one exact autonomous `sdd: true` feature at `pending`'
+
+  # Executed: a real linked worktree from the widened helper; the explicit HARNESS_DIR
+  # write lands on the worktree's board and leaves the primary's byte-identical.
+  _p="$TMP/r7/primary"
+  mkdir -p "$_p/state" "$_p/store"
+  safe_git init -q -b main "$_p" || { fail "r7 git init"; end; return 0; }
+  cp -R "$ROOT/tools" "$_p/tools"
+  cp "$ROOT/store/tasks.schema.json" "$_p/store/tasks.schema.json"
+  printf '#!/bin/sh\nexit 0\n' >"$_p/init.sh"
+  chmod +x "$_p/init.sh"
+  printf '.claude/worktrees/\n' >"$_p/.gitignore"
+  board "E1:$(feat E1-F1 pending '[]' '"autonomous":true'),$(feat E1-F2 pending '[]' '"autonomous":true')" >"$_p/state/tasks.json"
+  safe_git -C "$_p" add -A && safe_git -C "$_p" -c user.name=t -c user.email=t@example.test commit -qm base ||
+    { fail "r7 fixture commit"; end; return 0; }
+  _wt=$(cd "$_p" && env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 sh tools/fix-worktree.sh create E1-F1 one 2>"$TMP/r7.err") ||
+    { fail "r7 create E1-F1 failed: $(cat "$TMP/r7.err")"; end; return 0; }
+  [ -f "$_wt/state/tasks.json" ] || { fail "r7 worktree has no board: $_wt"; end; return 0; }
+  _prim_before=$(cksum <"$_p/state/tasks.json")
+  _wt_before=$(cksum <"$_wt/state/tasks.json")
+  (cd "$_wt" && HARNESS_DIR="$_wt" python3 "$_wt/tools/tasks-lock.py" set-status E1-F1 spec-ready) >"$TMP/r7.out" 2>&1 ||
+    fail "explicit HARNESS_DIR set-status failed: $(cat "$TMP/r7.out")"
+  [ "$(cksum <"$_p/state/tasks.json")" = "$_prim_before" ] || fail "explicit HARNESS_DIR write changed the PRIMARY board"
+  [ "$(cksum <"$_wt/state/tasks.json")" != "$_wt_before" ] || fail "explicit HARNESS_DIR write left the worktree board unchanged"
+  [ "$(status_of "$_wt/state/tasks.json" E1-F1)" = spec-ready ] || fail "worktree board E1-F1 is not spec-ready"
+  # Control: without the override the linked-worktree remap writes the PRIMARY board, so
+  # the explicit HARNESS_DIR is what keeps a worker's transitions on its own branch.
+  _wt_mid=$(cksum <"$_wt/state/tasks.json")
+  (cd "$_wt" && env -u HARNESS_DIR python3 "$_wt/tools/tasks-lock.py" set-status E1-F2 spec-ready) >"$TMP/r7c.out" 2>&1 ||
+    fail "control set-status failed: $(cat "$TMP/r7c.out")"
+  [ "$(status_of "$_p/state/tasks.json" E1-F2)" = spec-ready ] || fail "control: the remap did not write the primary board"
+  [ "$(cksum <"$_wt/state/tasks.json")" = "$_wt_mid" ] || fail "control: the remapped write also changed the worktree board"
+  end
+}
+
 test_wave_token_in_generated_bodies
 test_max_wave_config_seed
 test_preflight_contract
@@ -345,6 +401,7 @@ test_wave_read_consumes_envelope
 test_eligibility_order_and_cap
 test_slug_rule_prose
 test_manifest_contract
+test_worker_identity_and_harness_dir
 
 _after=$(protected_cksums)
 [ "$PROTECTED_BEFORE" = "$_after" ] || { FAILS=$((FAILS + 1)); echo "FAIL: [suite] a DO-NOT-TOUCH file changed during the suite" >&2; }

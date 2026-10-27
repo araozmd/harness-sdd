@@ -178,7 +178,8 @@ fresh human approval. Preserve receipts when stopping; report partial results ho
 Enter this fenced mode only when `/sdd-fix-parallel` supplies one exact autonomous E99
 `sdd: false` fix already atomically claimed `in-progress`, its inbox brief, dedicated
 pre-provisioned branch and worktree, canonical main `HARNESS_DIR`, and batch progress
-path. Pin every action to that identity; never call global `next()`, select another
+path, or when `/sdd-next --wave` supplies one exact autonomous `sdd: true` feature at
+`pending` (see "Wave coordinator mode" below for the wave variations). Pin every action to that identity; never call global `next()`, select another
 task, or mutate a sibling. The coordinator has already performed the one permitted
 F02 create; the targeted worker must not call `tools/fix-worktree.sh create`, replace
 those resources, or create another branch/worktree.
@@ -289,6 +290,35 @@ Its header carries `wave: <N>`, `cap: <n> (<source>)` where the source is `--max
 exact selector command run). Then it lists one line per record of `waves[0]` — every record,
 none absent — with the record's classification and, for a provisioned feature, its exact
 branch and worktree.
+
+### W5 — fan-out
+
+The coordinator spawns every provisioned worker before awaiting any one of them, up to `cap`
+(P5's fan-out-before-wait rule). Each is a clean targeted Orchestrator worker in "Targeted
+parallel-fix worker mode", given exactly: its feature id; the primary's absolute path to its
+inbox brief, or `-` when `progress/inbox/<id>.md` is absent (the Architect then falls back to
+the TaskStore title); its pre-provisioned branch and worktree; `HARNESS_DIR` set to that
+worktree; and the manifest path.
+
+### Wave worker variations
+
+A wave worker is the targeted worker above with these differences, and only these:
+
+- It starts at the Architect: `pending → spec-ready → in-progress`; `autonomous: true` skips
+  the human gate but still records the gate-span pair, then Builder and Reviewer rounds run as
+  usual.
+- A wave worker writes every board transition through
+  `HARNESS_DIR="<its worktree>" python3 "$HARNESS_DIR/tools/tasks-lock.py"` and commits those
+  transitions on its own feature branch; the explicit `HARNESS_DIR` wins over the
+  linked-worktree remap, so where the targeted mode above says canonical main `HARNESS_DIR`, a
+  wave worker uses its own worktree instead.
+- On entry it reads the feature's status from its own worktree board and resumes at that
+  phase, so a re-spawned worker never restarts the Architect.
+- A wave worker never stages, commits, switches, stashes, resets or cleans the primary.
+- It stops after opening its PR, with the feature left `in-review`: it never merges, never
+  runs `/sdd-pr-loop`, never writes `done` and never tears down its worktree. It returns a
+  verdict (`pr-opened`, `runner-busy`, `interrupted` or `stopped: <reason>`) with the feature's
+  last status, its branch, worktree, PR URL (or `-`) and transition records.
 
 ## Ownership & scoped selection (additive, opt-in) — E10-F01
 
