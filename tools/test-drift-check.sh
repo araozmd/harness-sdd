@@ -172,6 +172,15 @@ if [ "$fs_given" = 1 ]; then
     BEGIN { want = 0 }
     want == 0 { s = substr($0, 1, 1); want = (s == "R" || s == "C") ? 2 : 1; next }
     { print; want-- }' > "$tmp/scope"
+  # The net diff alone loses a feature-owned file whose final bytes equal the merge base — a
+  # pair commit adds an assertion, a later commit removes it (Codex P2 on PR #313). So the
+  # scope also takes every path a NON-MERGE commit on the branch touched (`<ref>..<head>`):
+  # merges are what bring main's own edits in, and `--no-merges` keeps those out. Renames are
+  # split (`--no-renames`) so both the old and the new path enter the scope.
+  git -c core.quotePath=false log --no-merges --no-renames --name-only -z --format= \
+      "$fsc..${headc:-HEAD}" > "$tmp/fslog.z" 2>"$tmp/git.err" \
+    || cant_diff "git log (feature scope) failed: $(head -n 1 "$tmp/git.err")"
+  tr '\000' '\n' < "$tmp/fslog.z" | awk 'NF' >> "$tmp/scope"
   fs_short="$(git rev-parse --short "$fs_mb" 2>"$tmp/git.err")" \
     || cant_diff "git rev-parse --short (feature scope) failed: $(head -n 1 "$tmp/git.err")"
   suffix=" (feature scope $fs_short)"

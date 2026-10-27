@@ -1476,6 +1476,14 @@ git -C "$R" checkout -q feature
 expect_rc 0 "FS2 head-ref mode"
 grep -qxF "test-drift-check: 0 findings, 0 waived, 0 test files examined (base $FS_PS) (feature scope $FS_M1S)" "$T/out" \
   || { cat "$T/out" >&2; fail "FS2 head-ref mode: the feature scope is measured against <head-ref>"; }
+# A user-level log.diffMerges=first-parent makes `git log` list a merge commit's first-parent
+# diff — main's own edits. The scope's commit walk must skip merges regardless of that config.
+git -C "$R" config log.diffMerges first-parent
+run "$R" "$FS_P" --feature-scope main
+git -C "$R" config --unset log.diffMerges
+expect_rc 0 "FS2 under log.diffMerges=first-parent"
+grep -qxF "test-drift-check: 0 findings, 0 waived, 0 test files examined (base $FS_PS) (feature scope $FS_M1S)" "$T/out" \
+  || { cat "$T/out" >&2; fail "FS2: log.diffMerges=first-parent must not pull main's merged-in edits into the scope"; }
 pass "FS2_feature_scope_drops_merged_in_file"
 
 # FS3 — a real weakening the FEATURE makes after P is still reported (working-tree mode), and an
@@ -1610,7 +1618,8 @@ grep -qF -- 'no merge base between --feature-scope island and HEAD' "$T/err" || 
 _mainsha="$(git -C "$R" rev-parse main)"
 for _probe in "merge-base $_mainsha|git merge-base (feature scope) failed" \
               "--name-status|git diff --name-status (feature scope) failed" \
-              "--short $FS_M1|git rev-parse --short (feature scope) failed"; do
+              "--short $FS_M1|git rev-parse --short (feature scope) failed" \
+              "--no-renames|git log (feature scope) failed"; do
   _tok="${_probe%%|*}"; _why="${_probe#*|}"
   ( cd "$R" && PATH="$T/failgit:$PATH" DT_FAILGIT="$_tok" sh "$TOOL" "$FS_P" --feature-scope main ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
   [ "$rc" = 3 ] || { cat "$T/out" "$T/err" >&2; fail "FS6: a failing 'git ... $_tok' must exit 3, got $rc"; }
@@ -1711,6 +1720,31 @@ for _clause in '`tools/test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <
   printf '%s' "$_wsec" | grep -qF -- "$_clause" || fail "FS7: docs/WORKFLOW.md must say: $_clause"
 done
 pass "FS7_workflow_names_feature_scope"
+
+# FS8 — a feature-owned file whose final bytes equal the merge base is still in scope (Codex P2
+# on PR #313): the pair commit ADDS an assertion, a later feature commit REMOVES it, so the net
+# diff from the merge base is empty. The scope also takes every path a non-merge feature commit
+# touched, so the per-pair run reports the removal.
+newrepo fs8
+put tests/g.test.js <<'EOF'
+it('kept', () => {
+  run(1);
+});
+EOF
+basecommit; feature
+subst tests/g.test.js '  run(1);' '  run(1);
+  expect(run(1)).toBe(1);'
+featcommit
+FS8_P="$(git -C "$R" rev-parse HEAD)"
+delline tests/g.test.js '  expect(run(1)).toBe(1);'
+featcommit
+[ -z "$(git -C "$R" diff main HEAD -- tests/g.test.js)" ] || fail "FS8 setup: the file must end byte-identical to the merge base"
+run "$R" "$FS8_P"
+expect_rc 1 "FS8 control (unscoped)"
+run "$R" "$FS8_P" --feature-scope main
+expect_rc 1 "FS8 scoped: a reverted feature-owned assertion is still reported"
+expect_line '^DRIFT assert-removed \| tests/g\.test\.js:[0-9]+ \| kept \| ' "FS8 scoped"
+pass "FS8_reverted_feature_file_stays_in_scope"
 
 # ── R12: the shipped body ────────────────────────────────────────────────────────
 TGT="$T/target"; mkdir -p "$TGT" "$T/home" "$T/ch"
