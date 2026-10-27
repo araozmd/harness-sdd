@@ -4,6 +4,24 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.104.1] — 2026-10-27
+
+### Fixed — the per-pair-commit drift check no longer reports main's own test edits (E36-F06)
+- `tools/test-drift-check.sh` gains `--feature-scope <default-ref>`. It restricts the examined
+  test files to those the branch itself changed since `git merge-base <default-ref> <head>`
+  (`git diff --name-status -z -M`, plus untracked files in working-tree mode). A rename stays
+  when either its old or its new path is in that set. The summary line then ends
+  `(feature scope <short-sha>)`. A missing, empty or repeated flag exits `2`. A ref that does
+  not resolve, a ref with no merge base, or a failed `git merge-base`, `git diff` or
+  `git rev-parse --short` (each named on stderr) exits `3`.
+- `agents/reviewer.md` and `docs/WORKFLOW.md`: the per-pair-commit run is now
+  `test-drift-check.sh <pair-sha> --tasks-md <same file> --feature-scope <default branch>`.
+  On a branch that had merged `main`, the `<pair-sha>..HEAD` diff carried every test edit the
+  merge brought in, and each one was reported as `DRIFT`, a false REJECT. The E36-F05 Reviewer
+  saw 55 of them on each of 13 pair commits, and the E36-F02 and F03 Reviewers saw the same
+  pattern. The merge-base run against the default branch is unchanged and is still the contract.
+- `tests/test_test_drift_check.sh` gains the `FS1`-`FS6` rows and new R11a pins.
+
 ## [0.104.0] — 2026-10-27
 
 ### Added — plan-row citation lint and Reviewer gate (E36-F04)

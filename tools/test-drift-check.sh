@@ -11,6 +11,7 @@
 #
 # Usage:
 #   tools/test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <feature.tasks.md>]
+#                             [--feature-scope <default-ref>]
 #
 #   <base-ref>   the BASE is `git merge-base <base-ref> <head>` (pass the default branch for
 #                merge-base semantics, or a pair commit that is an ancestor of head).
@@ -20,17 +21,25 @@
 #                  waive-test-drift: <exact test name> — <reason>      (— is U+2014)
 #                optionally behind a `- ` list marker. A waiver covers every finding
 #                attributed to that one test name, byte for byte, and nothing else.
+#   --feature-scope  examine only the test files the BRANCH itself changed: those in
+#                `git diff --name-status <fs-mb> <head>` (plus untracked files in working-tree
+#                mode), where <fs-mb> = `git merge-base <default-ref> <head>`; a renamed file
+#                stays when either its old or its new path is in that set. For a per-pair-commit
+#                run on a branch that has merged the default branch: the <pair-sha>..head diff
+#                otherwise carries every test edit the merge brought in, reported as drift.
+#                Given once; the summary then ends `(feature scope <short fs-mb>)`.
 #
 # Output (stdout): zero or more finding lines, then exactly one summary line.
 #   DRIFT <kind> | <path>:<line> | <test name> | <detail>      kind: assert-modified,
 #   WAIVED <kind> | ...                                        assert-removed, skip-added,
-#   test-drift-check: <N> findings, <W> waived, <F> test files examined (base <short-sha>)
+#   test-drift-check: <N> findings, <W> waived, <F> test files examined (base <short-sha>)[ (feature scope <short-sha>)]
 #                                                              test-removed
 #
 # Exit codes:
 #   0  clean, or every finding waived          1  at least one unwaived finding
 #   2  usage error (also unknown flags and malformed waivers; reason on stderr)
-#   3  cannot diff (not a git repo, ref does not resolve, no merge base; reason on stderr)
+#   3  cannot diff (not a git repo, ref does not resolve, no merge base, a git call failed;
+#      reason on stderr)
 #
 # Test files are whatever tools/change-size.sh calls test files: this tool asks its SIBLING
 # `change-size.sh --print-test-re` (never a second copy of the classifier) and reads
@@ -62,11 +71,15 @@ cant_diff() { # cant_diff <reason> — one line on stderr, exit 3
   exit 3
 }
 
-base=""; headref=""; tasks_md=""; npos=0
+base=""; headref=""; tasks_md=""; npos=0; fscope=""; fs_given=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --tasks-md) [ $# -ge 2 ] || usage_err '--tasks-md needs a file'; tasks_md="$2"; shift 2 ;;
-    -h|--help)  usage_err 'usage: test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <file>]' ;;
+    --feature-scope)
+      { [ $# -ge 2 ] && [ -n "$2" ]; } || usage_err '--feature-scope needs a ref'
+      [ "$fs_given" = 0 ] || usage_err 'duplicate --feature-scope'
+      fscope="$2"; fs_given=1; shift 2 ;;
+    -h|--help)  usage_err 'usage: test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <file>] [--feature-scope <default-ref>]' ;;
     -*)         usage_err "unknown flag: $1" ;;
     *)
       npos=$((npos + 1))
@@ -78,7 +91,7 @@ while [ $# -gt 0 ]; do
       shift ;;
   esac
 done
-[ -n "$base" ] || usage_err 'usage: test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <file>]'
+[ -n "$base" ] || usage_err 'usage: test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <file>] [--feature-scope <default-ref>]'
 
 tmp="$(mktemp -d 2>/dev/null || mktemp -d -t tdrift)"
 trap 'rm -rf "$tmp"' EXIT
@@ -137,6 +150,30 @@ fi
 [ -n "$mb" ] || cant_diff "no merge base between $base and ${headref:-HEAD}"
 short="$(git rev-parse --short "$mb")"
 if [ -n "$headc" ]; then range="$mb $headc"; else range="$mb"; fi
+
+# ── feature scope: the branch's OWN changed paths since its merge base with the default ref ─
+# `<status> NUL <path> NUL` (R/C: two paths) -> one path per line, every old AND new path, so
+# a later rename pair is kept when either side is the branch's own. Each call's status is
+# checked separately: a failed merge-base is not "no merge base", and a failed diff must never
+# read as an empty scope (that would be a clean verdict from a check that never ran).
+suffix=""
+if [ "$fs_given" = 1 ]; then
+  fsc="$(git rev-parse --verify --quiet "$fscope^{commit}" 2>/dev/null)" \
+    || cant_diff "--feature-scope ref does not resolve: $fscope"
+  _rc=0; fs_mb="$(git merge-base "$fsc" "${headc:-HEAD}" 2>"$tmp/git.err")" || _rc=$?
+  [ "$_rc" -le 1 ] || cant_diff "git merge-base (feature scope) failed: $(head -n 1 "$tmp/git.err")"
+  [ -n "$fs_mb" ] || cant_diff "no merge base between --feature-scope $fscope and ${headref:-HEAD}"
+  # shellcheck disable=SC2086
+  git -c core.quotePath=false diff --name-status -z -M "$fs_mb" $headc > "$tmp/fs.z" 2>"$tmp/git.err" \
+    || cant_diff "git diff --name-status (feature scope) failed: $(head -n 1 "$tmp/git.err")"
+  tr '\000' '\n' < "$tmp/fs.z" | awk '
+    BEGIN { want = 0 }
+    want == 0 { s = substr($0, 1, 1); want = (s == "R" || s == "C") ? 2 : 1; next }
+    { print; want-- }' > "$tmp/scope"
+  fs_short="$(git rev-parse --short "$fs_mb" 2>"$tmp/git.err")" \
+    || cant_diff "git rev-parse --short (feature scope) failed: $(head -n 1 "$tmp/git.err")"
+  suffix=" (feature scope $fs_short)"
+fi
 
 # ── classifier + configured patterns, from the SIBLING change-size.sh (R2, R5) ───
 TEST_RE="$(sh "$self/change-size.sh" --print-test-re --repo "$top" 2>/dev/null)" \
@@ -213,6 +250,14 @@ if [ -z "$headc" ]; then
     | DT_RE="$TEST_RE" awk '
         BEGIN { re = ENVIRON["DT_RE"] }
         $0 ~ re { printf "U\t%s\t%s\n", $0, $0 }' >> "$tmp/files"
+  # untracked files are the branch's own change by definition
+  if [ "$fs_given" = 1 ]; then tr '\000' '\n' < "$tmp/others.z" >> "$tmp/scope"; fi
+fi
+if [ "$fs_given" = 1 ]; then
+  DT_SCOPE="$tmp/scope" awk -F'\t' '
+    BEGIN { f = ENVIRON["DT_SCOPE"]; while ((getline ln < f) > 0) own[ln] = 1; close(f) }
+    ($2 in own) || ($3 in own)' "$tmp/files" > "$tmp/files.fs"
+  mv "$tmp/files.fs" "$tmp/files"
 fi
 
 # Extract test names: `<line><TAB><dir><TAB><name>`; dir B = a definition (attributes
@@ -432,7 +477,7 @@ DT_W="$tmp/waivers" awk -F'\t' '
   END { printf "%d %d\n", n + 0, w + 0 > "/dev/stderr" }
 ' "$tmp/findings" 2> "$tmp/counts"
 read -r nfind nwaived < "$tmp/counts"
-printf 'test-drift-check: %s findings, %s waived, %s test files examined (base %s)\n' \
-  "$nfind" "$nwaived" "$nfiles" "$short"
+printf 'test-drift-check: %s findings, %s waived, %s test files examined (base %s)%s\n' \
+  "$nfind" "$nwaived" "$nfiles" "$short" "$suffix"
 [ "$nfind" -eq "$nwaived" ] || exit 1
 exit 0

@@ -1416,6 +1416,176 @@ run "$R" main --tasks-md "$T/tasks.md"
 expect_rc 0 "R10f"; expect_line '^WAIVED assert-removed \| tests/t\.sh:6 \| R9 label \| assertion moved into the helper$' "R10f"
 pass "R10f_assert_finding_waived"
 
+# ── FS: --feature-scope (fix/drift-feature-scope) ────────────────────────────────
+# A per-pair-commit run on a branch that has since merged main diffs <pair-sha>..HEAD, and that
+# range carries every test edit MAIN made. --feature-scope <default-ref> keeps only the test
+# files the branch itself changed since `git merge-base <default-ref> <head>`. Fixture: main
+# owns tests/a.test.js; pair commit P touches tests/f.test.js only; main then weakens a.test.js
+# (M1), the feature merges main, and main moves on again (M2, a.test.js once more) so the
+# merge base M1 differs from main's tip and from P — each of the three shorts is distinct.
+newrepo fs
+put tests/a.test.js <<'EOF'
+it('main side', () => {
+  expect(run(1)).toBe(1);
+  expect(run(4)).toBe(4);
+});
+EOF
+basecommit; feature
+put tests/f.test.js <<'EOF'
+it('feature side', () => {
+  expect(run(2)).toBe(2);
+  expect(run(3)).toBe(3);
+});
+EOF
+featcommit
+FS_P="$(git -C "$R" rev-parse HEAD)"; FS_PS="$(git -C "$R" rev-parse --short "$FS_P")"
+git -C "$R" checkout -q main
+subst tests/a.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'
+git -C "$R" commit -qam m1
+FS_M1="$(git -C "$R" rev-parse HEAD)"; FS_M1S="$(git -C "$R" rev-parse --short "$FS_M1")"
+git -C "$R" checkout -q feature
+git -C "$R" merge -q --no-edit main
+git -C "$R" checkout -q main
+printf "it('later', () => {\n  expect(run(5)).toBe(5);\n});\n" >> "$R/tests/a.test.js"
+git -C "$R" commit -qam m2
+FS_M2S="$(git -C "$R" rev-parse --short HEAD)"
+git -C "$R" checkout -q feature
+[ "$FS_PS" != "$FS_M1S" ] && [ "$FS_M1S" != "$FS_M2S" ] || fail "FS setup: P, M1 and M2 must be distinct commits"
+[ "$(git -C "$R" merge-base main HEAD)" = "$FS_M1" ] || fail "FS setup: the feature's merge base with main must be M1"
+
+# FS1 — control: the pair baseline alone reports main's a.test.js weakening (the old behaviour).
+run "$R" "$FS_P"
+expect_rc 1 "FS1 control"
+expect_line '^DRIFT assert-modified \| tests/a\.test\.js:2 \| main side \| ' "FS1 control"
+grep -qxF "test-drift-check: 1 findings, 0 waived, 1 test files examined (base $FS_PS)" "$T/out" \
+  || { cat "$T/out" >&2; fail "FS1 control: without --feature-scope the summary carries no feature-scope suffix"; }
+pass "FS1_pair_baseline_reports_main_drift"
+
+# FS2 — with --feature-scope the merged-in file is not examined: exit 0, and the summary names
+# the feature-scope merge base (M1), not the base (P) and not main's tip (M2).
+run "$R" "$FS_P" --feature-scope main
+expect_rc 0 "FS2 scoped"
+expect_ndrift 0 "FS2 scoped"
+grep -qxF "test-drift-check: 0 findings, 0 waived, 0 test files examined (base $FS_PS) (feature scope $FS_M1S)" "$T/out" \
+  || { cat "$T/out" >&2; fail "FS2: the summary must end '(base $FS_PS) (feature scope $FS_M1S)'"; }
+# head-ref mode: the merge base and the scope diff are taken against <head-ref>, not HEAD. From a
+# checkout of the old base commit, HEAD-based scoping would pull a.test.js back in.
+git -C "$R" checkout -q "$FS_P~1"
+run "$R" "$FS_P" feature --feature-scope main
+git -C "$R" checkout -q feature
+expect_rc 0 "FS2 head-ref mode"
+grep -qxF "test-drift-check: 0 findings, 0 waived, 0 test files examined (base $FS_PS) (feature scope $FS_M1S)" "$T/out" \
+  || { cat "$T/out" >&2; fail "FS2 head-ref mode: the feature scope is measured against <head-ref>"; }
+pass "FS2_feature_scope_drops_merged_in_file"
+
+# FS3 — a real weakening the FEATURE makes after P is still reported (working-tree mode), and an
+# untracked test file is in scope too (its marker is built with \056 so this suite's own source
+# carries no skip marker).
+subst tests/f.test.js '  expect(run(2)).toBe(2);' '  expect(run(2)).toBeTruthy();'
+run "$R" "$FS_P" --feature-scope main
+expect_rc 1 "FS3 feature weakening"
+expect_ndrift 1 "FS3 feature weakening"
+expect_line '^DRIFT assert-modified \| tests/f\.test\.js:2 \| feature side \| ' "FS3"
+printf "it\056only('fresh', () => {\n  run(0);\n});\n" > "$R/tests/u.test.js"
+run "$R" "$FS_P" --feature-scope main
+expect_rc 1 "FS3 untracked"
+expect_ndrift 2 "FS3 untracked"
+expect_line '^DRIFT skip-added \| tests/u\.test\.js:1 \| fresh \| ' "FS3 untracked"
+rm -f "$R/tests/u.test.js"
+featcommit
+pass "FS3_feature_drift_still_reported"
+
+# FS4 — a file BOTH main and the feature changed is examined: the feature's own weakening of
+# a.test.js is reported (main's edit in the same file comes with it; scope is per file).
+subst tests/a.test.js '  expect(run(4)).toBe(4);' '  expect(run(4)).toBeTruthy();'
+featcommit
+run "$R" "$FS_P" feature --feature-scope main
+expect_rc 1 "FS4 shared file"
+expect_line '^DRIFT assert-modified \| tests/a\.test\.js:3 \| main side \| expect\(run\(4\)\)' "FS4"
+pass "FS4_shared_file_still_examined"
+
+# FS5 — renames: a pair entry is kept when EITHER path is in the branch's own change set.
+# New path only: the feature created old.test.js at P and renamed it after; since the merge base
+# with main, the branch's own diff holds only the new path (an add).
+newrepo fsrn; feature
+put tests/old.test.js <<'EOF'
+it('renamed', () => {
+  expect(run(1)).toBe(1);
+  run(2);
+  run(3);
+  run(4);
+});
+EOF
+featcommit; FS_RP="$(git -C "$R" rev-parse HEAD)"
+git -C "$R" mv tests/old.test.js tests/new.test.js
+subst tests/new.test.js '  expect(run(1)).toBe(1);' '  expect(run(1)).toBeTruthy();'
+featcommit
+run "$R" "$FS_RP" --feature-scope main
+expect_rc 1 "FS5 rename kept by its new path"
+expect_line '^DRIFT assert-modified \| tests/new\.test\.js:2 \| renamed \| ' "FS5 new path"
+# Old path only: main adds c.test.js (a weakened copy of k.test.js); the feature merges main and
+# deletes k.test.js. The pair diff pairs k -> c as a rename, but the branch's own diff since its
+# merge base holds only the deletion of k.
+newrepo fsro
+put tests/k.test.js <<'EOF'
+it('kept', () => {
+  expect(run(1)).toBe(1);
+  run(2);
+  run(3);
+  run(4);
+});
+EOF
+basecommit; feature
+put tests/f.test.js <<'EOF'
+it('pair', () => {
+  run(0);
+});
+EOF
+featcommit; FS_OP="$(git -C "$R" rev-parse HEAD)"
+git -C "$R" checkout -q main
+sed 's/toBe(1)/toBeTruthy()/' "$R/tests/k.test.js" > "$R/tests/c.test.js"
+git -C "$R" add -A && git -C "$R" commit -qm copy
+git -C "$R" checkout -q feature
+git -C "$R" merge -q --no-edit main
+git -C "$R" rm -q tests/k.test.js; featcommit
+git -C "$R" diff --name-status -M "$FS_OP" HEAD | grep -q '^R[0-9]*	tests/k\.test\.js	tests/c\.test\.js$' \
+  || fail "FS5 setup: the pair diff must pair k.test.js -> c.test.js as a rename"
+run "$R" "$FS_OP" --feature-scope main
+expect_rc 1 "FS5 rename kept by its old path"
+expect_line '^DRIFT assert-modified \| tests/c\.test\.js:2 \| kept \| ' "FS5 old path"
+pass "FS5_rename_kept_by_old_or_new_path"
+
+# FS6 — exit codes. Each usage branch gets the minimal argv only it can reject; each git call is
+# failed on its own through the R9e wrapper, keyed on a token every variant of that call carries.
+R="$T/fs"
+run "$R" main --feature-scope
+expect_rc 2 "FS6 --feature-scope without a value"
+grep -qF -- '--feature-scope needs a ref' "$T/err" || fail "FS6: --feature-scope with no value must say it needs a ref"
+run "$R" main --feature-scope ''
+expect_rc 2 "FS6 --feature-scope with an empty value"
+grep -qF -- '--feature-scope needs a ref' "$T/err" || fail "FS6: an empty --feature-scope value must say it needs a ref"
+run "$R" main --feature-scope main --feature-scope main
+expect_rc 2 "FS6 duplicate --feature-scope"
+grep -qF -- 'duplicate --feature-scope' "$T/err" || fail "FS6: a second --feature-scope must be rejected as a duplicate"
+run "$R" "$FS_P" --feature-scope no-such-ref
+expect_rc 3 "FS6 unresolvable feature-scope ref"
+grep -qF -- '--feature-scope ref does not resolve: no-such-ref' "$T/err" || fail "FS6: an unresolvable --feature-scope ref is named"
+_island="$(git -C "$R" commit-tree "$(git -C "$R" hash-object -t tree -w /dev/null)" -m island)"
+git -C "$R" update-ref refs/heads/island "$_island"
+run "$R" "$FS_P" --feature-scope island
+expect_rc 3 "FS6 no feature-scope merge base"
+grep -qF -- 'no merge base between --feature-scope island and HEAD' "$T/err" || fail "FS6: a feature-scope ref with no merge base is named"
+_mainsha="$(git -C "$R" rev-parse main)"
+for _probe in "merge-base $_mainsha|git merge-base (feature scope) failed" \
+              "--name-status|git diff --name-status (feature scope) failed" \
+              "--short $FS_M1|git rev-parse --short (feature scope) failed"; do
+  _tok="${_probe%%|*}"; _why="${_probe#*|}"
+  ( cd "$R" && PATH="$T/failgit:$PATH" DT_FAILGIT="$_tok" sh "$TOOL" "$FS_P" --feature-scope main ) > "$T/out" 2> "$T/err" && rc=0 || rc=$?
+  [ "$rc" = 3 ] || { cat "$T/out" "$T/err" >&2; fail "FS6: a failing 'git ... $_tok' must exit 3, got $rc"; }
+  grep -qF -- "$_why" "$T/err" || { cat "$T/err" >&2; fail "FS6: stderr must name the failed call ('$_why')"; }
+done
+pass "FS6_feature_scope_exit_codes"
+
 # ── R11: the Reviewer section ────────────────────────────────────────────────────
 FENCE_AWK="$(cat "$ROOT/tests/lib/fence.awk")"
 _rv="$ROOT/agents/reviewer.md"
@@ -1438,6 +1608,18 @@ done
 # The per-pair-commit command carries the same --tasks-md, or a waived finding is a false REJECT.
 printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qF 'test-drift-check.sh" <pair-sha> --tasks-md' \
   || fail "R11a: the per-pair-commit command must pass --tasks-md"
+# The per-pair-commit command is scoped to the branch's own files, and the reason is stated
+# whole, subject through object (fix/drift-feature-scope): a branch that merged main otherwise
+# reads main's own test edits as drift. The first, merge-base run stays the contract.
+_fold_fs="$(printf '%s\n' "$_sec" | tr '\n' ' ')"
+printf '%s' "$_fold_fs" | grep -qF -- '`sh "$HARNESS_DIR/tools/test-drift-check.sh" <pair-sha> --tasks-md <same file> --feature-scope <default branch>`' \
+  || fail "R11a: the per-pair-commit command must be the full scoped command, --tasks-md then --feature-scope <default branch>"
+printf '%s' "$_fold_fs" | grep -qF -- 'Pass `--feature-scope` with the same default branch as the first run: on a branch that has merged the default branch, the pair baseline would otherwise report the default branch'"'"'s own test changes, brought in by the merge, as drift.' \
+  || fail "R11a: the section must say why the per-pair-commit run passes --feature-scope"
+printf '%s' "$_fold_fs" | grep -qF -- 'Pair commits are optional; the merge-base run is the contract.' \
+  || fail "R11a: the merge-base run must stay the contract"
+printf '%s' "$_fold_fs" | grep -qF -- 'test-drift-check.sh" "$_def" --tasks-md specs/epics/<epic>/<feature>/<feature>.tasks.md ```' \
+  || fail "R11a: the merge-base run takes the default branch and --tasks-md, with no --feature-scope"
 # The *.spec.md-is-a-test-file limit is stated where the Reviewer reads the findings.
 printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qE "\*\.spec\.md[^.]{0,120}named by the spec's path" \
   || fail "R11a: the Reviewer section must state that *.spec.md findings are named by the spec's path"
