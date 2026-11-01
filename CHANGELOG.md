@@ -4,6 +4,23 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.105.1] — 2026-11-01
+
+### Fixed — `landed` write shape and recorded repository name (E99-F34)
+- `tasks-lock.py set-status <id> done --evidence …` wrote `landed` as one inline line, while
+  `apply` and `add-feature` re-serialize the board with `json.dumps(data, indent=2)`, which
+  expands it again — so every later board PR carried unrelated `landed` hunks. On a
+  pretty-printed board (the `status` / `landed` member opens its own line) the record is now
+  written exactly as `indent=2` renders it, at the member's indentation, for both the insert
+  and the replace path; a no-op `apply` after `set-status … done` is byte-identical. A
+  compact board (several members on one line) keeps the inline record.
+- `landed.repo` for an UNBOUND `--evidence <ref>` named the checkout folder, so a `done`
+  written from a linked worktree (`wt-f12`, `agent-…`) recorded the worktree. It now records
+  the manifest KEY when the chosen checkout is the same repository as a manifest entry, else
+  the main worktree's directory basename (from the git common dir), else the old basename.
+  Bound requests (`<repo>=<ref>`) are unchanged, and the witness/revalidation keys on the
+  binding, not on `repo`.
+
 ## [0.105.0] — 2026-10-27
 
 ### Added — per-front-end escalation gate (E99-F182, ADR-0011)
