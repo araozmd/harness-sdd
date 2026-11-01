@@ -1953,6 +1953,162 @@ mkslice_at alpha in-progress
   || { head -3 "$T/nt2.out" >&2; fail "R20 cross-check control: the selector rejected a board whose slice repo IS declared, so the assertion above proves nothing"; }
 pass "E99-F102 R20 the_manifest_locates_a_slice_repository_and_row3_refuses_row4_degrades"
 
+# ── E99-F34 S: the `landed` WRITE SHAPE agrees with a re-serialize ─────────────────────
+# `set-status … done --evidence` wrote `landed` as ONE inline line while `apply` and
+# `add-feature` re-serialize with `json.dumps(data, indent=2)`, which expands it again: every
+# later board PR carried unrelated hunks. On a pretty-printed board the record must be the
+# bytes `indent=2` would produce, at the member's indentation.
+S="$T/shape"
+mkdir -p "$S/state" "$S/store" "$S/tools"
+cp "$SCHEMA" "$S/store/"; cp "$VALIDATE" "$S/tools/"
+SB="$S/state/tasks.json"
+cat > "$S/identity.py" <<'PY'
+def mutate(data):
+    return data
+PY
+# A board whose bytes ARE json.dumps(indent=2): the only shape a no-op `apply` leaves alone.
+mkshape() {  # mkshape <slices-json-or-empty>
+  mkboard "$S" "$1"
+  python3 - "$SB" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["epics"][0]["features"].append({"id": "E01-F02", "title": "bystander", "status": "pending",
+    "sdd": True, "spec_path": "specs/e01f02/",
+    "landed": {"ref": "abc1234", "verified": "declared"}})
+open(p, "w").write(json.dumps(d, indent=2) + "\n")
+PY
+}
+apply_identity() { HARNESS_DIR="$S" python3 "$LOCK" apply --mutator "$S/identity.py" >/dev/null 2>&1; }
+SHAPE_REF="$BASE"
+# S1 — INSERT on an indent=2 board, then a no-op apply: byte-identical.
+mkshape ""
+set_status "$S" E01-F01 done --evidence "none:shape fixture"
+[ "$SS_RC" = "0" ] || fail "E99-F34 S1: set-status done was refused: $SS_OUT"
+cp "$SB" "$S/after-set.json"
+apply_identity || fail "E99-F34 S1: the identity apply failed"
+cmp -s "$S/after-set.json" "$SB" \
+  || fail "E99-F34 S1: a no-op apply rewrote the board after set-status wrote \`landed\` — the two writers disagree on the shape: $(diff "$S/after-set.json" "$SB" | head -8)"
+grep -q '^ *"landed": {$' "$SB" || fail "E99-F34 S1: \`landed\` is not written in the multi-line indent=2 shape"
+# S2 — REPLACE an existing multi-line record, then a no-op apply: byte-identical.
+python3 - "$SB" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["epics"][0]["features"][0]["status"] = "in-review"
+open(p, "w").write(json.dumps(d, indent=2) + "\n")
+PY
+set_status "$S" E01-F01 done --evidence "none:replacement reason"
+[ "$SS_RC" = "0" ] || fail "E99-F34 S2: replacing landed was refused: $SS_OUT"
+cp "$SB" "$S/after-replace.json"
+apply_identity || fail "E99-F34 S2: the identity apply failed"
+cmp -s "$S/after-replace.json" "$SB" \
+  || fail "E99-F34 S2: replacing an existing landed record produced a shape a no-op apply rewrites: $(diff "$S/after-replace.json" "$SB" | head -8)"
+grep -q 'replacement reason' "$SB" || fail "E99-F34 S2: the replacement did not land"
+# S3 — SLICED record (nested `slices` list), real git evidence per slice repo.
+mkrepo sa; SA_BASE="$BASE"; SA="$R"
+mkshape ',
+          "slices": [ { "id": "E01-F01@reposa", "repo": "reposa", "status": "done", "merged": true } ]'
+# the board for a sliced feature lives in the repo's own harness dir
+cp "$SB" "$SA/hd/state/tasks.json"
+set_status "$SA/hd" E01-F01 done --evidence "reposa=$SA_BASE"
+[ "$SS_RC" = "0" ] || fail "E99-F34 S3: the sliced landing was refused: $SS_OUT"
+grep -q '"slices": \[$' "$SA/hd/state/tasks.json" && [ "$(grep -c '"landed": {$' "$SA/hd/state/tasks.json")" -ge 1 ] \
+  || fail "E99-F34 S3: the sliced record was not written multi-line"
+cp "$SA/hd/state/tasks.json" "$S/sliced-after.json"
+HARNESS_DIR="$SA/hd" python3 "$LOCK" apply --mutator "$S/identity.py" >/dev/null 2>&1 \
+  || fail "E99-F34 S3: the identity apply failed on the sliced board"
+cmp -s "$S/sliced-after.json" "$SA/hd/state/tasks.json" \
+  || fail "E99-F34 S3: a no-op apply rewrote a board carrying a SLICED landed record: $(diff "$S/sliced-after.json" "$SA/hd/state/tasks.json" | head -8)"
+# S4 — a no-op apply on a board of ONLY multi-line records is byte-identical, and
+# add-feature leaves every other row byte-identical (only the appended row is new).
+mkshape ""
+set_status "$S" E01-F01 done --evidence "none:shape fixture"
+cp "$SB" "$S/pre-add.json"
+HARNESS_DIR="$S" python3 "$LOCK" add-feature --epic E01 --title "shape probe" >/dev/null 2>&1 \
+  || fail "E99-F34 S4: add-feature failed"
+python3 - "$S/pre-add.json" "$SB" <<'PY' || fail "E99-F34 S4: add-feature changed rows other than the appended one"
+import json, sys
+a = json.load(open(sys.argv[1])); b = json.load(open(sys.argv[2]))
+fa = a["epics"][0]["features"]; fb = b["epics"][0]["features"]
+assert fb[:len(fa)] == fa and len(fb) == len(fa) + 1, (len(fa), len(fb))
+PY
+# byte-level: every pre-add line still present, in order, as a prefix-with-one-hunk
+python3 - "$S/pre-add.json" "$SB" <<'PY' || fail "E99-F34 S4: add-feature reflowed lines outside the one appended row"
+import difflib, sys
+a = open(sys.argv[1]).read().splitlines(); b = open(sys.argv[2]).read().splitlines()
+ops = [o for o in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes() if o[0] != "equal"]
+assert all(o[0] == "insert" for o in ops), ops
+assert len(ops) <= 2, ops   # the new row (+ the comma on the previous closing brace is a replace-free insert)
+PY
+# S5 — COMPACT line unchanged: several members on the status line stay on it, inline.
+cat > "$S/state/tasks.json" <<'JSON'
+{"project": "c", "epics": [{"id": "E01", "title": "e", "status": "in-progress", "features": [{"id": "E01-F01", "title": "f", "status": "in-review", "sdd": true, "spec_path": "s/"}]}]}
+JSON
+set_status "$S" E01-F01 done --evidence "none:compact"
+[ "$SS_RC" = "0" ] || fail "E99-F34 S5: compact-board done was refused: $SS_OUT"
+[ "$(wc -l < "$SB" | tr -d ' ')" -le 1 ] \
+  || fail "E99-F34 S5: a compact one-line board was reflowed by set-status (lines=$(wc -l < "$SB"))"
+grep -qF '"landed": {"' "$SB" || fail "E99-F34 S5: the compact board's landed record is not inline"
+pass "E99-F34 S landed_is_written_in_the_shape_a_reserialize_produces"
+
+# ── E99-F34 N: the NAME recorded for an UNBOUND resolution is the repository's ─────────
+# `basename(chosen)` is a CHECKOUT folder: a linked worktree called `wt-f12` recorded
+# `wt-f12`. Now: manifest key first, else the main worktree's basename, else the old basename.
+W="$T/lw"
+mkdir -p "$W"
+( cd "$W" && git init -q proj && cd proj && git symbolic-ref HEAD refs/heads/main )
+: > "$W/proj/f.txt"
+( cd "$W/proj" && git_q add -A && git_q commit -m one )
+W_SHA="$(cd "$W/proj" && git rev-parse HEAD)"
+( cd "$W/proj" && git_q worktree add --detach "$W/wt-f12" )
+mkdir -p "$W/wt-f12/hd/state" "$W/wt-f12/hd/store" "$W/wt-f12/hd/tools"
+cp "$SCHEMA" "$W/wt-f12/hd/store/"; cp "$VALIDATE" "$W/wt-f12/hd/tools/"
+mkboard "$W/wt-f12/hd"
+set_status "$W/wt-f12/hd" E01-F01 done --evidence "$W_SHA"
+[ "$SS_RC" = "0" ] || fail "E99-F34 N1: done from a linked worktree was refused: $SS_OUT"
+_n="$(field "$W/wt-f12/hd/state/tasks.json" "d['landed'].get('repo','')")"
+[ "$_n" = "proj" ] || fail "E99-F34 N1: a landing resolved inside the linked worktree wt-f12 recorded repo='$_n', not the repository's main worktree name 'proj'"
+# N2 — bound request is unchanged: the binding is recorded verbatim.
+mkboard "$W/wt-f12/hd"
+set_status "$W/wt-f12/hd" E01-F01 done --evidence "proj=$W_SHA"
+[ "$SS_RC" = "0" ] || fail "E99-F34 N2: bound evidence was refused: $SS_OUT"
+[ "$(field "$W/wt-f12/hd/state/tasks.json" "d['landed'].get('repo','')")" = "proj" ] \
+  || fail "E99-F34 N2: a bound request did not record its binding"
+# N3 — MANIFEST KEY wins over the directory name: the repository `box` is declared in the
+# manifest under the key `boxkey`; an UNBOUND ref found there must record `boxkey`, and a
+# linked worktree of it (`wt-x`) must record the same key, not its folder name.
+K="$T/mk"
+mkdir -p "$K"
+( cd "$K" && git init -q box && cd box && git symbolic-ref HEAD refs/heads/main )
+: > "$K/box/f.txt"
+( cd "$K/box" && git_q add -A && git_q commit -m one )
+K_SHA="$(cd "$K/box" && git rev-parse HEAD)"
+( cd "$K/box" && git_q worktree add --detach "$K/wt-x" )
+cat > "$K/umb.yaml" <<'YAML'
+repos:
+  decoy:
+    path: ./not-a-repo
+    init: ./init.sh
+    test_command: "true"
+  boxkey:
+    path: ./box
+    init: ./init.sh
+    test_command: "true"
+YAML
+for _co in box wt-x; do
+  _hd="$K/$_co/hd"
+  mkdir -p "$_hd/state" "$_hd/store" "$_hd/tools"
+  cp "$SCHEMA" "$_hd/store/"; cp "$VALIDATE" "$_hd/tools/"
+  printf 'store:\n  backend: local\numbrella:\n  manifest: ../../umb.yaml\n' > "$_hd/harness.config.yaml"
+  mkboard "$_hd"
+  set_status "$_hd" E01-F01 done --evidence "$K_SHA"
+  [ "$SS_RC" = "0" ] || fail "E99-F34 N3: unbound evidence from checkout $_co was refused: $SS_OUT"
+  _n="$(field "$_hd/state/tasks.json" "d['landed'].get('repo','')")"
+  [ "$_n" = "boxkey" ] || fail "E99-F34 N3: an unbound landing from checkout '$_co' of the manifest repository 'boxkey' recorded repo='$_n', not the manifest key"
+done
+pass "E99-F34 N the_recorded_repo_names_the_repository_not_the_checkout"
+
 # ── R21: git decides what an object id is — never a regex ─────────────────────────────
 # Review round 5, P2. The predecessor gated resolution behind `^[0-9a-fA-F]{7,40}$`, which
 # silently excluded SHA-256's 64-character ids: they fell through to "not a commit id" and

@@ -624,6 +624,11 @@ python3 .harness/tools/tasks-lock.py set-status <id> done \
                           { "repo": "viernes-users", "ref": "none: superseded", "verified": "declared" } ] } }
 ```
 
+On a pretty-printed board `landed` is written multi-line, in the exact shape
+`json.dumps(board, indent=2)` produces (so a later `apply` / `add-feature` leaves it
+byte-identical); `repo` names the repository (manifest key, else the main worktree's
+directory), never a linked-worktree folder.
+
 **When `done` is written: after the work LANDS.** An approve verdict says the work
 is *correct*, not that it is *merged*. So the order on the main path is: approve →
 open the PR (the feature stays `in-review`) → **observe the merge** → then

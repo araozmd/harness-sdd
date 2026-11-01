@@ -846,6 +846,33 @@ def _capture(outcome, repo_name, identity, state, mapping, cand, hdir, chosen=No
     )
 
 
+def _record_name(chosen, state, mapping):
+    """The repository NAME to record for an UNBOUND resolution of `chosen`.
+
+    `basename(chosen)` names the CHECKOUT FOLDER, which for a linked worktree
+    (`.claude/worktrees/agent-…`, `umb`, `wt-f12`) is not the repository. In order:
+    (1) a present manifest entry that is the same repository -> its manifest KEY (first
+    in manifest order); (2) the MAIN worktree directory's basename, from the common git
+    dir; (3) git failure -> the old `basename(realpath(chosen))`. One extra git call at
+    most, at resolve time only — never from `still_holds()` (the in-lock re-check).
+    """
+    if state == "present":
+        for key, path in mapping.items():
+            if path and same_repository(chosen, path):
+                return key
+    common = _git(["rev-parse", "--git-common-dir"], cwd=chosen)
+    if common:
+        common = os.path.realpath(os.path.join(chosen, common))
+        base = os.path.basename(common)
+        if base == ".git":
+            base = os.path.basename(os.path.dirname(common))
+        elif base.endswith(".git"):
+            base = base[:-4]
+        if base:
+            return base
+    return os.path.basename(os.path.realpath(chosen))
+
+
 def resolve(ref, repo_name, hdir):
     """WHICH repository is this claim about? Returns a `Resolution`, never a guess.
 
@@ -999,7 +1026,7 @@ def resolve(ref, repo_name, hdir):
     base, evidence, has_origin, advertised = default_branch(chosen)
     return Resolution(
         RESOLVED,
-        repo=repo_name or os.path.basename(os.path.realpath(chosen)),
+        repo=repo_name or _record_name(chosen, state, mapping),
         binding=repo_name,
         directory=chosen,
         identity=Identity(chosen),
