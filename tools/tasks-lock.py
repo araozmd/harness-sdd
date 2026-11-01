@@ -1340,6 +1340,17 @@ def _resolve_landing(text, target_id, status, evidence_list, hdir, witnesses=Non
     return _landing_record(evidence_list[0], hdir, witnesses)
 
 
+def _landed_inline(record):
+    return json.dumps(record, separators=(", ", ": "), sort_keys=True)
+
+
+def _landed_blob(record, key_prefix):
+    """`record` as `json.dumps(board, indent=2)` renders it at a member whose line starts
+    with `key_prefix` (its indentation): continuation lines carry that indentation."""
+    indent = key_prefix[: len(key_prefix) - len(key_prefix.lstrip())]
+    return json.dumps(record, indent=2, sort_keys=True).replace("\n", "\n" + indent)
+
+
 def _write_landed(text, target_id, record):
     """Patch `landed` into the feature object, replacing any existing record.
 
@@ -1348,7 +1359,6 @@ def _write_landed(text, target_id, record):
     stays verbatim. The result is json.loads + schema validated by the caller before
     the atomic replace, so a malformed insert fail-stops instead of landing.
     """
-    blob = json.dumps(record, separators=(", ", ": "), sort_keys=True)
     in_string = _string_mask(text)
     span = _find_status_span(text, target_id)
     if span is None:
@@ -1366,7 +1376,13 @@ def _write_landed(text, target_id, record):
             _die(
                 "%s.landed is not an object; refusing to overwrite it blind" % target_id
             )
-        return text[: old[0]] + blob + text[old[1] :]
+        key_ls = text.rfind("\n", 0, existing) + 1
+        key_prefix = text[key_ls:existing]
+        if re.match(r'^[ \t]*"landed"\s*:\s*$', key_prefix):
+            # The key sits on its own line (pretty-printed board): write exactly what
+            # `json.dumps(board, indent=2)` would, so a later `apply` is a no-op here.
+            return text[: old[0]] + _landed_blob(record, key_prefix) + text[old[1] :]
+        return text[: old[0]] + _landed_inline(record) + text[old[1] :]
 
     # Insert immediately after the status member. `end + 1` steps past the closing
     # quote of the status VALUE (the span brackets the value between the quotes).
@@ -1378,10 +1394,11 @@ def _write_landed(text, target_id, record):
         # `status` opens its own line (the pretty-printed board): match its
         # indentation, so the diff is one ADDED line rather than one very long
         # rewritten one.
-        return text[:at] + ",\n" + indent + '"landed": ' + blob + text[at:]
+        return (text[:at] + ",\n" + indent + '"landed": '
+                + _landed_blob(record, indent) + text[at:])
     # Several members share the line (the compact fixtures, and hand-written boards):
     # stay on it — a newline here would reflow a line nobody asked to reformat.
-    return text[:at] + ', "landed": ' + blob + text[at:]
+    return text[:at] + ', "landed": ' + _landed_inline(record) + text[at:]
 
 
 # ── the landing PLAN: resolved BEFORE the lock, re-validated INSIDE it ────────
