@@ -58,3 +58,10 @@ __pycache__/
 # tools/change-size.sh's ADVISE tier during E30-F01 round 1 review purely because it was
 # untracked-but-present, not because any of it was production code.
 /scratchpad/
+
+# Codex Desktop's external-agent import (`[desktop] external-agent-import-sync-*` in
+# ~/.codex/config.toml) turns .claude/commands/*.md into `.agents/skills/source-command-*`
+# skills. They are stale, frozen copies of harness commands that already ship as real skill
+# units (e.g. sdd-report), seen by every front end that reads .agents/skills/. Not harness
+# output — never commit them (traced in progress/scout-pi-frontend.md §8).
+.agents/skills/source-command-*/
