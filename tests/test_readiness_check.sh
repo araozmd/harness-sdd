@@ -177,9 +177,14 @@ grep -qF "readiness-check: ok $GP: " "$T/out" || fail "R1_ok_plan_path_input: th
 pass "R1_ok_plan_path_input"
 
 fresh r1crlf
+# A fenced example ABOVE the table: if a CRLF closer (```\r) did not close it, every row
+# after it — the create rows included — would vanish and the tasks' created references fail.
+printf '%s\n' '```text' '| `tools/decoy.py` | modify: a fenced example | R1 |' '```' '' > "$T/fenced.md"
+insert_before "$GP" '| File | Change | R-id |' "$T/fenced.md"
 for _f in "$GP" "$GT" "$GX" "$GD/E01-F01.spec.md"; do crlf "$_f"; done
 grep -q "$(printf '\r')\$" "$GT" || fail "R1_ok_crlf: precondition: the tasks copy is not CRLF"
 lint "$GD"; expect_ok R1_ok_crlf
+grep -qF ", 3 created, " "$T/out" || fail "R1_ok_crlf: the CRLF create rows were not all read ($(both))"
 pass "R1_ok_crlf"
 
 # A BOM'd plan whose line 1 is `## Files to change`: if the BOM stayed, line 1 is no heading,
@@ -814,7 +819,7 @@ grep -qF 'is not inside a git work tree' "$T/err" || fail "R8_exit2_outside_repo
 [ -n "${I:-}" ] || setup_target
 _ar="$I/agents/architect.md"
 _ah='## Implementation readiness — every named path resolves (E37-F01)'
-grep -qxF "$_ah" "$_ar" || fail "R9_architect_section: no '$_ah' heading in the installed architect.md"
+[ "$(grep -cxF "$_ah" "$_ar")" -eq 1 ] || fail "R9_architect_section: the installed architect.md does not carry exactly one '$_ah' heading"
 _um="$(lineno "$_ar" '## Umbrella mode')"; _as="$(lineno "$_ar" "$_ah")"; _dc="$(lineno "$_ar" '## Doc-critic checkpoint')"
 [ "$_um" -gt 0 ] && [ "$_as" -gt "$_um" ] && [ "$_dc" -gt "$_as" ] \
   || fail "R9_architect_section: the section is not between '## Umbrella mode' and '## Doc-critic checkpoint' (umbrella=$_um section=$_as critic=$_dc)"
@@ -822,6 +827,7 @@ slice "$_ar" "$_ah" > "$T/ar.txt"
 has R9_architect_section "$T/ar.txt" 'Run `python3 "$HARNESS_DIR/tools/readiness-check.py" <feature-dir>` before the doc-critic checkpoint; it must exit 0 — the Reviewer rejects on exit 1 (check 9).'
 has R9_architect_section "$T/ar.txt" 'Declare every file the feature creates with `create` as the first word of its `## Files to change` Change cell; tasks and tests references to a created path, or to a path under a created directory, resolve through that declaration.'
 has R9_architect_section "$T/ar.txt" 'Exit 2 means the check did not run: fix the invocation and run it again.'
+has R9_architect_section "$T/ar.txt" 'Write a path that is not in this repository (a fixture-internal path, a consumer'"'"'s file) with a placeholder prefix (`<repo>/tools/x.py`) or inside fenced code.'
 pass "R9_architect_section"
 
 slice "$I/agents/reviewer.md" '## What you check' > "$T/rv.txt"
@@ -835,6 +841,7 @@ has R9_reviewer_check9 "$T/rv9.txt" '`.harness/tools/readiness-check.py` in an i
 hasre R9_reviewer_check9 "$T/rv9.txt" 'Exit 1 \(an `unresolved-path` or `unresolved-symbol` finding\)[^.]{0,80}reject, quoting'
 hasre R9_reviewer_check9 "$T/rv9.txt" 'Exit 2 means the check did not run[^.]{0,100}never approve on an unrun check'
 hasre R9_reviewer_check9 "$T/rv9.txt" 'the `--grandfathered` mode decides: exit 0 → flag[^.]{0,200}exit 1 → reject, exit 2 → flag'
+has R9_reviewer_check9 "$T/rv9.txt" 'Run it as `python3 "$HARNESS_DIR/tools/readiness-check.py" --grandfathered "<dir>/<feature>.plan.md"` after `git fetch origin`.'
 has R9_reviewer_check9 "$T/rv9.txt" 'A plan written before this tool merged is flagged, not rejected.'
 has R9_reviewer_check9 "$T/rv9.txt" 'This check judges resolution only — whether a resolving path is the right one stays check 5 and the doc-critic'"'"'s judgment.'
 has R9_reviewer_check9 "$T/rv9.txt" '`sdd: false` items are exempt (they have no `.plan.md`).'
@@ -848,10 +855,21 @@ has R9_reviewer_item8_intact "$T/rv8.txt" '`python3 "$HARNESS_DIR/tools/plan-cit
 has R9_reviewer_item8_intact "$T/rv8.txt" 'Checks 2 and 7 are unchanged.'
 grep -qF 'readiness-check' "$T/rv8.txt" && fail "R9_reviewer_item8_intact: item 8 names readiness-check — item 9 was merged into it"
 pass "R9_reviewer_item8_intact"
+# Structure: items 1-9 each exactly once and in order inside `## What you check`, and every
+# `## ` heading of the installed reviewer.md exactly once — an insertion that duplicates a
+# span (item 9 twice, a stray `## ADR-citation check` fragment) passes every slice above,
+# because a slice reads the first occurrence only.
+[ "$(grep -E '^[0-9]+\. ' "$T/rv.txt" | cut -d. -f1 | tr '\n' ' ')" = '1 2 3 4 5 6 7 8 9 ' ] \
+  || fail "R9_reviewer_structure: '## What you check' does not number its items 1-9 once each, in order ($(grep -E '^[0-9]+\. ' "$T/rv.txt" | cut -d. -f1 | tr '\n' ' '))"
+_dup="$(grep '^## ' "$I/agents/reviewer.md" | sort | uniq -d)"
+[ -z "$_dup" ] || fail "R9_reviewer_structure: duplicated headings in the installed reviewer.md: $_dup"
+[ "$(grep -c '^## ADR-citation check' "$I/agents/reviewer.md")" -eq 1 ] \
+  || fail "R9_reviewer_structure: more than one heading starts '## ADR-citation check' in the installed reviewer.md"
+pass "R9_reviewer_structure"
 
 _dcf="$I/agents/doc-critic.md"
 _dh='## Implementation readiness (E37-F01)'
-grep -qxF "$_dh" "$_dcf" || fail "R9_doc_critic_section: no '$_dh' heading in the installed doc-critic.md"
+[ "$(grep -cxF "$_dh" "$_dcf")" -eq 1 ] || fail "R9_doc_critic_section: the installed doc-critic.md does not carry exactly one '$_dh' heading"
 _e4="$(lineno "$_dcf" '## Plan-row citations and stage-aware NFRs (E36-F04)')"; _ds="$(lineno "$_dcf" "$_dh")"; _ed="$(lineno "$_dcf" '## Epic-decomposition checks')"
 [ "$_e4" -gt 0 ] && [ "$_ds" -gt "$_e4" ] && [ "$_ed" -gt "$_ds" ] \
   || fail "R9_doc_critic_section: the section is not after the E36-F04 section and before '## Epic-decomposition checks' (e36f04=$_e4 section=$_ds epic=$_ed)"
