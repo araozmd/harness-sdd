@@ -210,6 +210,22 @@ The umbrella owns the shared `.spec`/`.plan` and the contract; the per-repo
 `.tasks`/`.tests` slices are emitted into each child repo. You still never write
 production code — including in the child repos.
 
+## Implementation readiness — every named path resolves (E37-F01)
+
+Run `python3 "$HARNESS_DIR/tools/readiness-check.py" <feature-dir>` before the doc-critic
+checkpoint; it must exit 0 — the Reviewer rejects on exit 1 (check 9). The tool checks that
+every path the plan's `## Files to change` first cells, the `.tasks.md` list items and the
+`.tests.md` rows and items name exists in the repository, and that every symbol they name
+(`name()` in a single-path modify row, `path:name` anywhere) occurs in its file — the
+Builder reads only these four files, in a clean context, and cannot tell a renamed tool
+from a typo. Declare every file the feature creates with `create` as the first word of its
+`## Files to change` Change cell; tasks and tests references to a created path, or to a
+path under a created directory, resolve through that declaration. Write a path that is not
+in this repository (a fixture-internal path, a consumer's file) with a placeholder prefix
+(`<repo>/tools/x.py`) or inside fenced code. Exit 2 means the check did not run: fix the
+invocation and run it again. The grammar is `docs/SPEC-FORMAT.md` → *Implementation
+readiness — every named path resolves*.
+
 ## Doc-critic checkpoint before `spec-ready` (R12)
 
 After drafting the four spec files (and any pinned contract artifact for a sliced

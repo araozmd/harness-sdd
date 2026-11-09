@@ -772,4 +772,82 @@ mkdir -p "$T/nogit"; echo x > "$T/nogit/a.plan.md"
 gf_run "$T/nogit" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_outside_repo: rc $rc ($(both))"
 grep -qF 'is not inside a git work tree' "$T/err" || fail "R8_exit2_outside_repo: wrong reason ($(both))"; pass R8_exit2_outside_repo
 
+# ── prose helpers: fence-aware heading slicer (tests/lib/fence.awk), folded anchors ──────
+# slice <file> <heading-prefix> — one `## ` section (to the next `## ` heading outside fences).
+slice() {
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^## / { keep = (index($0, h) == 1); next }
+    keep' "$1"
+}
+# item <slice-file> <n> — numbered item n of a slice, up to the next `<digits>. ` item line.
+item() { awk -v n="$2" 'index($0, n ". ") == 1 { k = 1; print; next } k && /^[0-9]+\. / { k = 0 } k' "$1"; }
+folded() { tr '\n' ' ' < "$1" | tr -s ' '; }
+# has <row> <text-file> <exact-substring> — the folded text holds the exact sentence part.
+has() { folded "$2" | grep -qF -- "$3" || fail "$1: missing: $3"; }
+# hasre <row> <text-file> <ERE> — the folded text matches the anchored pattern (case-insensitive).
+hasre() { folded "$2" | grep -qiE -- "$3" || fail "$1: no match for /$3/"; }
+lineno() { awk -v s="$2" 'index($0,s)==1{print NR; f=1; exit} END{if(!f) print 0}' "$1"; }
+span() {
+  _sa="$(lineno "$1" "$2")"; _sb="$(lineno "$1" "$3")"
+  [ "$_sa" -gt 0 ] && [ "$_sb" -gt "$_sa" ] || fail "span: '$2' .. '$3' not found in order in $1"
+  sed -n "${_sa},${_sb}p" "$1" > "$4"
+}
+
+# ── R9: the Architect's step, Reviewer check 9 (reject), the doc-critic's advisory section ─
+_ar="$I/agents/architect.md"
+_ah='## Implementation readiness — every named path resolves (E37-F01)'
+grep -qxF "$_ah" "$_ar" || fail "R9_architect_section: no '$_ah' heading in the installed architect.md"
+_um="$(lineno "$_ar" '## Umbrella mode')"; _as="$(lineno "$_ar" "$_ah")"; _dc="$(lineno "$_ar" '## Doc-critic checkpoint')"
+[ "$_um" -gt 0 ] && [ "$_as" -gt "$_um" ] && [ "$_dc" -gt "$_as" ] \
+  || fail "R9_architect_section: the section is not between '## Umbrella mode' and '## Doc-critic checkpoint' (umbrella=$_um section=$_as critic=$_dc)"
+slice "$_ar" "$_ah" > "$T/ar.txt"
+has R9_architect_section "$T/ar.txt" 'Run `python3 "$HARNESS_DIR/tools/readiness-check.py" <feature-dir>` before the doc-critic checkpoint; it must exit 0 — the Reviewer rejects on exit 1 (check 9).'
+has R9_architect_section "$T/ar.txt" 'Declare every file the feature creates with `create` as the first word of its `## Files to change` Change cell; tasks and tests references to a created path, or to a path under a created directory, resolve through that declaration.'
+has R9_architect_section "$T/ar.txt" 'Exit 2 means the check did not run: fix the invocation and run it again.'
+pass "R9_architect_section"
+
+slice "$I/agents/reviewer.md" '## What you check' > "$T/rv.txt"
+[ -s "$T/rv.txt" ] || fail "R9_reviewer_check9: '## What you check' not found in the installed reviewer.md"
+item "$T/rv.txt" 9 > "$T/rv9.txt"
+[ -s "$T/rv9.txt" ] || fail "R9_reviewer_check9: no numbered item 9 inside '## What you check'"
+_l8="$(grep -n '^8\. ' "$T/rv.txt" | cut -d: -f1)"; _l9="$(grep -n '^9\. ' "$T/rv.txt" | cut -d: -f1)"
+[ -n "$_l8" ] && [ -n "$_l9" ] && [ "$_l9" -gt "$_l8" ] || fail "R9_reviewer_check9: item 9 does not follow item 8"
+has R9_reviewer_check9 "$T/rv9.txt" '9. **Implementation readiness (E37-F01).** For an `sdd: true` feature, run `python3 "$HARNESS_DIR/tools/readiness-check.py" "<dir>"`'
+has R9_reviewer_check9 "$T/rv9.txt" '`.harness/tools/readiness-check.py` in an installed target'
+hasre R9_reviewer_check9 "$T/rv9.txt" 'Exit 1 \(an `unresolved-path` or `unresolved-symbol` finding\)[^.]{0,80}reject, quoting'
+hasre R9_reviewer_check9 "$T/rv9.txt" 'Exit 2 means the check did not run[^.]{0,100}never approve on an unrun check'
+hasre R9_reviewer_check9 "$T/rv9.txt" 'the `--grandfathered` mode decides: exit 0 → flag[^.]{0,200}exit 1 → reject, exit 2 → flag'
+has R9_reviewer_check9 "$T/rv9.txt" 'A plan written before this tool merged is flagged, not rejected.'
+has R9_reviewer_check9 "$T/rv9.txt" 'This check judges resolution only — whether a resolving path is the right one stays check 5 and the doc-critic'"'"'s judgment.'
+has R9_reviewer_check9 "$T/rv9.txt" '`sdd: false` items are exempt (they have no `.plan.md`).'
+has R9_reviewer_check9 "$T/rv9.txt" 'Checks 2, 7 and 8 are unchanged.'
+folded "$T/rv9.txt" | grep -qiE 'exit 2[^.]{0,30}(→|⇒|=) ?(approve|approval|pass)' \
+  && fail "R9_reviewer_check9: item 9 lets an exit 2 (a check that did not run) approve"
+pass "R9_reviewer_check9"
+
+item "$T/rv.txt" 8 > "$T/rv8.txt"
+has R9_reviewer_item8_intact "$T/rv8.txt" '`python3 "$HARNESS_DIR/tools/plan-cite-check.py" "<dir>/<feature>.plan.md" --spec "<dir>/<feature>.spec.md"`'
+has R9_reviewer_item8_intact "$T/rv8.txt" 'Checks 2 and 7 are unchanged.'
+grep -qF 'readiness-check' "$T/rv8.txt" && fail "R9_reviewer_item8_intact: item 8 names readiness-check — item 9 was merged into it"
+pass "R9_reviewer_item8_intact"
+
+_dcf="$I/agents/doc-critic.md"
+_dh='## Implementation readiness (E37-F01)'
+grep -qxF "$_dh" "$_dcf" || fail "R9_doc_critic_section: no '$_dh' heading in the installed doc-critic.md"
+_e4="$(lineno "$_dcf" '## Plan-row citations and stage-aware NFRs (E36-F04)')"; _ds="$(lineno "$_dcf" "$_dh")"; _ed="$(lineno "$_dcf" '## Epic-decomposition checks')"
+[ "$_e4" -gt 0 ] && [ "$_ds" -gt "$_e4" ] && [ "$_ed" -gt "$_ds" ] \
+  || fail "R9_doc_critic_section: the section is not after the E36-F04 section and before '## Epic-decomposition checks' (e36f04=$_e4 section=$_ds epic=$_ed)"
+slice "$_dcf" "$_dh" > "$T/dcr.txt"
+has R9_doc_critic_section "$T/dcr.txt" 'At `target-type=feature-spec`, also run the implementation-readiness lint on the feature directory: `python3 "$HARNESS_DIR/tools/readiness-check.py" <feature-dir>`'
+hasre R9_doc_critic_section "$T/dcr.txt" 'readiness-check\.py[^.]{0,120}report each line it prints as an advisory finding'
+has R9_doc_critic_section "$T/dcr.txt" 'an exit 2 is recorded as the finding "readiness lint did not run: <stderr>".'
+has R9_doc_critic_section "$T/dcr.txt" 'These findings are advisory like every other finding: you never block the Architect'
+grep -qF 'never block' "$_dcf" || fail "R9_doc_critic_section: the role's never-block rule is gone"
+pass "R9_doc_critic_section"
+has R9_doc_critic_no_shell_fallback "$T/dcr.txt" 'If your host gives you no shell tool, the lint does not run: record the finding "implementation-readiness lint did not run: no shell tool" in your note, and never judge the plan'"'"'s references resolved by reading them — the Reviewer'"'"'s check 9 stays the gate.'
+folded "$T/dcr.txt" | grep -qiE '(may|can|should|free to)[^.]{0,80}(reference|path|plan)[^.]{0,60}resolve' \
+  && fail "R9_doc_critic_no_shell_fallback: the section lets the critic declare the references resolved without the lint"
+pass "R9_doc_critic_no_shell_fallback"
+
 echo "all readiness-check checks passed"
