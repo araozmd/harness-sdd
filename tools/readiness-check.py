@@ -281,10 +281,12 @@ def ignored(path, root, created):
         return True
     if "/" not in path:
         return False
-    rest = path[len(HARNESS):] if path.startswith(HARNESS) else path
+    rest = path
+    if path.startswith(HARNESS):
+        rest = path[len(HARNESS):]
+        if not rest.strip("/"):
+            return True  # `.harness/` itself names the install directory, never a file
     first = rest.split("/", 1)[0]
-    if not first:
-        return True
     known = os.path.isdir(os.path.join(root, first)) \
         or os.path.isdir(os.path.join(root, HARNESS, first)) \
         or any(c.startswith(first + "/") for c in created)

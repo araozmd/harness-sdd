@@ -304,4 +304,82 @@ lint "$GD"; expect_fail "R3_blockquote_and_prose_unscanned control"
 [ "$(count ' tools/nope\.py$')" -eq 1 ] || fail "R3_blockquote_and_prose_unscanned control: the list item was not scanned ($(both))"
 pass "R3_blockquote_and_prose_unscanned"
 
+# ── R4: ignore rules (each under a KNOWN root), trailing /, ./, the .harness/ remap ──────
+# clean_tasks — drop the positive tasks' ignored-shapes item (T4 to the end), so each R4
+# case plants exactly one token on an otherwise clean copy.
+clean_tasks() { awk '/^- \[ \] \*\*T4\*\*/ { exit } { print }' "$GT" > "$GT.new"; mv "$GT.new" "$GT"; }
+_n=0
+for _tok in 'tools/<x>.py' 'tools/<x.py' 'tools/x>.py' 'tools/a*.py' 'tools/a?.py' 'docs/a[1].md' \
+    'docs/a[1.md' 'docs/a1].md' 'tools/{a,b}.py' 'tools/{a.py' 'tools/a}.py' 'docs/$X.md' \
+    'tools/~x.py' 'tools/a|b.py' 'tools/…/x.md' 'http://x/tools/y.md' '/var/tmp/x' '--root' \
+    '.mutbak' '.plan.md' 'scratchpad/E01-F01-builder/' 'progress/E01-F01/builder.md' 'VERSION' \
+    'check 8' 'origin/main' 'tols/x.py' '.harness/'; do
+  fresh r4tok; clean_tasks
+  # `http:` made a known root, so only the `://` rule can ignore the URL token
+  case "$_tok" in http://*) mkdir "$R/http:" ;; esac
+  [ -d "$R/scratchpad" ] && [ -d "$R/progress" ] && [ -d "$R/tools" ] && [ -d "$R/docs" ] \
+    || fail "R4_ignored_tokens: precondition: the fixture's known roots are missing"
+  grep -qF -- "\`$_tok\`" "$GT" && fail "R4_ignored_tokens: precondition: the clean copy still names '$_tok'"
+  add_item "$GT" "- [ ] **T9** — Mention \`$_tok\` in prose."
+  lint "$GD"; expect_ok "R4_ignored_tokens[$_tok]"
+  _n=$((_n + 1))
+done
+[ "$_n" -ge 20 ] || fail "R4_ignored_tokens: only $_n tokens were exercised"
+pass "R4_ignored_tokens ($_n tokens)"
+
+# The shapes a plan FIRST cell would otherwise check (a bare basename there is a reference):
+# a bare extension, a flag-like name and an absolute path stay ignored by their own rule.
+fresh r4first
+printf '%s\n' '| `.plan.md`, `--out.md`, `/var/tmp/x.md` | modify the scratch outputs | R1 |' > "$T/row.md"
+insert_before "$GP" '| `README.md` |' "$T/row.md"
+lint "$GD"; expect_ok R4_plan_first_cell_shapes
+pass "R4_plan_first_cell_shapes"
+
+fresh r4dir
+clean_tasks; add_item "$GT" '- [ ] **T9** — Under `tools/`.'
+lint "$GD"; expect_ok R4_dir_trailing_slash
+for _tok in 'tools/nowhere/' 'tools/real.py/'; do
+  fresh r4dir; clean_tasks; add_item "$GT" "- [ ] **T9** — Under \`$_tok\`."
+  lint "$GD"; expect_fail "R4_dir_trailing_slash[$_tok]"
+  [ "$(count "^readiness-check: unresolved-path .*E01-F01\\.tasks\\.md:[0-9]+ $_tok\$")" -eq 1 ] \
+    || fail "R4_dir_trailing_slash[$_tok]: a directory reference that is not a directory is not a finding ($(both))"
+done
+pass "R4_dir_trailing_slash"
+
+# ./ is stripped before resolution: `./tools/new.py` is the created `tools/new.py`.
+fresh r4dot
+clean_tasks; add_item "$GT" '- [ ] **T9** — Call `./tools/new.py` and `./tools/real.py`.'
+lint "$GD"; expect_ok R4_leading_dot_slash_stripped
+add_item "$GT" '- [ ] **T10** — Call `./tools/nope.py`.'
+lint "$GD"; expect_fail R4_leading_dot_slash_stripped
+[ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:[0-9]+ \./tools/nope\.py$')" -eq 1 ] \
+  || fail "R4_leading_dot_slash_stripped: './tools/nope.py' is not one finding printed as written ($(both))"
+pass "R4_leading_dot_slash_stripped"
+
+fresh r4remap
+grep -qF '`.harness/tools/real.py`' "$GT" || fail "R4_harness_remap_both_ways: precondition: the positive tasks lost .harness/tools/real.py"
+[ ! -e "$R/.harness" ] || fail "R4_harness_remap_both_ways: precondition: the fixture has a .harness/"
+lint "$GD"; expect_ok "R4_harness_remap_both_ways (.harness/ → bare)"
+mkdir "$R/.harness"; mv "$R/tools" "$R/tests" "$R/docs" "$R/.harness/"
+lint "$GD"; expect_ok "R4_harness_remap_both_ways (bare → .harness/)"
+# docs/ has no created path, so only the `.harness/<first>` known-root clause makes it known.
+add_item "$GT" '- [ ] **T9** — Call `tools/nope.py` and read `docs/nope.md`.'
+lint "$GD"; expect_fail R4_harness_remap_both_ways
+[ "$(count '^readiness-check: unresolved-path ')" -eq 2 ] && [ "$(count 'E01-F01\.tasks\.md:[0-9]+ tools/nope\.py$')" -eq 1 ] \
+  && [ "$(count 'E01-F01\.tasks\.md:[0-9]+ docs/nope\.md$')" -eq 1 ] \
+  || fail "R4_harness_remap_both_ways: under the installed layout tools/nope.py and docs/nope.md are not the two findings ($(both))"
+pass "R4_harness_remap_both_ways"
+
+fresh r4croot
+[ ! -e "$R/contract" ] || fail "R4_created_root_is_known: precondition: the fixture has contract/"
+printf '%s\n' '| `contract/api.yaml` | create the API contract | R2 |' > "$T/row.md"
+insert_before "$GP" '| `README.md` |' "$T/row.md"
+clean_tasks; add_item "$GT" '- [ ] **T9** — Validate against `contract/missing.yaml`.'
+lint "$GD"; expect_fail R4_created_root_is_known
+[ "$(count '^readiness-check: unresolved-path ')" -eq 1 ] && [ "$(count 'E01-F01\.tasks\.md:[0-9]+ contract/missing\.yaml$')" -eq 1 ] \
+  || fail "R4_created_root_is_known: a created first segment did not make contract/missing.yaml a reference ($(both))"
+grep -v '^| `contract/api.yaml` |' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+lint "$GD"; expect_ok "R4_created_root_is_known (no create row ⇒ unknown root, ignored)"
+pass "R4_created_root_is_known"
+
 echo "all readiness-check checks passed"
