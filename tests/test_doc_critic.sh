@@ -370,6 +370,35 @@ test_template_trade_offs_section() {
   pass "E37-F02:R5: template carries the optional Accepted trade-offs section"
 }
 
+# ── E37-F02:R6 — WORKFLOW paragraph and README sentence ────────────────────────
+test_workflow_paraphrase_paragraph() {
+  _sec="$(slice "$WORKFLOW" '## Doc-critic checkpoints' | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R6: WORKFLOW $2" ;; esac; }
+  _need 'At the `feature-spec` checkpoint the critic'"'"'s note opens with a `## Paraphrase` (E37-F02)' "paragraph opener missing"
+  _need 'restated from the four spec files alone — the inbox brief and the chat are withheld on purpose, because the Builder never sees them either' \
+    "four-files-only / withheld-on-purpose clause missing"
+  _need 'Each `could-not-restate` item is blocking for the Architect'"'"'s hand-off: fix it, or after at most one re-audit record it in the `.spec.md` under `## Accepted trade-offs`.' \
+    "fix-or-record sentence missing"
+  _need 'The critic itself stays advisory — no new status, no new gate — and the Reviewer reads `## Accepted trade-offs` and treats a recorded trade-off as a decision, not a defect.' \
+    "advisory / Reviewer sentence missing"
+  _need 'the Architect runs `tools/readiness-check.py <feature-dir>` before hand-off and it must exit 0' \
+    "the E37-F01 paragraph was lost"
+  pass "E37-F02:R6: WORKFLOW carries the paraphrase paragraph, E37-F01 paragraph kept"
+}
+
+test_readme_paraphrase_sentence() {
+  _sec="$(slice "$README" '## How it works' | folded)"
+  case "$_sec" in
+    *'Before the Builder sees a spec, the Doc-critic also paraphrases it back from the four files alone — what it proposes and how the existing system works, per the document — and anything the cold reader could not restate is fixed or recorded in the spec as an accepted trade-off (E37-F02).'*) : ;;
+    *) fail "E37-F02:R6: README ## How it works lacks the paraphrase sentence" ;;
+  esac
+  case "$_sec" in
+    *'the Reviewer rejects on exit 1.'*) : ;;
+    *) fail "E37-F02:R6: README lost the three-lints sentence" ;;
+  esac
+  pass "E37-F02:R6: README carries the paraphrase sentence"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -393,5 +422,7 @@ test_could_not_restate_blocking
 test_architect_paraphrase_step
 test_reviewer_reads_trade_offs
 test_template_trade_offs_section
+test_workflow_paraphrase_paragraph
+test_readme_paraphrase_sentence
 
 echo "All doc-critic contract tests passed."

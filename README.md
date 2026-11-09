@@ -67,6 +67,11 @@ backticked repo-rooted path and symbol it recognises in the plan, tasks and test
 is declared created — an unrecognised token is ignored, never flagged, E37-F01); each exits
 0/1/2 and the Reviewer rejects on exit 1.
 
+Before the Builder sees a spec, the Doc-critic also paraphrases it back from the four files
+alone — what it proposes and how the existing system works, per the document — and anything
+the cold reader could not restate is fixed or recorded in the spec as an accepted trade-off
+(E37-F02).
+
 ## Quick start in this source checkout (Claude Code)
 
 To use the harness in your own project, follow
