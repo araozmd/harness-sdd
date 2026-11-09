@@ -850,4 +850,64 @@ folded "$T/dcr.txt" | grep -qiE '(may|can|should|free to)[^.]{0,80}(reference|pa
   && fail "R9_doc_critic_no_shell_fallback: the section lets the critic declare the references resolved without the lint"
 pass "R9_doc_critic_no_shell_fallback"
 
+# ── R10: the deliberate copies stay in step with their originals (parity, not trust) ────
+# Fence parity: tests/test_tasks_pairs.sh's edge corpus, verbatim — each segment exists for
+# one clause (closer length · closer char · closer info string · backtick-in-info opener ·
+# run >= 3 · indent 0-3 · trailing blanks on a closer).
+{ printf '%s\n' 'P0 outside' \
+    '````md' 'P1 in: a 3-run cannot close a 4-run' '```' 'P2 in' '````' 'P3 out' \
+    '```' 'P4 in: a tilde run cannot close a backtick fence' '~~~' 'P5 in' '```' 'P6 out' \
+    '```' 'P7 in: a closer carries no info string' '```sh' 'P8 in' '```' 'P9 out' \
+    '```a`b' 'P10 out: backtick in a backtick info string is not an opener' \
+    '~~~a`b' 'P11 in: a tilde opener may carry a backtick' '~~~' 'P12 out' \
+    '``' 'P13 out: a 2-run is not a fence' '~~' 'P14 out' \
+    '    ```' 'P15 out: 4-space indent is not a fence' \
+    '   ~~~' 'P16 in: 3-space indent is' '~~~  ' 'P17 out: closer with trailing blanks' \
+    '~~~' 'P18 in' "$(printf '~~~\t')" 'P19 out: closer with a trailing tab'
+} > "$T/fence-corpus.md"
+[ "$(grep -c '^P[0-9]* ' "$T/fence-corpus.md")" -eq 20 ] || fail "R10_fence_parity: precondition: the corpus does not hold its 20 segments"
+awk "$FENCE_AWK"'fence_delim($0) { next } !fence' "$T/fence-corpus.md" > "$T/fence-awk.out"
+python3 - "$TOOL" "$T/fence-corpus.md" > "$T/fence-py.out" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("readiness_check", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+lines = mod._read(sys.argv[2])
+plain = list(mod.iter_unfenced(lines))
+numbered = list(mod.iter_unfenced(lines, numbered=True))
+assert [t for _n, t in numbered] == plain, "numbered and plain iter_unfenced disagree"
+assert all(lines[n - 1] == t for n, t in numbered), "a numbered line points at the wrong source line"
+for line in plain:
+    print(line)
+PY
+printf '%s\n' 'P0 outside' 'P3 out' 'P6 out' 'P9 out' '```a`b' \
+  'P10 out: backtick in a backtick info string is not an opener' 'P12 out' '``' \
+  'P13 out: a 2-run is not a fence' '~~' 'P14 out' '    ```' 'P15 out: 4-space indent is not a fence' \
+  'P17 out: closer with trailing blanks' 'P19 out: closer with a trailing tab' > "$T/fence-want.out"
+cmp -s "$T/fence-want.out" "$T/fence-awk.out" \
+  || fail "R10_fence_parity: fence.awk reads the corpus differently than the suite expects: $(diff "$T/fence-want.out" "$T/fence-awk.out" | tr '\n' '|')"
+cmp -s "$T/fence-awk.out" "$T/fence-py.out" \
+  || fail "R10_fence_parity: readiness-check's iter_unfenced() diverges from tests/lib/fence.awk: $(diff "$T/fence-awk.out" "$T/fence-py.out" | tr '\n' '|')"
+pass "R10_fence_parity"
+
+# Table-grammar parity: both modules' parse_sections() on plan-cite's positive plan yield the
+# same `## Files to change` data-row line numbers (its `### sub-heading` row included).
+python3 - "$ROOT/tools/plan-cite-check.py" "$TOOL" "$ROOT/tests/fixtures/plan-cite/specs/epics/E01-x/F01-good/E01-F01.plan.md" <<'PY' \
+  || fail "R10_table_grammar_parity: see the message above"
+import importlib.util, sys
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); return mod
+def rows(mod, plan):
+    return [n for sec in mod.parse_sections(mod._read(plan)) if sec["name"] == "Files to change"
+            for table in sec["tables"] for n, _t, kind in table if kind == "data"]
+pc, rc = load("plan_cite_check", sys.argv[1]), load("readiness_check", sys.argv[2])
+a, b = rows(pc, sys.argv[3]), rows(rc, sys.argv[3])
+if len(a) < 5:
+    sys.exit("precondition: plan-cite's positive plan has only %d Files to change rows" % len(a))
+if a != b:
+    sys.exit("parse_sections() diverges: plan-cite-check %r, readiness-check %r" % (a, b))
+PY
+pass "R10_table_grammar_parity"
+
 echo "all readiness-check checks passed"

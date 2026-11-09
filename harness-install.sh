@@ -4210,6 +4210,7 @@ install_one() {
   chmod +x "$H/tools/sweep-scratch.sh" 2>/dev/null || true   # E34-F01 automated scratch-dir sweep
   chmod +x "$H/tools/tasks-pair-check.py" 2>/dev/null || true   # E36-F01 Reviewer task-pair shape lint
   chmod +x "$H/tools/plan-cite-check.py" 2>/dev/null || true   # E36-F04 Reviewer plan-row citation lint
+  chmod +x "$H/tools/readiness-check.py" 2>/dev/null || true   # E37-F01 Reviewer implementation-readiness lint
   chmod +x "$H/tools/host-frontend.sh" 2>/dev/null || true   # E99-F182 host front-end key for builder-role.sh --frontend
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
