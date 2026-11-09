@@ -73,6 +73,95 @@ insert_before() {
 # add_item <tasks-file> <text> — append one list item to a tasks file.
 add_item() { printf '%s\n' "$2" >> "$1"; }
 
+# lno <file> <fixed-string> — the line number of the first line holding the string (a
+# precondition: the fixture README states each planted defect's line).
+lno() { grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1; }
+# readme_says <file-basename:line> — the fixture README documents the planted defect there.
+readme_says() { grep -qF "| $1 |" "$FX/README.md" || fail "setup: the fixture README does not document $1"; }
+
+# clean_tasks — drop the positive tasks' ignored-shapes item (T4 to the end), so each R4
+# case plants exactly one token on an otherwise clean copy.
+clean_tasks() { awk '/^- \[ \] \*\*T4\*\*/ { exit } { print }' "$GT" > "$GT.new"; mv "$GT.new" "$GT"; }
+# set_cell <plan> <first-cell-fixed-string> <new-change-cell> — rewrite one row's Change cell.
+set_cell() {
+  awk -v k="| \`$2\` |" -v f="$2" -v c="$3" 'index($0, k) == 1 && !d { split($0, a, "|"); printf "| `%s` | %s |%s|\n", f, c, a[4]; d = 1; next } { print }' "$1" > "$1.new"
+  mv "$1.new" "$1"
+}
+# chk_exit2 <row> <stderr-fixed-string> — each row's argv is the minimal one ONLY that branch
+# rejects; the string names the branch so a second producer cannot pass it.
+chk_exit2() {
+  [ "$rc" -eq 2 ] || fail "$1: expected rc 2, got $rc ($(both))"
+  head -n 1 "$T/err" | grep -q '^readiness-check: error: ' || fail "$1: stderr's first line is not 'readiness-check: error: ...' ($(both))"
+  grep -q 'usage:' "$T/err" || fail "$1: no usage on stderr ($(both))"
+  [ ! -s "$T/out" ] || fail "$1: stdout is not empty on an error ($(both))"
+  grep -qF -- "$2" "$T/err" || fail "$1: the error does not name '$2' ($(both))"
+  pass "$1"
+}
+# setup_target — ONE fresh install (CODEX_HOME/HOME sandboxed) into $T/tgt, a git work tree
+# (hostile-config-proof git, lesson 2026-10-19) whose ROOT holds the fixture's project files.
+# R7 plants features under the installed .harness/specs; the prose rows read the installed copy.
+setup_target() {
+  mkdir -p "$T/tgt" "$T/ch" "$T/home"
+  CODEX_HOME="$T/ch" HOME="$T/home" sh "$ROOT/harness-install.sh" --agents=claude "$T/tgt" \
+    >"$T/install.out" 2>"$T/install.err" || fail "setup: fresh install exited non-zero: $(cat "$T/install.err")"
+  I="$T/tgt/.harness"
+  hgit() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TEMPLATE_DIR='' git "$@"; }
+  hgit init -q "$T/tgt" || fail "setup: git init of the target failed"
+  cp -R "$FX/repo/tools" "$FX/repo/docs" "$FX/repo/tests" "$FX/repo/README.md" "$T/tgt/"
+}
+# init_case <feature-id> <status> <sdd> <feature-dir> — plant board + feature.
+init_case() {
+  rm -rf "$I/specs/epics/E01-x" "$T/tgt/src"; mkdir -p "$I/specs/epics"
+  cp -R "$FX/repo/specs/epics/E01-x" "$I/specs/epics/"
+  printf '{"$schema": "../store/tasks.schema.json", "project": "fx", "epics": [{"id": "E01", "title": "Fixture", "status": "in-progress", "features": [{"id": "%s", "title": "Fixture feature", "status": "%s", "sdd": %s, "autonomous": false, "depends_on": [], "spec_path": "specs/epics/E01-x/%s/"}]}]}\n' \
+    "$1" "$2" "$3" "$4" > "$I/state/tasks.json"
+  IGP="$I/specs/epics/E01-x/F01-good/E01-F01.plan.md"; IGT="$I/specs/epics/E01-x/F01-good/E01-F01.tasks.md"
+  IBP="$I/specs/epics/E01-x/F02-bad/E01-F02.plan.md"
+}
+init_run() { set +e; (cd "$T/tgt" && bash "$I/init.sh") >"$T/out" 2>"$T/err"; rc=$?; set -e; }
+init_ok() {
+  [ "$rc" -eq 0 ] || fail "$1: init.sh exited $rc — the 2e block must never fail the gate ($(both))"
+  grep -qF '✅ environment ready' "$T/out" || fail "$1: init.sh did not reach its final ok line ($(both))"
+}
+
+GIT_CONFIG_GLOBAL=/dev/null; GIT_CONFIG_NOSYSTEM=1; GIT_TEMPLATE_DIR=''
+export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM GIT_TEMPLATE_DIR
+gq() { git -c user.name=fx -c user.email=fx@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+gci() { # gci <author-epoch> <committer-epoch> <msg>  (stage first)
+  GIT_AUTHOR_DATE="@$1 +0000" GIT_COMMITTER_DATE="@$2 +0000" gq commit -q -m "$3" || fail "fixture commit '$3' failed"
+}
+gf_run() { # gf_run <cwd> <plan-path> [args...]
+  _r="$1"; _f="$2"; shift 2
+  set +e; (cd "$_r" && python3 "$TOOL" --grandfathered "$_f" "$@") >"$T/out" 2>"$T/err"; rc=$?; set -e
+}
+gf_expect() { # gf_expect <row> <rc> <stdout-regex>
+  [ "$rc" -eq "$2" ] || fail "$1: expected rc $2, got $rc ($(both))"
+  grep -qE "$3" "$T/out" || fail "$1: stdout does not match '$3' ($(both))"
+  pass "$1"
+}
+# prose helpers: fence-aware heading slicer (tests/lib/fence.awk), folded anchors, spans.
+# slice <file> <heading-prefix> — one `## ` section (to the next `## ` heading outside fences).
+slice() {
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^## / { keep = (index($0, h) == 1); next }
+    keep' "$1"
+}
+# item <slice-file> <n> — numbered item n of a slice, up to the next `<digits>. ` item line.
+item() { awk -v n="$2" 'index($0, n ". ") == 1 { k = 1; print; next } k && /^[0-9]+\. / { k = 0 } k' "$1"; }
+folded() { tr '\n' ' ' < "$1" | tr -s ' '; }
+# has <row> <text-file> <exact-substring> — the folded text holds the exact sentence part.
+has() { folded "$2" | grep -qF -- "$3" || fail "$1: missing: $3"; }
+# hasre <row> <text-file> <ERE> — the folded text matches the anchored pattern (case-insensitive).
+hasre() { folded "$2" | grep -qiE -- "$3" || fail "$1: no match for /$3/"; }
+lineno() { awk -v s="$2" 'index($0,s)==1{print NR; f=1; exit} END{if(!f) print 0}' "$1"; }
+span() {
+  _sa="$(lineno "$1" "$2")"; _sb="$(lineno "$1" "$3")"
+  [ "$_sa" -gt 0 ] && [ "$_sb" -gt "$_sa" ] || fail "span: '$2' .. '$3' not found in order in $1"
+  sed -n "${_sa},${_sb}p" "$1" > "$4"
+}
+
+
 # ── R1: a clean feature ⇒ exit 0 and one ok line ────────────────────────────────────────
 fresh r1
 lint "$GD"; expect_ok R1_ok_positive
@@ -135,11 +224,6 @@ grep -qE '^readiness-check: ok .*tasks: read, tests: read$' "$T/out" || fail "R1
 pass "R1_dogfood_own_dir"
 
 # ── R2: a `## Files to change` first-cell path that does not resolve ⇒ unresolved-path ──
-# lno <file> <fixed-string> — the line number of the first line holding the string (a
-# precondition: the fixture README states each planted defect's line).
-lno() { grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1; }
-# readme_says <file-basename:line> — the fixture README documents the planted defect there.
-readme_says() { grep -qF "| $1 |" "$FX/README.md" || fail "setup: the fixture README does not document $1"; }
 
 fresh r1fencectl
 insert_before "$GP" '## Deferred' "$T/decoys.md"
@@ -312,9 +396,6 @@ lint "$GD"; expect_fail "R3_blockquote_and_prose_unscanned control"
 pass "R3_blockquote_and_prose_unscanned"
 
 # ── R4: ignore rules (each under a KNOWN root), trailing /, ./, the .harness/ remap ──────
-# clean_tasks — drop the positive tasks' ignored-shapes item (T4 to the end), so each R4
-# case plants exactly one token on an otherwise clean copy.
-clean_tasks() { awk '/^- \[ \] \*\*T4\*\*/ { exit } { print }' "$GT" > "$GT.new"; mv "$GT.new" "$GT"; }
 _n=0
 for _tok in 'tools/<x>.py' 'tools/<x.py' 'tools/x>.py' 'tools/a*.py' 'tools/a?.py' 'docs/a[1].md' \
     'docs/a[1.md' 'docs/a1].md' 'tools/{a,b}.py' 'tools/{a.py' 'tools/a}.py' 'docs/$X.md' \
@@ -390,11 +471,6 @@ lint "$GD"; expect_ok "R4_created_root_is_known (no create row ⇒ unknown root,
 pass "R4_created_root_is_known"
 
 # ── R5: symbols — `name()` in a single-path modify row, `path:name` anywhere ─────────────
-# set_cell <plan> <first-cell-fixed-string> <new-change-cell> — rewrite one row's Change cell.
-set_cell() {
-  awk -v k="| \`$2\` |" -v f="$2" -v c="$3" 'index($0, k) == 1 && !d { split($0, a, "|"); printf "| `%s` | %s |%s|\n", f, c, a[4]; d = 1; next } { print }' "$1" > "$1.new"
-  mv "$1.new" "$1"
-}
 fresh r5
 _l="$(lno "$BP" '`gone()`')"; readme_says "E01-F02.plan.md:$_l"
 lint "$BD"; expect_fail R5_symbol_missing_in_row
@@ -489,16 +565,6 @@ lint "$GD"; expect_fail R5_whole_word_only
 pass "R5_whole_word_only"
 
 # ── R6: usage / input / internal errors ⇒ exit 2, `error:` + usage on stderr, stdout empty ─
-# chk_exit2 <row> <stderr-fixed-string> — each row's argv is the minimal one ONLY that branch
-# rejects; the string names the branch so a second producer cannot pass it.
-chk_exit2() {
-  [ "$rc" -eq 2 ] || fail "$1: expected rc 2, got $rc ($(both))"
-  head -n 1 "$T/err" | grep -q '^readiness-check: error: ' || fail "$1: stderr's first line is not 'readiness-check: error: ...' ($(both))"
-  grep -q 'usage:' "$T/err" || fail "$1: no usage on stderr ($(both))"
-  [ ! -s "$T/out" ] || fail "$1: stdout is not empty on an error ($(both))"
-  grep -qF -- "$2" "$T/err" || fail "$1: the error does not name '$2' ($(both))"
-  pass "$1"
-}
 fresh r6
 run_tool; chk_exit2 R6_no_arg 'expected exactly one <feature-dir | feature.plan.md>'
 run_tool "$GD" "$BD" --root "$R"; chk_exit2 R6_two_args 'expected exactly one <feature-dir | feature.plan.md>'
@@ -582,27 +648,7 @@ pass "R6_internal_error_exit2"
 # One fresh install (CODEX_HOME/HOME sandboxed). The target is a git work tree (hostile-config-
 # proof git, lesson 2026-10-19); the fixture's project files sit at the TARGET root and each
 # case plants one feature under the installed .harness/specs plus a one-feature board.
-mkdir -p "$T/tgt" "$T/ch" "$T/home"
-CODEX_HOME="$T/ch" HOME="$T/home" sh "$ROOT/harness-install.sh" --agents=claude "$T/tgt" \
-  >"$T/install.out" 2>"$T/install.err" || fail "setup: fresh install exited non-zero: $(cat "$T/install.err")"
-I="$T/tgt/.harness"
-hgit() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TEMPLATE_DIR='' git "$@"; }
-hgit init -q "$T/tgt" || fail "setup: git init of the target failed"
-cp -R "$FX/repo/tools" "$FX/repo/docs" "$FX/repo/tests" "$FX/repo/README.md" "$T/tgt/"
-# init_case <feature-id> <status> <sdd> <feature-dir> — plant board + feature.
-init_case() {
-  rm -rf "$I/specs/epics/E01-x" "$T/tgt/src"; mkdir -p "$I/specs/epics"
-  cp -R "$FX/repo/specs/epics/E01-x" "$I/specs/epics/"
-  printf '{"$schema": "../store/tasks.schema.json", "project": "fx", "epics": [{"id": "E01", "title": "Fixture", "status": "in-progress", "features": [{"id": "%s", "title": "Fixture feature", "status": "%s", "sdd": %s, "autonomous": false, "depends_on": [], "spec_path": "specs/epics/E01-x/%s/"}]}]}\n' \
-    "$1" "$2" "$3" "$4" > "$I/state/tasks.json"
-  IGP="$I/specs/epics/E01-x/F01-good/E01-F01.plan.md"; IGT="$I/specs/epics/E01-x/F01-good/E01-F01.tasks.md"
-  IBP="$I/specs/epics/E01-x/F02-bad/E01-F02.plan.md"
-}
-init_run() { set +e; (cd "$T/tgt" && bash "$I/init.sh") >"$T/out" 2>"$T/err"; rc=$?; set -e; }
-init_ok() {
-  [ "$rc" -eq 0 ] || fail "$1: init.sh exited $rc — the 2e block must never fail the gate ($(both))"
-  grep -qF '✅ environment ready' "$T/out" || fail "$1: init.sh did not reach its final ok line ($(both))"
-}
+[ -n "${I:-}" ] || setup_target
 _RDOK='✅ implementation readiness clean (1 feature(s) checked)'
 
 init_case E01-F02 spec-ready true F02-bad; init_run; init_ok R7_init_warns_on_bad_feature
@@ -684,21 +730,6 @@ pass "R7_init_large_output_never_fails"
 # default branch touching tools/readiness-check.py or .harness/tools/readiness-check.py. The
 # plan's date is the AUTHOR time of the earliest commit on HEAD that added it. Hermetic git:
 # bounded discovery (GIT_CEILING_DIRECTORIES above), no host config, fixed dates.
-GIT_CONFIG_GLOBAL=/dev/null; GIT_CONFIG_NOSYSTEM=1; GIT_TEMPLATE_DIR=''
-export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM GIT_TEMPLATE_DIR
-gq() { git -c user.name=fx -c user.email=fx@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
-gci() { # gci <author-epoch> <committer-epoch> <msg>  (stage first)
-  GIT_AUTHOR_DATE="@$1 +0000" GIT_COMMITTER_DATE="@$2 +0000" gq commit -q -m "$3" || fail "fixture commit '$3' failed"
-}
-gf_run() { # gf_run <cwd> <plan-path> [args...]
-  _r="$1"; _f="$2"; shift 2
-  set +e; (cd "$_r" && python3 "$TOOL" --grandfathered "$_f" "$@") >"$T/out" 2>"$T/err"; rc=$?; set -e
-}
-gf_expect() { # gf_expect <row> <rc> <stdout-regex>
-  [ "$rc" -eq "$2" ] || fail "$1: expected rc $2, got $rc ($(both))"
-  grep -qE "$3" "$T/out" || fail "$1: stdout does not match '$3' ($(both))"
-  pass "$1"
-}
 # G1: main: base @1000; old.plan.md @1100; the tool @1500; new.plan.md @1600; one uncommitted.
 G="$T/g1"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
 echo base > README; gq add README; gci 1000 1000 base
@@ -779,29 +810,8 @@ mkdir -p "$T/nogit"; echo x > "$T/nogit/a.plan.md"
 gf_run "$T/nogit" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_outside_repo: rc $rc ($(both))"
 grep -qF 'is not inside a git work tree' "$T/err" || fail "R8_exit2_outside_repo: wrong reason ($(both))"; pass R8_exit2_outside_repo
 
-# ── prose helpers: fence-aware heading slicer (tests/lib/fence.awk), folded anchors ──────
-# slice <file> <heading-prefix> — one `## ` section (to the next `## ` heading outside fences).
-slice() {
-  awk -v h="$2" "$FENCE_AWK"'
-    fence_delim($0) { if (keep) print; next }
-    !fence && /^## / { keep = (index($0, h) == 1); next }
-    keep' "$1"
-}
-# item <slice-file> <n> — numbered item n of a slice, up to the next `<digits>. ` item line.
-item() { awk -v n="$2" 'index($0, n ". ") == 1 { k = 1; print; next } k && /^[0-9]+\. / { k = 0 } k' "$1"; }
-folded() { tr '\n' ' ' < "$1" | tr -s ' '; }
-# has <row> <text-file> <exact-substring> — the folded text holds the exact sentence part.
-has() { folded "$2" | grep -qF -- "$3" || fail "$1: missing: $3"; }
-# hasre <row> <text-file> <ERE> — the folded text matches the anchored pattern (case-insensitive).
-hasre() { folded "$2" | grep -qiE -- "$3" || fail "$1: no match for /$3/"; }
-lineno() { awk -v s="$2" 'index($0,s)==1{print NR; f=1; exit} END{if(!f) print 0}' "$1"; }
-span() {
-  _sa="$(lineno "$1" "$2")"; _sb="$(lineno "$1" "$3")"
-  [ "$_sa" -gt 0 ] && [ "$_sb" -gt "$_sa" ] || fail "span: '$2' .. '$3' not found in order in $1"
-  sed -n "${_sa},${_sb}p" "$1" > "$4"
-}
-
 # ── R9: the Architect's step, Reviewer check 9 (reject), the doc-critic's advisory section ─
+[ -n "${I:-}" ] || setup_target
 _ar="$I/agents/architect.md"
 _ah='## Implementation readiness — every named path resolves (E37-F01)'
 grep -qxF "$_ah" "$_ar" || fail "R9_architect_section: no '$_ah' heading in the installed architect.md"
@@ -918,6 +928,7 @@ PY
 pass "R10_table_grammar_parity"
 
 # ── R11: SPEC-FORMAT's schema section, WORKFLOW's paragraph, README's sentence ─────────
+[ -n "${I:-}" ] || setup_target
 _sf="$I/docs/SPEC-FORMAT.md"
 _sh='## Implementation readiness — every named path resolves'
 grep -qxF "$_sh" "$_sf" || fail "R11_spec_format_section: no '$_sh' heading in the installed SPEC-FORMAT.md"
