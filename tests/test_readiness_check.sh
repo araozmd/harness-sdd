@@ -382,4 +382,103 @@ grep -v '^| `contract/api.yaml` |' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
 lint "$GD"; expect_ok "R4_created_root_is_known (no create row ⇒ unknown root, ignored)"
 pass "R4_created_root_is_known"
 
+# ── R5: symbols — `name()` in a single-path modify row, `path:name` anywhere ─────────────
+# set_cell <plan> <first-cell-fixed-string> <new-change-cell> — rewrite one row's Change cell.
+set_cell() {
+  awk -v k="| \`$2\` |" -v f="$2" -v c="$3" 'index($0, k) == 1 && !d { split($0, a, "|"); printf "| `%s` | %s |%s|\n", f, c, a[4]; d = 1; next } { print }' "$1" > "$1.new"
+  mv "$1.new" "$1"
+}
+fresh r5
+_l="$(lno "$BP" '`gone()`')"; readme_says "E01-F02.plan.md:$_l"
+lint "$BD"; expect_fail R5_symbol_missing_in_row
+[ "$(count "^readiness-check: unresolved-symbol .*E01-F02\\.plan\\.md:$_l docs/NOTES\\.md:gone\$")" -eq 1 ] \
+  || fail "R5_symbol_missing_in_row: no unresolved-symbol for gone() on the NOTES row ($(both))"
+pass "R5_symbol_missing_in_row"
+_l="$(lno "$BP" '`tools/real.py:nothere`')"; readme_says "E01-F02.plan.md:$_l"
+[ "$(count "^readiness-check: unresolved-symbol .*E01-F02\\.plan\\.md:$_l tools/real\\.py:nothere\$")" -eq 1 ] \
+  || fail "R5_path_colon_name_in_plan_cell: no unresolved-symbol for the Change cell's path:name ($(both))"
+pass "R5_path_colon_name_in_plan_cell"
+_l="$(lno "$BT" '`tools/real.py:absent`')"; readme_says "E01-F02.tasks.md:$_l"
+[ "$(count "^readiness-check: unresolved-symbol .*E01-F02\\.tasks\\.md:$_l tools/real\\.py:absent\$")" -eq 1 ] \
+  || fail "R5_path_colon_name_in_tasks_item: no unresolved-symbol for the tasks item's path:name ($(both))"
+# The whole negative feature, finding for finding: nine lines and the summary.
+[ "$(count '^readiness-check: unresolved-')" -eq 9 ] || fail "R5_path_colon_name_in_tasks_item: the negative feature does not give exactly its nine planted findings ($(both))"
+fresh r5pos
+grep -qF '`tools/real.py:other`' "$GT" || fail "R5_path_colon_name_in_tasks_item: precondition: the positive tasks lost tools/real.py:other"
+lint "$GD"; expect_ok R5_path_colon_name_in_tasks_item
+pass "R5_path_colon_name_in_tasks_item"
+
+fresh r5present
+grep -qF '| `tools/real.py` | modify: call `helper()` |' "$GP" || fail "R5_symbol_present_ok: precondition: the helper() row changed"
+lint "$GD"; expect_ok R5_symbol_present_ok
+sed 's/helper/helpme/g' "$R/tools/real.py" > "$R/tools/real.py.new"; mv "$R/tools/real.py.new" "$R/tools/real.py"
+lint "$GD"; expect_fail R5_symbol_present_ok
+[ "$(count '^readiness-check: unresolved-symbol .*E01-F01\.plan\.md:[0-9]+ tools/real\.py:helper$')" -eq 1 ] \
+  || fail "R5_symbol_present_ok: a renamed def does not make helper() a finding ($(both))"
+pass "R5_symbol_present_ok"
+
+# An add row (an existing file) and a create row each name symbols an existing file lacks —
+# `gone()` and the Change-cell form `tools/real.py:gone` — and neither is searched. The
+# Change-cell form is what the create verb alone exempts (its own first cell is created, so
+# form 1 is masked by the created set).
+fresh r5add
+set_cell "$GP" 'docs/NOTES.md' 'add a note that calls `gone()` per `tools/real.py:gone`'
+grep -qF '| `docs/NOTES.md` | add a note that calls `gone()` per `tools/real.py:gone` |' "$GP" || fail "R5_create_add_row_skips_symbols: precondition: the add cell rewrite did not apply"
+lint "$GD"; expect_ok "R5_create_add_row_skips_symbols (add)"
+fresh r5create
+set_cell "$GP" 'tools/new.py' 'create it beside `tools/real.py:gone`'
+grep -qF '| `tools/new.py` | create it beside `tools/real.py:gone` |' "$GP" || fail "R5_create_add_row_skips_symbols: precondition: the create cell rewrite did not apply"
+lint "$GD"; expect_ok "R5_create_add_row_skips_symbols (create)"
+pass "R5_create_add_row_skips_symbols"
+
+# A line reference is stripped before the symbol form; `:1x` is not an identifier, so it is
+# no symbol either — the whole token is a path that does not resolve.
+fresh r5line
+grep -qF '`tools/real.py:12`' "$GT" && grep -qF '`tools/real.py:12-20`' "$GT" || fail "R5_line_ref_not_symbol: precondition: the line refs are gone"
+lint "$GD"; expect_ok R5_line_ref_not_symbol
+add_item "$GT" '- [ ] **T9** — See `tools/real.py:1x`.'
+lint "$GD"; expect_fail R5_line_ref_not_symbol
+[ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:[0-9]+ tools/real\.py:1x$')" -eq 1 ] \
+  && [ "$(count 'unresolved-symbol')" -eq 0 ] \
+  || fail "R5_line_ref_not_symbol: ':1x' was read as a symbol name ($(both))"
+pass "R5_line_ref_not_symbol"
+
+fresh r5args
+set_cell "$GP" 'tools/real.py' 'modify: call `helper()` and `fence_delim($0)`'
+grep -qF 'and `fence_delim($0)` |' "$GP" || fail "R5_call_with_args_not_symbol: precondition: the cell rewrite did not apply"
+lint "$GD"; expect_ok R5_call_with_args_not_symbol
+pass "R5_call_with_args_not_symbol"
+
+fresh r5multi
+grep -qF '| `tools/real.py`, `tests/test_real.sh` | modify both; names `nothere()`' "$GP" || fail "R5_multi_path_row_skips_symbols: precondition: the two-path row changed"
+lint "$GD"; expect_ok R5_multi_path_row_skips_symbols
+pass "R5_multi_path_row_skips_symbols"
+
+fresh r5bin
+set_cell "$GP" 'tools/real.py' 'modify: call `gone()`'
+printf '\377' >> "$R/tools/real.py"
+lint "$GD"; expect_ok R5_non_utf8_target_not_searched
+pass "R5_non_utf8_target_not_searched"
+
+# A created path that already exists (mid-feature) is never searched.
+fresh r5created
+: > "$R/tools/new.py"
+add_item "$GT" '- [ ] **T9** — Wire `tools/new.py:anything`.'
+lint "$GD"; expect_ok R5_symbol_on_created_path_skipped
+pass "R5_symbol_on_created_path_skipped"
+
+fresh r5unres
+set_cell "$GP" 'docs/NOTES.md' 'modify per `tools/nope.py:x`'
+grep -qF '| `docs/NOTES.md` | modify per `tools/nope.py:x` |' "$GP" || fail "R5_unresolved_path_colon_name_in_change_cell: precondition: rewrite did not apply"
+lint "$GD"; expect_ok R5_unresolved_path_colon_name_in_change_cell
+pass "R5_unresolved_path_colon_name_in_change_cell"
+
+fresh r5word
+set_cell "$GP" 'tools/real.py' 'modify: call `help()`'
+grep -q 'helper' "$R/tools/real.py" || fail "R5_whole_word_only: precondition: real.py lost helper"
+lint "$GD"; expect_fail R5_whole_word_only
+[ "$(count '^readiness-check: unresolved-symbol .*E01-F01\.plan\.md:[0-9]+ tools/real\.py:help$')" -eq 1 ] \
+  || fail "R5_whole_word_only: help() matched inside helper ($(both))"
+pass "R5_whole_word_only"
+
 echo "all readiness-check checks passed"

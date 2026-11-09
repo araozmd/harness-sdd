@@ -72,6 +72,7 @@ TESTREF_RE = re.compile(r"::.*$")
 LINEREF_RE = re.compile(r":[0-9]+(-[0-9]+)?$")
 SYMFORM_RE = re.compile(r":([A-Za-z_][A-Za-z0-9_]*)$")
 EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+CALL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\)$")  # symbol form 1: `name()`, no args
 ITEM_RE = re.compile(r"^[ \t]*- ")
 CONT_RE = re.compile(r"^[ \t]{2,}\S")
 VERB_RE = re.compile(r"[A-Za-z]+")
@@ -339,6 +340,17 @@ def resolve(path, root, feature_dir, created):
     return None
 
 
+def symbol_present(path, name):
+    """True when `name` occurs in the file as a whole word.  A file that is not valid UTF-8
+    is not searched (True: no finding) — a binary target must not block a spec."""
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+    return re.search(r"(?<![A-Za-z0-9_])" + name + r"(?![A-Za-z0-9_])", text) is not None
+
+
 def find_root(plan):
     ceilings = {os.path.abspath(c) for c in
                 os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep) if c}
@@ -397,14 +409,40 @@ def check_feature(plan, tasks, tests, root):
             return True
         return False
 
+    def target(p):
+        """The existing regular file a symbol is searched in, else None (unresolved, created,
+        a directory)."""
+        t = resolve(p, root, feature_dir, created)
+        return t if t not in (None, "created") and os.path.isfile(t) else None
+
+    def symbol_form(rank, fname, n, display, p, name):
+        t = target(p)
+        if t is not None and not symbol_present(t, name):
+            emit(rank, fname, n, "unresolved-symbol %s:%d %s" % (fname, n, display))
+
     for n, text in rows:
         cs = cells(text)
-        if plan_verb(cs[1] if len(cs) > 1 else "") == "create":
+        verb = plan_verb(cs[1] if len(cs) > 1 else "")
+        if verb == "create":
             continue
+        firsts = []
         for sp in spans(cs[0]):
             display, p, _name = classify(sp)
-            if p is not None and not ignored(p, root, created) and not ref(p):
-                emit(0, plan, n, "unresolved-path %s:%d %s" % (plan, n, display))
+            if p is not None and not ignored(p, root, created):
+                firsts.append(p)
+                if not ref(p):
+                    emit(0, plan, n, "unresolved-path %s:%d %s" % (plan, n, display))
+        if verb == "add":
+            continue  # you add TO a file that exists: path checked, symbols not
+        t = target(firsts[0]) if len(firsts) == 1 else None
+        for cell in cs:
+            for sp in spans(cell):
+                m = CALL_RE.match(sp)
+                if m and t is not None and not symbol_present(t, m.group(1)):
+                    emit(0, plan, n, "unresolved-symbol %s:%d %s:%s" % (plan, n, firsts[0], m.group(1)))
+                display, p, name = classify(sp)
+                if name is not None and p is not None and not ignored(p, root, created):
+                    symbol_form(0, plan, n, display, p, name)
     for rank, fname, lines in ((1, tasks, tasks_lines), (2, tests, tests_lines)):
         if lines is None:
             continue
@@ -417,13 +455,15 @@ def check_feature(plan, tasks, tests, root):
                 continue  # the Builder is told to make it: the whole unit is exempt
             for n, text in unit:
                 for sp in spans(text):
-                    display, p, _name = classify(sp)
+                    display, p, name = classify(sp)
                     if p is None or ignored(p, root, created):
                         continue
                     if "/" not in p:
                         ref(p)  # a bare basename found nowhere is prose, never a finding
                     elif not ref(p):
                         emit(rank, fname, n, "unresolved-path %s:%d %s" % (fname, n, display))
+                    if name is not None:
+                        symbol_form(rank, fname, n, display, p, name)
     findings.sort(key=lambda f: (f[0], f[1]))  # stable: order of discovery within a line
     return findings, resolved[0], len(created)
 
