@@ -571,4 +571,105 @@ head -n 1 "$T/err" | grep -q '^readiness-check: error: internal: BrokenPipeError
 grep -q 'Traceback' "$T/err" && fail "R6_internal_error_exit2: a traceback reached stderr ($(tr '\n' '|' < "$T/err"))"
 pass "R6_internal_error_exit2"
 
+# ── R7: init.sh 2e — warn-only sweep, resolving against the PROJECT root ────────────────
+# One fresh install (CODEX_HOME/HOME sandboxed). The target is a git work tree (hostile-config-
+# proof git, lesson 2026-10-19); the fixture's project files sit at the TARGET root and each
+# case plants one feature under the installed .harness/specs plus a one-feature board.
+mkdir -p "$T/tgt" "$T/ch" "$T/home"
+CODEX_HOME="$T/ch" HOME="$T/home" sh "$ROOT/harness-install.sh" --agents=claude "$T/tgt" \
+  >"$T/install.out" 2>"$T/install.err" || fail "setup: fresh install exited non-zero: $(cat "$T/install.err")"
+I="$T/tgt/.harness"
+hgit() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TEMPLATE_DIR='' git "$@"; }
+hgit init -q "$T/tgt" || fail "setup: git init of the target failed"
+cp -R "$FX/repo/tools" "$FX/repo/docs" "$FX/repo/tests" "$FX/repo/README.md" "$T/tgt/"
+# init_case <feature-id> <status> <sdd> <feature-dir> — plant board + feature.
+init_case() {
+  rm -rf "$I/specs/epics/E01-x" "$T/tgt/src"; mkdir -p "$I/specs/epics"
+  cp -R "$FX/repo/specs/epics/E01-x" "$I/specs/epics/"
+  printf '{"$schema": "../store/tasks.schema.json", "project": "fx", "epics": [{"id": "E01", "title": "Fixture", "status": "in-progress", "features": [{"id": "%s", "title": "Fixture feature", "status": "%s", "sdd": %s, "autonomous": false, "depends_on": [], "spec_path": "specs/epics/E01-x/%s/"}]}]}\n' \
+    "$1" "$2" "$3" "$4" > "$I/state/tasks.json"
+  IGP="$I/specs/epics/E01-x/F01-good/E01-F01.plan.md"; IGT="$I/specs/epics/E01-x/F01-good/E01-F01.tasks.md"
+  IBP="$I/specs/epics/E01-x/F02-bad/E01-F02.plan.md"
+}
+init_run() { set +e; (cd "$T/tgt" && bash "$I/init.sh") >"$T/out" 2>"$T/err"; rc=$?; set -e; }
+init_ok() {
+  [ "$rc" -eq 0 ] || fail "$1: init.sh exited $rc — the 2e block must never fail the gate ($(both))"
+  grep -qF '✅ environment ready' "$T/out" || fail "$1: init.sh did not reach its final ok line ($(both))"
+}
+_RDOK='✅ implementation readiness clean (1 feature(s) checked)'
+
+init_case E01-F02 spec-ready true F02-bad; init_run; init_ok R7_init_warns_on_bad_feature
+_l="$(lno "$IBP" '`tools/missing.py`')"
+grep -qxF "⚠️  readiness: E01-F02 unresolved-path specs/epics/E01-x/F02-bad/E01-F02.plan.md:$_l tools/missing.py (+8 more; warn-only — Reviewer check 9 rejects)" "$T/out" \
+  || fail "R7_init_warns_on_bad_feature: no whole warn line naming E01-F02, its first finding and the other 8 ($(both))"
+grep -qF 'implementation readiness clean' "$T/out" && fail "R7_init_warns_on_bad_feature: the clean line printed beside a warning ($(both))"
+grep -qF 'readiness: FAIL' "$T/out" && fail "R7_init_warns_on_bad_feature: the tool's FAIL summary leaked as a warning ($(both))"
+pass "R7_init_warns_on_bad_feature"
+
+init_case E01-F01 spec-ready true F01-good; init_run; init_ok R7_init_ok_on_good_feature
+grep -qxF "$_RDOK" "$T/out" || fail "R7_init_ok_on_good_feature: no clean line counting 1 feature ($(both))"
+grep -qF 'readiness:' "$T/out" && fail "R7_init_ok_on_good_feature: a warn line on a clean feature ($(both))"
+pass "R7_init_ok_on_good_feature"
+grep -qF '✅ plan citations and deferred ADRs clean (1 plan(s) checked)' "$T/out" \
+  || fail "R7_init_2d_untouched: section 2d's clean line no longer prints ($(both))"
+pass "R7_init_2d_untouched"
+
+# The root is the TARGET (the plan's .git ancestor), not .harness/ (init.sh's cwd): a tasks
+# item naming src/app.py resolves only against the project.
+init_case E01-F01 spec-ready true F01-good
+add_item "$IGT" '- [ ] **T9** — Wire `src/app.py`.'
+mkdir -p "$T/tgt/src"; : > "$T/tgt/src/app.py"
+init_run; init_ok R7_init_root_is_project_root
+grep -qxF "$_RDOK" "$T/out" || fail "R7_init_root_is_project_root: src/app.py at the project root did not resolve ($(both))"
+rm "$T/tgt/src/app.py"
+init_run; init_ok R7_init_root_is_project_root
+_l="$(lno "$IGT" '`src/app.py`')"
+grep -qxF "⚠️  readiness: E01-F01 unresolved-path specs/epics/E01-x/F01-good/E01-F01.tasks.md:$_l src/app.py (+0 more; warn-only — Reviewer check 9 rejects)" "$T/out" \
+  || fail "R7_init_root_is_project_root: a missing project file is not the warn line ($(both))"
+pass "R7_init_root_is_project_root"
+
+init_case E01-F01 spec-ready true F01-good
+mv "$T/tgt/.git" "$T/tgt.git-away"
+init_run; mv "$T/tgt.git-away" "$T/tgt/.git"; init_ok R7_init_no_git_did_not_run
+grep -qxF '⚠️  readiness: E01-F01 check did not run: error: no ancestor of specs/epics/E01-x/F01-good/E01-F01.plan.md holds .git; pass --root (warn-only)' "$T/out" \
+  || fail "R7_init_no_git_did_not_run: a target with no .git is not ONE whole 'did not run' line ($(both))"
+grep -qF 'implementation readiness clean' "$T/out" && fail "R7_init_no_git_did_not_run: the clean line printed though the check did not run ($(both))"
+pass "R7_init_no_git_did_not_run"
+
+init_case E01-F02 spec-ready true F02-bad; rm "$IBP"; init_run; init_ok R7_init_exit2_reported_as_did_not_run
+grep -qxF '⚠️  readiness: E01-F02 check did not run: error: no *.plan.md in specs/epics/E01-x/F02-bad/ (warn-only)' "$T/out" \
+  || fail "R7_init_exit2_reported_as_did_not_run: an exit-2 lint is not ONE whole 'did not run' line ($(both))"
+grep -qF 'implementation readiness clean' "$T/out" && fail "R7_init_exit2_reported_as_did_not_run: the clean line printed though the check did not run ($(both))"
+pass "R7_init_exit2_reported_as_did_not_run"
+
+for _st in in-review in-progress; do
+  init_case E01-F02 "$_st" true F02-bad; init_run; init_ok "R7_init_in_review_swept[$_st]"
+  grep -qF '⚠️  readiness: E01-F02 unresolved-path ' "$T/out" || fail "R7_init_in_review_swept: a '$_st' feature was not linted ($(both))"
+done
+for _st in done pending; do
+  init_case E01-F02 "$_st" true F02-bad; init_run; init_ok "R7_init_in_review_swept[$_st]"
+  grep -qF 'readiness: E01-F02' "$T/out" && fail "R7_init_in_review_swept: a '$_st' feature was linted ($(both))"
+done
+init_case E01-F02 spec-ready false F02-bad; init_run; init_ok R7_init_sdd_false_exempt
+grep -qF 'readiness: E01-F02' "$T/out" && fail "R7_init_sdd_false_exempt: an sdd: false feature was linted ($(both))"
+pass "R7_init_in_review_swept"
+pass "R7_init_sdd_false_exempt"
+
+init_case E01-F02 spec-ready true F02-bad; rm "$I/tools/readiness-check.py"; init_run; init_ok R7_init_silent_without_tool
+grep -qF 'readiness' "$T/out" && fail "R7_init_silent_without_tool: 2e printed without the tool ($(both))"
+pass "R7_init_silent_without_tool"
+cp "$TOOL" "$I/tools/readiness-check.py"
+
+# A warn-only lint never fails the gate, however much it prints: 2000 generated unresolved
+# rows (past any pipe buffer) must not let a `printf | head` take SIGPIPE under pipefail.
+init_case E01-F01 spec-ready true F01-good
+awk 'BEGIN { for (i = 1; i <= 2000; i++) printf "| `tools/big%d.py` | modify it | R1 |\n", i }' > "$T/big.md"
+insert_before "$IGP" '| `README.md` |' "$T/big.md"
+[ "$(grep -c '^| `tools/big[0-9]*\.py` |' "$IGP")" -eq 2000 ] || fail "R7_init_large_output_never_fails: precondition: the 2000 rows were not inserted"
+init_run; init_ok R7_init_large_output_never_fails
+_l="$(lno "$IGP" '`tools/big1.py`')"
+grep -qxF "⚠️  readiness: E01-F01 unresolved-path specs/epics/E01-x/F01-good/E01-F01.plan.md:$_l tools/big1.py (+1999 more; warn-only — Reviewer check 9 rejects)" "$T/out" \
+  || fail "R7_init_large_output_never_fails: no whole warn line counting the other 1999 findings ($(both))"
+pass "R7_init_large_output_never_fails"
+
 echo "all readiness-check checks passed"
