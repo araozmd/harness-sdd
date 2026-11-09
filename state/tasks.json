@@ -2265,17 +2265,18 @@
         {
           "id": "E37-F01",
           "title": "Implementation-readiness lint: every path and symbol a plan/tasks file names must resolve",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "58c39b2fbdc67d3d85fece905294ad85aef0a112",
+            "ref": "58c39b2fbdc67d3d85fece905294ad85aef0a112",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E37-goldfish-spec-review/F01-readiness-lint/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (319)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E37-F01 done --evidence <merge-ref>`",
-            "pr": "319"
-          }
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F01-readiness-lint/"
         },
         {
           "id": "E37-F02",
