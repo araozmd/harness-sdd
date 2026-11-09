@@ -310,6 +310,17 @@ lint "$GD"; expect_fail R2_multi_span_first_cell
   || fail "R2_multi_span_first_cell: expected exactly one finding, naming tools/nope.py ($(both))"
 pass "R2_multi_span_first_cell"
 
+# The create verb is matched case-insensitively (`**Create**`, `CREATE`): the row still
+# declares tools/new.py (review round 1, V11).
+for _v in '**Create**' 'CREATE'; do
+  fresh r2case
+  set_cell "$GP" 'tools/new.py' "$_v the new tool"
+  grep -qF "| \`tools/new.py\` | $_v the new tool |" "$GP" || fail "R2_create_verb_case_insensitive[$_v]: precondition: the cell rewrite did not apply"
+  lint "$GD"; expect_ok "R2_create_verb_case_insensitive[$_v]"
+  grep -qF ", 3 created, " "$T/out" || fail "R2_create_verb_case_insensitive[$_v]: the row no longer counts as created ($(both))"
+done
+pass "R2_create_verb_case_insensitive"
+
 # ── R3: tasks list items, tests rows and items ⇒ unresolved-path at the physical line ───
 fresh r3
 lint "$BD"; expect_fail R3_tasks_item_unresolved
@@ -421,6 +432,41 @@ lint "$GD"; expect_fail R3_feature_dir_fallback_bare_only
   || fail "R3_feature_dir_fallback_bare_only: a slash path resolved through the feature directory ($(both))"
 pass "R3_feature_dir_fallback_bare_only"
 
+# A created DIRECTORY named without its trailing slash resolves through the declaration
+# (review round 1, V01).
+fresh r3cdir
+clean_tasks; add_item "$GT" '- [ ] **T9** — Fill `tests/fixtures/new` with the cases.'
+[ ! -e "$R/tests/fixtures" ] || fail "R3_created_dir_without_slash: precondition: the fixture has tests/fixtures/"
+lint "$GD"; expect_ok R3_created_dir_without_slash
+pass "R3_created_dir_without_slash"
+
+# Unit grammar: an item ends at a fence (the next unfenced line is no continuation, however
+# indented) and continues only on a line indented by at least two spaces; a tests table's
+# header row is no data row. The control proves the token is a finding once it IS in a unit
+# (review round 1, V06, V41, V07).
+fresh r3unit
+clean_tasks; printf '%s\n' '- [ ] **T9** — An item.' '```' 'fenced' '```' '  `tools/nope.py` after the fence' >> "$GT"
+lint "$GD"; expect_ok R3_item_ends_at_fence
+pass "R3_item_ends_at_fence"
+fresh r3unit
+clean_tasks; printf '%s\n' '- [ ] **T9** — An item.' ' `tools/nope.py` one space in' >> "$GT"
+lint "$GD"; expect_ok R3_continuation_needs_two_spaces
+fresh r3unit
+clean_tasks; printf '%s\n' '- [ ] **T9** — An item.' '  `tools/nope.py` two spaces in' >> "$GT"
+lint "$GD"; expect_fail "R3_continuation_needs_two_spaces control"
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count 'E01-F01\.tasks\.md:[0-9]+ tools/nope\.py$')" -eq 1 ] \
+  || fail "R3_continuation_needs_two_spaces control: a two-space continuation was not scanned ($(both))"
+pass "R3_continuation_needs_two_spaces"
+fresh r3thdr
+printf '%s\n' '' '| `tools/nope.py` | Test |' '|---|---|' '| R9 | `tests/test_real.sh` |' >> "$GX"
+lint "$GD"; expect_ok R3_tests_header_row_exempt
+printf '%s\n' '| R9 | `tools/nope.py` |' >> "$GX"
+_l="$(wc -l < "$GX" | tr -d ' ')"
+lint "$GD"; expect_fail "R3_tests_header_row_exempt control"
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count "E01-F01\\.tests\\.md:$_l tools/nope\\.py\$")" -eq 1 ] \
+  || fail "R3_tests_header_row_exempt control: the data row's tools/nope.py is not the one finding ($(both))"
+pass "R3_tests_header_row_exempt"
+
 # ── R4: ignore rules (each under a KNOWN root), trailing /, ./, the .harness/ remap ──────
 _n=0
 for _tok in 'tools/<x>.py' 'tools/<x.py' 'tools/x>.py' 'tools/a*.py' 'tools/a?.py' 'docs/a[1].md' \
@@ -506,6 +552,18 @@ lint "$GD"; expect_fail R4_harness_prefix_known_root_after_prefix
 [ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:[0-9]+ \.harness/tools/nope\.py$')" -eq 1 ] \
   || fail "R4_harness_prefix_known_root_after_prefix: .harness/tools/nope.py was ignored as an unknown root ($(both))"
 pass "R4_harness_prefix_known_root_after_prefix"
+
+# A bare basename is a candidate only with a 1-5 character extension: a plan first cell
+# `x.abcdef` is not a candidate; `x.abcde` is, and resolves nowhere (review round 1, V14).
+fresh r4ext
+printf '%s\n' '| `x.abcdef` | modify the scratch output | R1 |' > "$T/row.md"
+insert_before "$GP" '| `README.md` |' "$T/row.md"
+lint "$GD"; expect_ok R4_extension_at_most_five
+sed 's/^| `x\.abcdef` |/| `x.abcde` |/' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+lint "$GD"; expect_fail "R4_extension_at_most_five control"
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count 'E01-F01\.plan\.md:[0-9]+ x\.abcde$')" -eq 1 ] \
+  || fail "R4_extension_at_most_five control: a five-character extension is not a candidate ($(both))"
+pass "R4_extension_at_most_five"
 
 # ── R5: symbols — `name()` in a single-path modify row, `path:name` anywhere ─────────────
 fresh r5
@@ -600,6 +658,36 @@ lint "$GD"; expect_fail R5_whole_word_only
 [ "$(count '^readiness-check: unresolved-symbol .*E01-F01\.plan\.md:[0-9]+ tools/real\.py:help$')" -eq 1 ] \
   || fail "R5_whole_word_only: help() matched inside helper ($(both))"
 pass "R5_whole_word_only"
+
+# The whole-word match has a LEADING boundary too: `elper` is not found inside `helper`
+# (review round 1, V34).
+fresh r5lead
+grep -q 'helper' "$R/tools/real.py" && ! grep -qE '(^|[^A-Za-z0-9_])elper([^A-Za-z0-9_]|$)' "$R/tools/real.py" \
+  || fail "R5_whole_word_leading_boundary: precondition: real.py does not hold helper alone"
+add_item "$GT" '- [ ] **T9** — Call `tools/real.py:elper`.'
+lint "$GD"; expect_fail R5_whole_word_leading_boundary
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count '^readiness-check: unresolved-symbol .*E01-F01\.tasks\.md:[0-9]+ tools/real\.py:elper$')" -eq 1 ] \
+  || fail "R5_whole_word_leading_boundary: elper matched inside helper ($(both))"
+pass "R5_whole_word_leading_boundary"
+
+# `path:name` is searched anywhere, a bare-basename path included (review round 1, V21).
+fresh r5bsym
+[ -f "$R/README.md" ] && ! grep -q 'nosuchsym' "$R/README.md" || fail "R5_bare_path_colon_name: precondition: README.md"
+add_item "$GT" '- [ ] **T9** — See `README.md:nosuchsym`.'
+lint "$GD"; expect_fail R5_bare_path_colon_name
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count '^readiness-check: unresolved-symbol .*E01-F01\.tasks\.md:[0-9]+ README\.md:nosuchsym$')" -eq 1 ] \
+  || fail "R5_bare_path_colon_name: the bare path's symbol was not searched ($(both))"
+pass "R5_bare_path_colon_name"
+
+# An ignored path in a Change cell's `path:name` is no reference, even when it names an
+# existing file: a run-time root and an absolute path (review round 1, V22).
+fresh r5ign
+mkdir -p "$R/scratchpad/E01-F01-builder"; printf 'x\n' > "$R/scratchpad/E01-F01-builder/log.md"
+case "$R" in *[!A-Za-z0-9/._-]*) fail "R5_ignored_path_colon_name: precondition: \$R has a character a span would not carry: $R" ;; esac
+set_cell "$GP" 'docs/NOTES.md' "modify per \`scratchpad/E01-F01-builder/log.md:zzqnot\` and \`$R/tools/real.py:zzqnot\`"
+grep -qF "\`$R/tools/real.py:zzqnot\` |" "$GP" || fail "R5_ignored_path_colon_name: precondition: the cell rewrite did not apply"
+lint "$GD"; expect_ok R5_ignored_path_colon_name
+pass "R5_ignored_path_colon_name"
 
 # ── R6: usage / input / internal errors ⇒ exit 2, `error:` + usage on stderr, stdout empty ─
 fresh r6
@@ -856,6 +944,27 @@ grep -qF -- '--base' "$T/err" || fail "R8_exit2_no_default_branch: the error doe
 mkdir -p "$T/nogit"; echo x > "$T/nogit/a.plan.md"
 gf_run "$T/nogit" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_outside_repo: rc $rc ($(both))"
 grep -qF 'is not inside a git work tree' "$T/err" || fail "R8_exit2_outside_repo: wrong reason ($(both))"; pass R8_exit2_outside_repo
+
+# G11: the plan is authored at the tool's merge second: "strictly older" fails, so reject
+# (review round 1, V19).
+G="$T/g11"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p tools; echo v1 > tools/readiness-check.py; gq add tools; gci 1500 1500 tool
+mkdir -p s; echo x > s/eq.plan.md; gq add s; gci 1500 1600 plan-same-second
+cd "$ROOT"
+gf_run "$G" s/eq.plan.md --base main; gf_expect R8_equal_time_is_not_before 1 '^readiness-check: grandfather reject: s/eq\.plan\.md authored 1500, not before tool merged into main at 1500$'
+# G12: added @1100 (before the merge @1500), deleted @1550, re-added @1600: the EARLIEST
+# add on HEAD is the plan's date (review round 1, V20).
+G="$T/g12"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p s; echo x > s/re.plan.md; gq add s; gci 1100 1100 plan-added
+mkdir -p tools; echo v1 > tools/readiness-check.py; gq add tools; gci 1500 1500 tool
+gq rm -q s/re.plan.md; gci 1550 1550 plan-deleted
+mkdir -p s; echo y > s/re.plan.md; gq add s; gci 1600 1600 plan-re-added
+cd "$ROOT"
+[ "$(git -C "$G" log --diff-filter=A --format=%at HEAD -- s/re.plan.md | wc -l | tr -d ' ')" -eq 2 ] \
+  || fail "R8_earliest_add_counts: precondition: the plan does not have two add commits"
+gf_run "$G" s/re.plan.md --base main; gf_expect R8_earliest_add_counts 0 '^readiness-check: grandfather flag: s/re\.plan\.md authored 1100, before tool merged into main at 1500$'
 
 # ── R9: the Architect's step, Reviewer check 9 (reject), the doc-critic's advisory section ─
 [ -n "${I:-}" ] || setup_target
