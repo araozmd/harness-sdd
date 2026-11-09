@@ -2265,7 +2265,7 @@
         {
           "id": "E37-F01",
           "title": "Implementation-readiness lint: every path and symbol a plan/tasks file names must resolve",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
