@@ -421,6 +421,16 @@ lint "$GD"; expect_fail R3_created_file_is_no_prefix
   || fail "R3_created_file_is_no_prefix: a path that starts with the created FILE tools/new.py resolved through it ($(both))"
 pass "R3_created_file_is_no_prefix"
 
+# The slash is part of a created DIRECTORY's prefix: a SIBLING whose name merely begins with
+# the directory's name does not resolve through it (review round 2, R2-1 / F07).
+fresh r3csib
+clean_tasks; add_item "$GT" '- [ ] **T9** — Keep `tests/fixtures/newer.md` beside it.'
+[ ! -e "$R/tests/fixtures/newer.md" ] || fail "R3_created_dir_sibling_is_no_prefix: precondition: the fixture has tests/fixtures/newer.md"
+lint "$GD"; expect_fail R3_created_dir_sibling_is_no_prefix
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:[0-9]+ tests/fixtures/newer\.md$')" -eq 1 ] \
+  || fail "R3_created_dir_sibling_is_no_prefix: tests/fixtures/newer.md resolved through the created DIRECTORY tests/fixtures/new/ ($(both))"
+pass "R3_created_dir_sibling_is_no_prefix"
+
 # The feature-directory fallback is for a bare basename only: a slash path that exists only
 # under the feature directory does not resolve (review round 1, V17).
 fresh r3fdir
