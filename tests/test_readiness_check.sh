@@ -400,6 +400,27 @@ lint "$GD"; expect_fail "R3_blockquote_and_prose_unscanned control"
 [ "$(count ' tools/nope\.py$')" -eq 1 ] || fail "R3_blockquote_and_prose_unscanned control: the list item was not scanned ($(both))"
 pass "R3_blockquote_and_prose_unscanned"
 
+# The created set resolves a created path exactly and a path UNDER a created DIRECTORY —
+# never a path that merely begins with a created FILE's name (review round 1, V02).
+fresh r3cfile
+clean_tasks; add_item "$GT" '- [ ] **T9** — Keep `tools/new.py.bak` beside it.'
+[ ! -e "$R/tools/new.py.bak" ] || fail "R3_created_file_is_no_prefix: precondition: the fixture has tools/new.py.bak"
+lint "$GD"; expect_fail R3_created_file_is_no_prefix
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:[0-9]+ tools/new\.py\.bak$')" -eq 1 ] \
+  || fail "R3_created_file_is_no_prefix: a path that starts with the created FILE tools/new.py resolved through it ($(both))"
+pass "R3_created_file_is_no_prefix"
+
+# The feature-directory fallback is for a bare basename only: a slash path that exists only
+# under the feature directory does not resolve (review round 1, V17).
+fresh r3fdir
+clean_tasks; mkdir -p "$GD/docs"; : > "$GD/docs/x.md"
+[ ! -e "$R/docs/x.md" ] || fail "R3_feature_dir_fallback_bare_only: precondition: the fixture has docs/x.md at the root"
+add_item "$GT" '- [ ] **T9** — Read `docs/x.md`.'
+lint "$GD"; expect_fail R3_feature_dir_fallback_bare_only
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:[0-9]+ docs/x\.md$')" -eq 1 ] \
+  || fail "R3_feature_dir_fallback_bare_only: a slash path resolved through the feature directory ($(both))"
+pass "R3_feature_dir_fallback_bare_only"
+
 # ── R4: ignore rules (each under a KNOWN root), trailing /, ./, the .harness/ remap ──────
 _n=0
 for _tok in 'tools/<x>.py' 'tools/<x.py' 'tools/x>.py' 'tools/a*.py' 'tools/a?.py' 'docs/a[1].md' \
@@ -474,6 +495,17 @@ lint "$GD"; expect_fail R4_created_root_is_known
 grep -v '^| `contract/api.yaml` |' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
 lint "$GD"; expect_ok "R4_created_root_is_known (no create row ⇒ unknown root, ignored)"
 pass "R4_created_root_is_known"
+
+# A `.harness/`-prefixed path's known root is the segment AFTER the prefix: in the source
+# layout (no .harness/ directory) `.harness/tools/nope.py` is a reference under the known
+# `tools/`, and it does not resolve (review round 1, V40).
+fresh r4hnope
+clean_tasks; add_item "$GT" '- [ ] **T9** — Run `.harness/tools/nope.py`.'
+[ ! -e "$R/.harness" ] && [ -d "$R/tools" ] || fail "R4_harness_prefix_known_root_after_prefix: precondition: the layout is not the source layout"
+lint "$GD"; expect_fail R4_harness_prefix_known_root_after_prefix
+[ "$(count '^readiness-check: unresolved-')" -eq 1 ] && [ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:[0-9]+ \.harness/tools/nope\.py$')" -eq 1 ] \
+  || fail "R4_harness_prefix_known_root_after_prefix: .harness/tools/nope.py was ignored as an unknown root ($(both))"
+pass "R4_harness_prefix_known_root_after_prefix"
 
 # ── R5: symbols — `name()` in a single-path modify row, `path:name` anywhere ─────────────
 fresh r5
@@ -607,6 +639,16 @@ run_tool "$GD" --bogus; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: unk
 run_tool "$R/docs" --root "$R"; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: a dir without a plan wrote to stdout ($(both))"
 [ -s "$T/err" ] || fail "R6_stdout_empty_on_error: a dir without a plan wrote nothing to stderr"
 pass "R6_stdout_empty_on_error"
+
+# A PRESENT sibling that is not a regular file — a directory, a dangling symlink — is exit 2,
+# never `absent` with exit 0 (review round 1, V23).
+fresh r6tdir; rm "$GT"; mkdir "$GT"
+lint "$GD"; chk_exit2 "R6_tasks_not_regular (directory)" "cannot read $GT: not a regular file"
+fresh r6tlink; rm "$GT"; ln -s "$GD/nowhere.tasks.md" "$GT"
+[ -L "$GT" ] && [ ! -e "$GT" ] || fail "R6_tasks_not_regular: precondition: the tasks file is not a dangling symlink"
+lint "$GD"; chk_exit2 "R6_tasks_not_regular (dangling symlink)" "cannot read $GT: "
+fresh r6xdir; rm "$GX"; mkdir "$GX"
+lint "$GD"; chk_exit2 "R6_tasks_not_regular (tests directory)" "cannot read $GX: not a regular file"
 
 rm -rf "$T/dir with space"; mkdir -p "$T/dir with space/it's"; cp -R "$FX/repo" "$T/dir with space/it's/repo"
 _q="$T/dir with space/it's/repo/specs/epics/E01-x/F01-good"
