@@ -391,24 +391,38 @@ def locate(positional):
     return plan, sibs[0], sibs[1]
 
 
-def check_feature(plan, tasks, tests, root):
-    """Return (findings, n_resolved, n_created); findings are (file_rank, line, text)."""
-    feature_dir = os.path.dirname(plan) or "."
-    plan_lines = _read(plan)
-    tasks_lines = _read(tasks) if tasks else None
-    tests_lines = _read(tests) if tests else None
-    rows = []
+def feature_units(plan, plan_lines, tasks, tasks_lines, tests, tests_lines):
+    """The scanned units, in report order: ("row", 0, plan, [(n, text)]) for each
+    `## Files to change` data row, then ("unit", 1, tasks, lines) for each tasks list item,
+    then ("unit", 2, tests, lines) for each tests list item and table data row."""
+    out = []
     for sec in parse_sections(plan_lines):
         for table in sec["tables"]:
-            rows.extend((n, t) for n, t, k in table if k == "data")
-    created = created_set(rows)
+            out.extend(("row", 0, plan, [(n, t)]) for n, t, k in table if k == "data")
+    for rank, fname, lines in ((1, tasks, tasks_lines), (2, tests, tests_lines)):
+        if lines is None:
+            continue
+        numbered = list(iter_unfenced(lines, numbered=True))
+        out.extend(("unit", rank, fname, ln) for _f, ln in list_items(numbered))
+        if rank == 2:
+            out.extend(("unit", rank, fname, [r]) for r in table_rows(numbered))
+    return out
+
+
+def check_feature(plan, tasks, tests, root):
+    """Return (findings, n_resolved, n_created); findings are (file_rank, line, text) in
+    report order — plan, then tasks, then tests, by line, discovery order within a line.
+    Pure but for os.path lookups and file reads."""
+    feature_dir = os.path.dirname(plan) or "."
+    units = feature_units(plan, _read(plan), tasks, _read(tasks) if tasks else None,
+                          tests, _read(tests) if tests else None)
+    created = created_set([u[3][0] for u in units if u[0] == "row"])
     findings = []
     resolved = [0]
 
-    def emit(rank, fname, n, text):
-        key = (rank, n, text)
-        if key not in findings:
-            findings.append(key)
+    def emit(rank, n, text):
+        if (rank, n, text) not in findings:  # one line per (line, finding)
+            findings.append((rank, n, text))
 
     def ref(path):
         if resolve(path, root, feature_dir, created) is not None:
@@ -425,53 +439,56 @@ def check_feature(plan, tasks, tests, root):
     def symbol_form(rank, fname, n, display, p, name):
         t = target(p)
         if t is not None and not symbol_present(t, name):
-            emit(rank, fname, n, "unresolved-symbol %s:%d %s" % (fname, n, display))
+            emit(rank, n, "unresolved-symbol %s:%d %s" % (fname, n, display))
 
-    for n, text in rows:
+    def check_row(n, text):
+        """A `## Files to change` data row: first-cell paths unless the row creates; symbols
+        unless it creates or adds."""
         cs = cells(text)
         verb = plan_verb(cs[1] if len(cs) > 1 else "")
         if verb == "create":
-            continue
+            return  # the row IS the declaration
         firsts = []
         for sp in spans(cs[0]):
             display, p, _name = classify(sp)
             if p is not None and not ignored(p, root, created):
                 firsts.append(p)
                 if not ref(p):
-                    emit(0, plan, n, "unresolved-path %s:%d %s" % (plan, n, display))
+                    emit(0, n, "unresolved-path %s:%d %s" % (plan, n, display))
         if verb == "add":
-            continue  # you add TO a file that exists: path checked, symbols not
+            return  # you add TO a file that exists: path checked, symbols not
         t = target(firsts[0]) if len(firsts) == 1 else None
         for cell in cs:
             for sp in spans(cell):
                 m = CALL_RE.match(sp)
                 if m and t is not None and not symbol_present(t, m.group(1)):
-                    emit(0, plan, n, "unresolved-symbol %s:%d %s:%s" % (plan, n, firsts[0], m.group(1)))
+                    emit(0, n, "unresolved-symbol %s:%d %s:%s" % (plan, n, firsts[0], m.group(1)))
                 display, p, name = classify(sp)
                 if name is not None and p is not None and not ignored(p, root, created):
                     symbol_form(0, plan, n, display, p, name)
-    for rank, fname, lines in ((1, tasks, tasks_lines), (2, tests, tests_lines)):
-        if lines is None:
-            continue
-        numbered = list(iter_unfenced(lines, numbered=True))
-        units = [ln for _f, ln in list_items(numbered)]
-        if rank == 2:
-            units += [[r] for r in table_rows(numbered)]
-        for unit in units:
-            if CREATE_RE.search(" ".join(t for _n, t in unit)):
-                continue  # the Builder is told to make it: the whole unit is exempt
-            for n, text in unit:
-                for sp in spans(text):
-                    display, p, name = classify(sp)
-                    if p is None or ignored(p, root, created):
-                        continue
-                    if "/" not in p:
-                        ref(p)  # a bare basename found nowhere is prose, never a finding
-                    elif not ref(p):
-                        emit(rank, fname, n, "unresolved-path %s:%d %s" % (fname, n, display))
-                    if name is not None:
-                        symbol_form(rank, fname, n, display, p, name)
-    findings.sort(key=lambda f: (f[0], f[1]))  # stable: order of discovery within a line
+
+    def check_unit(rank, fname, lines):
+        """A tasks/tests unit: every line's references, unless the unit says create."""
+        if CREATE_RE.search(" ".join(t for _n, t in lines)):
+            return  # the Builder is told to make it: the whole unit is exempt
+        for n, text in lines:
+            for sp in spans(text):
+                display, p, name = classify(sp)
+                if p is None or ignored(p, root, created):
+                    continue
+                if "/" not in p:
+                    ref(p)  # a bare basename found nowhere is prose, never a finding
+                elif not ref(p):
+                    emit(rank, n, "unresolved-path %s:%d %s" % (fname, n, display))
+                if name is not None:
+                    symbol_form(rank, fname, n, display, p, name)
+
+    for kind, rank, fname, lines in units:
+        if kind == "row":
+            check_row(*lines[0])
+        else:
+            check_unit(rank, fname, lines)
+    findings.sort(key=lambda f: (f[0], f[1]))  # stable: discovery order within a line
     return findings, resolved[0], len(created)
 
 

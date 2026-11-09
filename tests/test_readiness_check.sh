@@ -117,8 +117,8 @@ pass "R1_ok_fenced_decoys"
 fresh r1abs
 rm "$GT" "$GX"
 lint "$GD"; expect_ok R1_ok_siblings_absent
-grep -qE '^readiness-check: ok .*tasks: absent, tests: absent$' "$T/out" \
-  || fail "R1_ok_siblings_absent: the ok line does not say 'tasks: absent, tests: absent' ($(both))"
+grep -qE '^readiness-check: ok .*: 5 reference\(s\) resolved, 3 created, tasks: absent, tests: absent$' "$T/out" \
+  || fail "R1_ok_siblings_absent: the ok line does not say '5 reference(s) resolved, 3 created, tasks: absent, tests: absent' (the plan's five non-creating first-cell paths) ($(both))"
 pass "R1_ok_siblings_absent"
 
 # Root discovery: no --root; the copy's .git (a directory, then a FILE as in a linked worktree)
@@ -295,6 +295,13 @@ lint "$GD"; expect_fail R3_bare_basename_rule
 [ "$(count '^readiness-check: unresolved-path .*E01-F01\.plan\.md:[0-9]+ fence\.awk$')" -eq 1 ] \
   || fail "R3_bare_basename_rule: a bare first-cell basename found nowhere is not a finding ($(both))"
 pass "R3_bare_basename_rule"
+
+fresh r3dup
+add_item "$GT" '- [ ] **T9** — Call `tools/nope.py`, then `tools/nope.py` again.'
+lint "$GD"; expect_fail R3_duplicate_on_one_line_collapsed
+[ "$(count '^readiness-check: unresolved-path ')" -eq 1 ] && tail -n 1 "$T/out" | grep -qxF 'readiness-check: FAIL 1 finding(s)' \
+  || fail "R3_duplicate_on_one_line_collapsed: one missing path named twice on a line is not one finding ($(both))"
+pass "R3_duplicate_on_one_line_collapsed"
 
 fresh r3prose
 printf '%s\n' '' '> A blockquote naming `tools/nope.py`.' '' 'A paragraph naming `tools/nope.py`.' >> "$GT"
