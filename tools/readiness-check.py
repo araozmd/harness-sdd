@@ -75,6 +75,13 @@ EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,5}$")
 ITEM_RE = re.compile(r"^[ \t]*- ")
 CONT_RE = re.compile(r"^[ \t]{2,}\S")
 VERB_RE = re.compile(r"[A-Za-z]+")
+IGNORE_CHARS = "<>*?[]{}$~|"
+BARE_EXT_RE = re.compile(r"^\.[A-Za-z0-9.]+$")
+RUNTIME_ROOTS = ("scratchpad/", "progress/")
+HARNESS = ".harness/"
+# A tasks/tests unit that says `create` in any inflection is exempt as a whole (the Builder is
+# being told to make the thing); `recreate` and `created_x` are not the word.
+CREATE_RE = re.compile(r"(?i)(?<![A-Za-z0-9_])creat(e|es|ed|ing)(?![A-Za-z0-9_])")
 
 
 class InputError(Exception):
@@ -250,10 +257,38 @@ def classify(span):
     if m:
         name = m.group(1)
         p = p[:m.start()]
+    if p.startswith("./"):
+        p = p[2:]
     last = p.rstrip("/").rsplit("/", 1)[-1]
     if "/" not in p and not EXT_RE.search(last):
         return display, None, name
     return display, p, name
+
+
+def shape_ignored(path):
+    """The ignore rules that need no tree: placeholders, globs, variables, URLs, absolute
+    paths, flags, bare extensions and the run-time roots roles write under."""
+    return any(ch in path for ch in IGNORE_CHARS) or "…" in path or "://" in path \
+        or path.startswith(("/", "-")) or BARE_EXT_RE.match(path) is not None \
+        or path.startswith(RUNTIME_ROOTS)
+
+
+def ignored(path, root, created):
+    """True when a candidate is not a reference: shape_ignored(), or a `/` path whose first
+    segment is not a known root — an existing directory at the root or under `.harness/`, or
+    the first segment of a created path (computed after the created set)."""
+    if shape_ignored(path):
+        return True
+    if "/" not in path:
+        return False
+    rest = path[len(HARNESS):] if path.startswith(HARNESS) else path
+    first = rest.split("/", 1)[0]
+    if not first:
+        return True
+    known = os.path.isdir(os.path.join(root, first)) \
+        or os.path.isdir(os.path.join(root, HARNESS, first)) \
+        or any(c.startswith(first + "/") for c in created)
+    return not known
 
 
 def plan_verb(change_cell):
@@ -270,7 +305,7 @@ def created_set(rows):
             continue
         for sp in spans(cs[0]):
             _d, p, _name = classify(sp)
-            if p is not None and p not in created:
+            if p is not None and not shape_ignored(p) and p not in created:
                 created.append(p)
     return created
 
@@ -288,6 +323,11 @@ def resolve(path, root, feature_dir, created):
         return isinstance(p, str) and (os.path.isdir(p) if is_dir else os.path.exists(p))
 
     cand = os.path.join(root, q)
+    if hit(cand):
+        return cand
+    # the two layouts: source (`tools/x`) and installed target (`.harness/tools/x`)
+    cand = os.path.join(root, q[len(HARNESS):]) if q.startswith(HARNESS) \
+        else os.path.join(root, HARNESS, q)
     if hit(cand):
         return cand
     if "/" not in q:
@@ -361,21 +401,27 @@ def check_feature(plan, tasks, tests, root):
             continue
         for sp in spans(cs[0]):
             display, p, _name = classify(sp)
-            if p is not None and not ref(p):
+            if p is not None and not ignored(p, root, created) and not ref(p):
                 emit(0, plan, n, "unresolved-path %s:%d %s" % (plan, n, display))
-    for lines in (tasks_lines, tests_lines):
+    for rank, fname, lines in ((1, tasks, tasks_lines), (2, tests, tests_lines)):
         if lines is None:
             continue
         numbered = list(iter_unfenced(lines, numbered=True))
         units = [ln for _f, ln in list_items(numbered)]
-        if lines is tests_lines:
+        if rank == 2:
             units += [[r] for r in table_rows(numbered)]
         for unit in units:
-            for _n, text in unit:
+            if CREATE_RE.search(" ".join(t for _n, t in unit)):
+                continue  # the Builder is told to make it: the whole unit is exempt
+            for n, text in unit:
                 for sp in spans(text):
-                    _d, p, _name = classify(sp)
-                    if p is not None:
-                        ref(p)
+                    display, p, _name = classify(sp)
+                    if p is None or ignored(p, root, created):
+                        continue
+                    if "/" not in p:
+                        ref(p)  # a bare basename found nowhere is prose, never a finding
+                    elif not ref(p):
+                        emit(rank, fname, n, "unresolved-path %s:%d %s" % (fname, n, display))
     findings.sort(key=lambda f: (f[0], f[1]))  # stable: order of discovery within a line
     return findings, resolved[0], len(created)
 

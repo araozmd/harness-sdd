@@ -221,4 +221,87 @@ lint "$GD"; expect_fail R2_multi_span_first_cell
   || fail "R2_multi_span_first_cell: expected exactly one finding, naming tools/nope.py ($(both))"
 pass "R2_multi_span_first_cell"
 
+# ── R3: tasks list items, tests rows and items ⇒ unresolved-path at the physical line ───
+fresh r3
+lint "$BD"; expect_fail R3_tasks_item_unresolved
+_l="$(lno "$BT" '`tests/test_missing.sh`')"; readme_says "E01-F02.tasks.md:$_l"
+[ "$(count "^readiness-check: unresolved-path .*E01-F02\\.tasks\\.md:$_l tests/test_missing\\.sh\$")" -eq 1 ] \
+  || fail "R3_tasks_item_unresolved: no finding for the tasks item's missing suite ($(both))"
+pass "R3_tasks_item_unresolved"
+# The continuation line is reported at ITS number, not the bullet's.
+_b="$(lno "$BT" '**T1**')"
+[ "$_l" -eq $((_b + 1)) ] || fail "R3_continuation_line_physical_number: precondition: the reference is not on the item's second line"
+grep -qF "E01-F02.tasks.md:$_b " "$T/out" && fail "R3_continuation_line_physical_number: a finding names the bullet's line $_b ($(both))"
+pass "R3_continuation_line_physical_number"
+
+_l="$(lno "$BX" '`tests/test_missing2.sh::R1`')"; readme_says "E01-F02.tests.md:$_l"
+[ "$(count "^readiness-check: unresolved-path .*E01-F02\\.tests\\.md:$_l tests/test_missing2\\.sh\$")" -eq 1 ] \
+  || fail "R3_tests_row_unresolved: no finding (printed without its ::R1 tail) for the tests row ($(both))"
+pass "R3_tests_row_unresolved"
+_l="$(lno "$BX" '`docs/gone.md`')"; readme_says "E01-F02.tests.md:$_l"
+[ "$(count "^readiness-check: unresolved-path .*E01-F02\\.tests\\.md:$_l docs/gone\\.md\$")" -eq 1 ] \
+  || fail "R3_tests_list_item_unresolved: no finding for the tests bullet ($(both))"
+pass "R3_tests_list_item_unresolved"
+
+# Order: plan findings, then tasks, then tests; ascending line within each.
+awk -v bd="$BD/" '
+  /^readiness-check: unresolved-/ {
+    loc = $3; sub(/^.*\//, "", loc); split(loc, a, ":"); f = a[1]; n = a[2] + 0
+    r = (f ~ /\.plan\.md$/) ? 0 : (f ~ /\.tasks\.md$/) ? 1 : 2
+    seen[r] = 1
+    if (r < pr || (r == pr && n < pn)) bad = 1
+    pr = r; pn = n
+  }
+  END { exit (bad || !seen[0] || !seen[1] || !seen[2]) ? 1 : 0 }' "$T/out" \
+  || fail "R3_finding_order_plan_tasks_tests: findings are not plan → tasks → tests by line ($(both))"
+pass "R3_finding_order_plan_tasks_tests"
+
+fresh r3created
+lint "$GD"; expect_ok R3_created_set_resolves_tasks
+grep -vE '^\| `(tools/new\.py|tests/fixtures/new/)` \|' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+lint "$GD"; expect_fail R3_created_set_resolves_tasks
+[ "$(count '^readiness-check: unresolved-path .*E01-F01\.tasks\.md:')" -eq 2 ] \
+  && [ "$(count 'E01-F01\.tasks\.md:[0-9]+ tools/new\.py$')" -eq 1 ] \
+  && [ "$(count 'E01-F01\.tasks\.md:[0-9]+ tests/fixtures/new/a\.md$')" -eq 1 ] \
+  || fail "R3_created_set_resolves_tasks: without the create rows the two tasks references are not exactly the findings ($(both))"
+pass "R3_created_set_resolves_tasks"
+
+fresh r3dc
+add_item "$GT" '- [ ] **T9** — Extend `tests/test_real.sh::does_not_exist_yet`.'
+lint "$GD"; expect_ok R3_test_ref_double_colon_file_only
+pass "R3_test_ref_double_colon_file_only"
+
+# The create exemption: every inflection exempts the unit; Recreate / created_x do not.
+for _w in Create creates created creating; do
+  fresh r3cr
+  add_item "$GT" "- [ ] **T9** — $_w \`docs/fresh.md\` for the notes."
+  lint "$GD"; expect_ok "R3_create_item_exempt[$_w]"
+done
+for _w in Recreate created_x; do
+  fresh r3cr
+  add_item "$GT" "- [ ] **T9** — $_w \`docs/fresh.md\` for the notes."
+  lint "$GD"; expect_fail "R3_create_item_exempt[$_w]"
+  [ "$(count 'E01-F01\.tasks\.md:[0-9]+ docs/fresh\.md$')" -eq 1 ] \
+    || fail "R3_create_item_exempt[$_w]: '$_w' exempted the unit ($(both))"
+done
+pass "R3_create_item_exempt"
+
+fresh r3bare
+add_item "$GT" '- [ ] **T9** — Read `E01-F09.tests.md` and `fence.awk`.'
+lint "$GD"; expect_ok R3_bare_basename_rule
+printf '%s\n' '| `fence.awk` | modify the fence rule | R1 |' > "$T/row.md"
+insert_before "$GP" '| `README.md` |' "$T/row.md"
+lint "$GD"; expect_fail R3_bare_basename_rule
+[ "$(count '^readiness-check: unresolved-path .*E01-F01\.plan\.md:[0-9]+ fence\.awk$')" -eq 1 ] \
+  || fail "R3_bare_basename_rule: a bare first-cell basename found nowhere is not a finding ($(both))"
+pass "R3_bare_basename_rule"
+
+fresh r3prose
+printf '%s\n' '' '> A blockquote naming `tools/nope.py`.' '' 'A paragraph naming `tools/nope.py`.' >> "$GT"
+lint "$GD"; expect_ok R3_blockquote_and_prose_unscanned
+add_item "$GT" '- a list item naming `tools/nope.py`'
+lint "$GD"; expect_fail "R3_blockquote_and_prose_unscanned control"
+[ "$(count ' tools/nope\.py$')" -eq 1 ] || fail "R3_blockquote_and_prose_unscanned control: the list item was not scanned ($(both))"
+pass "R3_blockquote_and_prose_unscanned"
+
 echo "all readiness-check checks passed"
