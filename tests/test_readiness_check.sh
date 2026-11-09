@@ -672,4 +672,104 @@ grep -qxF "⚠️  readiness: E01-F01 unresolved-path specs/epics/E01-x/F01-good
   || fail "R7_init_large_output_never_fails: no whole warn line counting the other 1999 findings ($(both))"
 pass "R7_init_large_output_never_fails"
 
+# ── R8: --grandfathered — flag a plan written before THIS tool merged, else reject class ─
+# The tool's date is its MERGE: the committer time of the first first-parent commit on the
+# default branch touching tools/readiness-check.py or .harness/tools/readiness-check.py. The
+# plan's date is the AUTHOR time of the earliest commit on HEAD that added it. Hermetic git:
+# bounded discovery (GIT_CEILING_DIRECTORIES above), no host config, fixed dates.
+GIT_CONFIG_GLOBAL=/dev/null; GIT_CONFIG_NOSYSTEM=1; GIT_TEMPLATE_DIR=''
+export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM GIT_TEMPLATE_DIR
+gq() { git -c user.name=fx -c user.email=fx@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+gci() { # gci <author-epoch> <committer-epoch> <msg>  (stage first)
+  GIT_AUTHOR_DATE="@$1 +0000" GIT_COMMITTER_DATE="@$2 +0000" gq commit -q -m "$3" || fail "fixture commit '$3' failed"
+}
+gf_run() { # gf_run <cwd> <plan-path> [args...]
+  _r="$1"; _f="$2"; shift 2
+  set +e; (cd "$_r" && python3 "$TOOL" --grandfathered "$_f" "$@") >"$T/out" 2>"$T/err"; rc=$?; set -e
+}
+gf_expect() { # gf_expect <row> <rc> <stdout-regex>
+  [ "$rc" -eq "$2" ] || fail "$1: expected rc $2, got $rc ($(both))"
+  grep -qE "$3" "$T/out" || fail "$1: stdout does not match '$3' ($(both))"
+  pass "$1"
+}
+# G1: main: base @1000; old.plan.md @1100; the tool @1500; new.plan.md @1600; one uncommitted.
+G="$T/g1"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p s; echo x > s/old.plan.md; gq add s; gci 1100 1100 old
+gq tag pre-tool
+mkdir -p tools; echo v1 > tools/readiness-check.py; gq add tools; gci 1500 1500 tool
+echo x > s/new.plan.md; gq add s; gci 1600 1600 new
+echo v2 > tools/readiness-check.py; gq add tools; gci 1800 1800 tool-v2
+echo x > s/dirty.plan.md
+cd "$ROOT"
+gf_run "$G" s/old.plan.md; gf_expect R8_flag_plan_older_than_merge 0 '^readiness-check: grandfather flag: s/old\.plan\.md authored 1100, before tool merged into main at 1500$'
+gf_run "$G" s/new.plan.md; gf_expect R8_reject_plan_after_merge 1 '^readiness-check: grandfather reject: s/new\.plan\.md authored 1600, not before tool merged into main at 1500$'
+gf_run "$G" s/dirty.plan.md; gf_expect R8_reject_uncommitted_plan 1 '^readiness-check: grandfather reject: s/dirty\.plan\.md has no commit on HEAD'
+gf_run "$G" s/new.plan.md --base main; gf_expect R8_base_flag_equals_form 1 '^readiness-check: grandfather reject: .* main at 1500$'
+gf_run "$G" s/new.plan.md --base=main; gf_expect R8_base_flag_equals_form 1 '^readiness-check: grandfather reject: .* main at 1500$'
+gf_run "$G" s/new.plan.md --base nope; [ "$rc" -eq 2 ] || fail "R8_exit2_bad_base: rc $rc ($(both))"
+grep -qF 'readiness-check: error: --base does not resolve: nope' "$T/err" || fail "R8_exit2_bad_base: wrong error ($(both))"
+[ ! -s "$T/out" ] || fail "R8_exit2_bad_base: stdout not empty"; pass R8_exit2_bad_base
+# origin/HEAD is asked first: point it at a remote-tracking ref that never saw the tool.
+gq -C "$G" update-ref refs/remotes/origin/trunk "$(git -C "$G" rev-parse pre-tool)"
+gq -C "$G" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+gf_run "$G" s/new.plan.md; gf_expect R8_flag_tool_not_on_base 0 '^readiness-check: grandfather flag: tool not on default branch origin/trunk yet$'
+# G2: the tool reaches main only through a --no-ff merge. Its branch commit (@1100) is OLDER
+# than the plan (@1200); the merge (@1300) is newer: the first-parent merge is the tool's date.
+G="$T/g2"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+gq checkout -q -b tool; mkdir -p tools; echo v1 > tools/readiness-check.py; gq add tools; gci 1100 1100 tool
+gq checkout -q main; mkdir -p s; echo x > s/p.plan.md; gq add s; gci 1200 1200 plan
+GIT_AUTHOR_DATE="@1150 +0000" GIT_COMMITTER_DATE="@1300 +0000" gq merge -q --no-ff -m merge-tool tool || fail "fixture merge failed"
+cd "$ROOT"
+gf_run "$G" s/p.plan.md; gf_expect R8_merge_time_not_branch_time 0 '^readiness-check: grandfather flag: s/p\.plan\.md authored 1200, before tool merged into main at 1300$'
+# G7: the plan exists ONLY on a rebased feature branch, authored @1100 before the tool merged
+# @1500, committed @1600: the plan's date is read on HEAD, never on the base branch.
+G="$T/g7"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p tools; echo v1 > tools/readiness-check.py; gq add tools; gci 1500 1500 tool
+gq checkout -q -b feat; mkdir -p s; echo x > s/sib.plan.md; gq add s; gci 1100 1600 sibling-rebased
+cd "$ROOT"
+git -C "$G" log --format=%H main -- s/sib.plan.md | grep -q . && fail "R8_flag_sibling_plan_only_on_head: precondition: the plan reached main"
+gf_run "$G" s/sib.plan.md --base main; gf_expect R8_flag_sibling_plan_only_on_head 0 '^readiness-check: grandfather flag: s/sib\.plan\.md authored 1100, before tool merged into main at 1500$'
+# G8: the tool merges @1500, the plan is ADDED @1600, a later edit carries an older author
+# date @900: only the ADD commit's author time counts.
+G="$T/g8"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p tools; echo v1 > tools/readiness-check.py; gq add tools; gci 1500 1500 tool
+mkdir -p s; echo x > s/late.plan.md; gq add s; gci 1600 1600 plan-added
+echo y >> s/late.plan.md; gq add s; gci 900 1700 edit-with-older-author-date
+cd "$ROOT"
+gf_run "$G" s/late.plan.md --base main; gf_expect R8_reject_edit_with_older_author_date 1 '^readiness-check: grandfather reject: s/late\.plan\.md authored 1600, not before tool merged into main at 1500$'
+# G9: author time, not commit time — the plan's add commit is AUTHORED a day before the
+# tool's merge and COMMITTED an hour after it (a rebase moves only the committer date).
+G="$T/g9"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p tools; echo v1 > tools/readiness-check.py; gq add tools; gci 100000 100000 tool
+mkdir -p s; echo x > s/r.plan.md; gq add s; gci 13600 103600 rebased-plan
+cd "$ROOT"
+gf_run "$G" s/r.plan.md --base main; gf_expect R8_author_time_not_commit_time 0 '^readiness-check: grandfather flag: s/r\.plan\.md authored 13600, before tool merged into main at 100000$'
+# G10: only the SIBLING lint (plan-cite-check) is on main, merged before the plan: this tool
+# is not on the default branch, so the plan is flagged — keying on the sibling would reject.
+G="$T/g10"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p tools; echo v1 > tools/plan-cite-check.py; gq add tools; gci 1500 1500 sibling-tool
+mkdir -p s; echo x > s/n.plan.md; gq add s; gci 1600 1600 n
+cd "$ROOT"
+gf_run "$G" s/n.plan.md --base main; gf_expect R8_tool_paths_are_this_tools 0 '^readiness-check: grandfather flag: tool not on default branch main yet$'
+# G3: installed-target layout — the tool lives at .harness/tools/readiness-check.py.
+G="$T/g3"; mkdir -p "$G"; cd "$G"; gq init -q -b main .
+echo base > README; gq add README; gci 1000 1000 base
+mkdir -p .harness/tools s; echo v1 > .harness/tools/readiness-check.py; gq add .harness; gci 1100 1100 upgrade
+echo x > s/n.plan.md; gq add s; gci 1200 1200 new
+cd "$ROOT"
+gf_run "$G" s/n.plan.md; gf_expect R8_consumer_layout_rejects 1 '^readiness-check: grandfather reject: s/n\.plan\.md authored 1200, not before tool merged into main at 1100$'
+# G4: the only branch is `trunkless`, no origin: no default branch resolves.
+G="$T/g4"; mkdir -p "$G"; cd "$G"; gq init -q -b trunkless .; echo x > a.plan.md; gq add a.plan.md; gci 1000 1000 a; cd "$ROOT"
+gf_run "$G" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_no_default_branch: rc $rc ($(both))"
+grep -qF -- '--base' "$T/err" || fail "R8_exit2_no_default_branch: the error does not name --base ($(both))"; pass R8_exit2_no_default_branch
+mkdir -p "$T/nogit"; echo x > "$T/nogit/a.plan.md"
+gf_run "$T/nogit" a.plan.md; [ "$rc" -eq 2 ] || fail "R8_exit2_outside_repo: rc $rc ($(both))"
+grep -qF 'is not inside a git work tree' "$T/err" || fail "R8_exit2_outside_repo: wrong reason ($(both))"; pass R8_exit2_outside_repo
+
 echo "all readiness-check checks passed"
