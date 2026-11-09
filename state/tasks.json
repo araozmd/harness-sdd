@@ -2281,7 +2281,7 @@
         {
           "id": "E37-F02",
           "title": "Doc-critic paraphrase-back comprehension mode at the feature-spec checkpoint",
-          "status": "pending",
+          "status": "in-progress",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
