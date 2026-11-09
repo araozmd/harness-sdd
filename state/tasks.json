@@ -2269,7 +2269,13 @@
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E37-goldfish-spec-review/F01-readiness-lint/"
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F01-readiness-lint/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (319)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E37-F01 done --evidence <merge-ref>`",
+            "pr": "319"
+          }
         },
         {
           "id": "E37-F02",
