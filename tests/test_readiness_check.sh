@@ -910,4 +910,37 @@ if a != b:
 PY
 pass "R10_table_grammar_parity"
 
+# ── R11: SPEC-FORMAT's schema section, WORKFLOW's paragraph, README's sentence ─────────
+_sf="$I/docs/SPEC-FORMAT.md"
+_sh='## Implementation readiness — every named path resolves'
+grep -qxF "$_sh" "$_sf" || fail "R11_spec_format_section: no '$_sh' heading in the installed SPEC-FORMAT.md"
+_aa="$(lineno "$_sf" '## Architecture alignment')"; _ss="$(lineno "$_sf" "$_sh")"; _fm="$(lineno "$_sf" '## Frontmatter')"
+[ "$_aa" -gt 0 ] && [ "$_ss" -gt "$_aa" ] && [ "$_fm" -gt "$_ss" ] \
+  || fail "R11_spec_format_section: the section is not between '## Architecture alignment' and '## Frontmatter' (alignment=$_aa section=$_ss frontmatter=$_fm)"
+span "$_sf" "$_sh" '## Frontmatter' "$T/sf.sec"
+has R11_spec_format_section "$T/sf.sec" 'A reference is the text of a single-backtick span with no whitespace'
+has R11_spec_format_section "$T/sf.sec" 'A file the feature creates is declared with `create` as the first word of the row'"'"'s Change cell'
+has R11_spec_format_section "$T/sf.sec" 'An unrecognised token is ignored, never flagged'
+has R11_spec_format_section "$T/sf.sec" 'Write a path that is not in this repository (a fixture-internal path, a consumer'"'"'s file) with a placeholder prefix'
+has R11_spec_format_section "$T/sf.sec" '`tools/readiness-check.py <feature-dir>` (E37-F01) turns this into an exit code (0 ok, 1 finding, 2 usage/input error); the Reviewer'"'"'s check 9 rejects on exit 1. This section is the schema it lints.'
+# The plan-row grammar section above is untouched: the installed copy of the span from its
+# heading to `## Architecture alignment` equals the source's, and the new section is not in it.
+span "$ROOT/docs/SPEC-FORMAT.md" '## Plan rows cite an R-id or an ADR' '## Architecture alignment' "$T/pr-src.sec"
+span "$_sf" '## Plan rows cite an R-id or an ADR' '## Architecture alignment' "$T/pr-inst.sec"
+[ "$(wc -l < "$T/pr-src.sec" | tr -d ' ')" -ge 40 ] || fail "R11_spec_format_section: precondition: the plan-row grammar span is implausibly short"
+cmp -s "$T/pr-src.sec" "$T/pr-inst.sec" || fail "R11_spec_format_section: the installed plan-row grammar span differs from the source"
+grep -qF 'readiness-check' "$T/pr-inst.sec" && fail "R11_spec_format_section: the plan-row grammar section now names readiness-check"
+pass "R11_spec_format_section"
+
+span "$I/docs/WORKFLOW.md" '## Doc-critic checkpoints' '## Drift check on epic rollup' "$T/wf.sec"
+has R11_workflow_paragraph "$T/wf.sec" 'Beside the critic at the `feature-spec` checkpoint sits the implementation-readiness lint (E37-F01): the Architect runs `tools/readiness-check.py <feature-dir>` before hand-off and it must exit 0,'
+has R11_workflow_paragraph "$T/wf.sec" 'the doc-critic reports its lines as advisory findings,'
+has R11_workflow_paragraph "$T/wf.sec" 'the Reviewer rejects on exit 1 (check 9; a plan written before the tool merged is flagged, not rejected),'
+has R11_workflow_paragraph "$T/wf.sec" 'and `init.sh` sweeps every in-flight feature warn-only at session start (section 2e).'
+pass "R11_workflow_paragraph"
+
+span "$ROOT/README.md" '## How it works' '## Quick start' "$T/rm.sec"
+has R11_readme_sentence "$T/rm.sec" 'Three deterministic spec lints gate a feature before the Builder sees it — `tools/tasks-pair-check.py` (red/green pair shape, ADR-0008), `tools/plan-cite-check.py` (every plan row cites an R-id or an ADR, ADR-0009) and `tools/readiness-check.py` (every path and symbol the plan, tasks and tests name resolves or is declared created, E37-F01); each exits 0/1/2 and the Reviewer rejects on exit 1.'
+pass "R11_readme_sentence"
+
 echo "all readiness-check checks passed"

@@ -201,6 +201,32 @@ ids the inbox brief already records (the F03-D7 hook). The rule:
   the Architect records the absence and proceeds, writing no fabricated citation. Specs
   written before this contract (without the section) remain valid — no retro-fit.
 
+## Implementation readiness — every named path resolves
+
+A reference is the text of a single-backtick span with no whitespace that holds a `/` or
+ends in a dotted extension — a path a Builder in a clean context will look for. Three units
+are scanned: every data row of the `.plan.md`'s `## Files to change` table (paths from the
+first cell only, the template's `path/to/file`), every `.tasks.md` list item, and every
+`.tests.md` table row and list item; prose, blockquotes, headings, fenced code and the
+`.spec.md` are not. A file the feature creates is declared with `create` as the first word
+of the row's Change cell; tasks and tests references to a created path, or to a path under
+a created directory, resolve through that declaration, and a tasks or tests unit that says
+`create` (in any inflection) is exempt. A reference resolves when it is declared created,
+exists at the repository root, exists through the `.harness/` remap (the source and the
+installed layout are both tried), or — a bare filename — exists in the feature directory.
+An unrecognised token is ignored, never flagged: placeholders and globs (any of `<` `>` `*`
+`?` `[` `]` `{` `}` `$` `~` `|`, an ellipsis or `://`), absolute paths and flags, bare
+extensions, `scratchpad/` and `progress/` (written at run time), a path whose first segment
+is not a known root (an existing top-level directory, or one a created path begins with),
+and — in a tasks or tests unit — a bare basename found nowhere. Write a path that is not in
+this repository (a fixture-internal path, a consumer's file) with a placeholder prefix —
+`<repo>/tools/x.py` — or inside fenced code: the lint cannot tell it from a typo. Two symbol
+forms are checked: `name()` in a `## Files to change` row whose first cell holds exactly one
+existing file and whose verb is neither `create` nor `add`, and `path:name` anywhere; the
+name must occur in that file as a whole word. `tools/readiness-check.py <feature-dir>`
+(E37-F01) turns this into an exit code (0 ok, 1 finding, 2 usage/input error); the
+Reviewer's check 9 rejects on exit 1. This section is the schema it lints.
+
 ## Frontmatter (machine-readable state)
 
 Every `.spec.md` starts with YAML frontmatter so the Orchestrator reads state

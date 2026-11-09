@@ -644,7 +644,7 @@ test_readiness_check_installed_contract() {
     fail "E37-F01: installed readiness-check.py differs from source"
   grep -qF 'chmod +x "$H/tools/readiness-check.py"' "$SRC/harness-install.sh" ||
     fail "E37-F01: installer lacks explicit readiness-check executable wiring"
-  for f in init.sh agents/architect.md agents/reviewer.md agents/doc-critic.md; do
+  for f in init.sh agents/architect.md agents/reviewer.md agents/doc-critic.md docs/SPEC-FORMAT.md; do
     grep -qF 'tools/readiness-check.py' "$T/.harness/$f" ||
       fail "E37-F01: installed $f does not name tools/readiness-check.py"
   done
