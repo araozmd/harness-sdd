@@ -1127,12 +1127,69 @@ has R11_spec_format_section "$T/sf.sec" 'A file the feature creates is declared 
 has R11_spec_format_section "$T/sf.sec" 'An unrecognised token is ignored, never flagged'
 has R11_spec_format_section "$T/sf.sec" 'Write a path that is not in this repository (a fixture-internal path, a consumer'"'"'s file) with a placeholder prefix'
 has R11_spec_format_section "$T/sf.sec" '`tools/readiness-check.py <feature-dir>` (E37-F01) turns this into an exit code (0 ok, 1 finding, 2 usage/input error); the Reviewer'"'"'s check 9 rejects on exit 1. This section is the schema it lints.'
-# The plan-row grammar section above is untouched: the installed copy of the span from its
-# heading to `## Architecture alignment` equals the source's, and the new section is not in it.
-span "$ROOT/docs/SPEC-FORMAT.md" '## Plan rows cite an R-id or an ADR' '## Architecture alignment' "$T/pr-src.sec"
-span "$_sf" '## Plan rows cite an R-id or an ADR' '## Architecture alignment' "$T/pr-inst.sec"
-[ "$(wc -l < "$T/pr-src.sec" | tr -d ' ')" -ge 40 ] || fail "R11_spec_format_section: precondition: the plan-row grammar span is implausibly short"
-cmp -s "$T/pr-src.sec" "$T/pr-inst.sec" || fail "R11_spec_format_section: the installed plan-row grammar span differs from the source"
+# The plan-row grammar section above (E36-F04's, DO NOT TOUCH here) is pinned byte for byte
+# against a COPY of its lines held in this suite — never a diff against main, never source
+# vs installed (the installer copies docs verbatim, so that comparison cannot fail). An edit
+# to the grammar section reds this row; a feature that changes the grammar on purpose
+# updates the copy below in the same change.
+cat > "$T/pr-want.sec" <<'GRAMMAR'
+## Plan rows cite an R-id or an ADR
+
+Stage-aware NFRs (ADR-0009) rest on one citation grammar, stated here once and copied exactly
+into the ADR and plan templates, `agents/architect.md` and `docs/WORKFLOW.md`. Four forms:
+
+1. **Stage line.** In `specs/product.md`'s frontmatter (the `---` block that starts on line 1
+   and runs to the next `---` line), a line matching `^stage: (discovery|pilot|production)$`.
+   A `---` block that starts on any later line is not frontmatter, so a `stage:` line inside
+   it is absent. The value is the whole rest of the line,
+   so no inline comment is allowed on it — an explanation goes on its own `#` line in the
+   block, as the installer's stub shows. Absent, or any other value, reads as `production`.
+   Read it with `sed -n '1{/^---$/!q;};1,/^---$/p' specs/product.md | grep '^stage:'`.
+2. **Deferred ADR header.** In `specs/adr/NNNN-*.md` (or a product space's `adr/`), the
+   header list under the `# ADR-NNNN —` title carries a line `- **Status:** deferred`
+   (regex `^- \*\*Status:\*\* deferred`) **and** a line `- **Trigger:**` followed by a
+   non-empty observable condition (regex `^- \*\*Trigger:\*\* \S`). A `deferred` ADR without a
+   `Trigger:` line is a defect. Filename and numbering follow the ordinary ADR rule (4-digit,
+   strictly above the maximum, no reuse).
+3. **Plan-row citation.** Every table row (`^|`) under a `.plan.md`'s `## Data model`,
+   `## API / interface`, `## Files to change` and `## Deferred` headings carries an
+   `R[0-9]+` token or an `ADR-[0-9]{4}` token. Header and separator rows are exempt; the
+   qualified `<ns>/ADR-NNNN` form counts, because `ADR-` is what is matched. An `R[0-9]+`
+   token immediately preceded by a feature id and a colon, `E[0-9]+-F[0-9]+:` (as in
+   `E36-F03:R5`), is a **cross-feature citation**: it cites the row, but it is never checked
+   against this feature's own spec R-ids. A bare `R[0-9]+` token is this feature's own R-id.
+   A `(serves: …)` suffix on a heading does not stand in for a row citation.
+4. **`## Deferred` subsection.** In `.plan.md`, **either** a table headed
+   `| Bolt-on | Deferred by | Trigger |` whose every row's *Deferred by* cell holds an
+   `ADR-[0-9]{4}` token (the *Trigger* cell copies the ADR's `Trigger:` text), **or** the
+   single line `Deferred: none — <why>`. Never both, never neither.
+
+```markdown
+## Deferred  (ADR-0009 — bolt-ons the stage excludes)
+
+| Bolt-on | Deferred by | Trigger |
+|---|---|---|
+| encryption at rest | ADR-0012 | first regulated customer signs |
+```
+
+or, when nothing is deferred:
+
+```markdown
+## Deferred  (ADR-0009 — bolt-ons the stage excludes)
+
+Deferred: none — stage is production
+```
+
+`tools/plan-cite-check.py <plan> --spec <spec>` (E36-F04) turns this grammar into an exit code
+(0 ok, 1 violation, 2 usage/input error); `--sweep <specs-dir>` is the trigger sweep `init.sh`
+runs warn-only, and the Reviewer's check 8 rejects on exit 1. This section is the schema it lints.
+
+GRAMMAR
+_pa="$(lineno "$_sf" '## Plan rows cite an R-id or an ADR')"
+[ "$_pa" -gt 0 ] && [ "$_aa" -gt "$_pa" ] || fail "R11_spec_format_section: '## Plan rows cite an R-id or an ADR' is not above '## Architecture alignment'"
+sed -n "${_pa},$((_aa - 1))p" "$_sf" > "$T/pr-inst.sec"
+cmp -s "$T/pr-want.sec" "$T/pr-inst.sec" \
+  || fail "R11_spec_format_section: the installed plan-row grammar section differs from the pinned copy: $(diff "$T/pr-want.sec" "$T/pr-inst.sec" | tr '\n' '|')"
 grep -qF 'readiness-check' "$T/pr-inst.sec" && fail "R11_spec_format_section: the plan-row grammar section now names readiness-check"
 pass "R11_spec_format_section"
 
