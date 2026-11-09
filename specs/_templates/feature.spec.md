@@ -54,5 +54,12 @@ owner: <handle>
 ## Out of scope
 - <explicitly not doing>
 
+## Accepted trade-offs
+> Optional (E37-F02). What the Doc-critic's cold reader could not restate from the four files
+> after the Architect's one re-audit, recorded here so the decision is durable and the Reviewer
+> treats it as a decision, not a defect. Omit the section when there is nothing to record.
+
+- <unit: R-id, plan row, T<n> or section> — <what the cold reader could not restate> — accepted because <why>
+
 ## Open questions
 - <anything the human should resolve before approval>

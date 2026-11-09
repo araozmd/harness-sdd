@@ -344,6 +344,32 @@ test_reviewer_reads_trade_offs() {
   pass "E37-F02:R4: reviewer section present, positioned, waives only the comprehension gap"
 }
 
+# ── E37-F02:R5 — feature spec template carries the optional ## Accepted trade-offs ─
+test_template_trade_offs_section() {
+  _h='## Accepted trade-offs'
+  [ "$(grep -cxF -- "$_h" "$TEMPLATE" || true)" -eq 1 ] \
+    || fail "E37-F02:R5: template must carry exactly one '$_h' heading"
+  _os="$(lineno "$TEMPLATE" '## Out of scope')"
+  _tt="$(lineno "$TEMPLATE" "$_h")"
+  _oq="$(lineno "$TEMPLATE" '## Open questions')"
+  [ -n "$_os" ] && [ -n "$_tt" ] && [ -n "$_oq" ] && [ "$_os" -lt "$_tt" ] && [ "$_tt" -lt "$_oq" ] \
+    || fail "E37-F02:R5: the section must sit between '## Out of scope' and '## Open questions'"
+  _sl="$(slice "$TEMPLATE" "$_h")"
+  _sec="$(printf '%s\n' "$_sl" | folded)"
+  case "$_sec" in *'Optional (E37-F02).'*) : ;; *) fail "E37-F02:R5: optional marker missing" ;; esac
+  case "$_sec" in *'Omit the section when there is nothing to record.'*) : ;; *) fail "E37-F02:R5: omit sentence missing" ;; esac
+  printf '%s\n' "$_sl" | grep -qxF -- '- <unit: R-id, plan row, T<n> or section> — <what the cold reader could not restate> — accepted because <why>' \
+    || fail "E37-F02:R5: placeholder entry missing"
+  _bm="$(lineno "$TEMPLATE" '## Business rules')"
+  _aa="$(lineno "$TEMPLATE" '## Architecture alignment')"
+  _ac="$(lineno "$TEMPLATE" '## Acceptance criteria (EARS)')"
+  [ -n "$_bm" ] && [ -n "$_aa" ] && [ -n "$_ac" ] && [ "$_bm" -lt "$_aa" ] && [ "$_aa" -lt "$_ac" ] \
+    || fail "E37-F02:R5: '## Architecture alignment' must stay between Business rules and Acceptance criteria"
+  python3 "$SRC/tools/tasks-pair-check.py" "$SRC/specs/_templates/feature.tasks.md" --spec "$TEMPLATE" >/dev/null \
+    || fail "E37-F02:R5: the templates no longer lint clean under tasks-pair-check"
+  pass "E37-F02:R5: template carries the optional Accepted trade-offs section"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -366,5 +392,6 @@ test_paraphrase_section
 test_could_not_restate_blocking
 test_architect_paraphrase_step
 test_reviewer_reads_trade_offs
+test_template_trade_offs_section
 
 echo "All doc-critic contract tests passed."
