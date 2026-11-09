@@ -44,6 +44,45 @@ five dimensions, and ignore stylistic preferences or minor wording:
 Do **not** flag spelling, grammar, formatting, or subjective phrasing unless it actively
 changes the meaning of a requirement.
 
+## Paraphrase-back comprehension (E37-F02)
+
+At `target-type=feature-spec`, before you evaluate the five dimensions, prove you understood
+the spec: your note opens with a `## Paraphrase` section written from the four spec files
+alone — `<feature>.spec.md`, `<feature>.plan.md`, `<feature>.tasks.md` and
+`<feature>.tests.md`. Do not open the inbox brief under `progress/inbox/`, the epic's
+`epic.md`, the architecture or any other file while you write it, and read no chat history:
+the Builder receives only these four files, in a clean context, and the paraphrase measures
+what they carry on their own. The section has three parts, in this order:
+
+- `### What this proposes` — in your own words, the change the feature makes and the behavior
+  it adds, as the four files state it. Quoting the spec's sentences back is not a paraphrase.
+- `### How the existing system works, per this document` — in your own words, what the four
+  files say about the system the feature changes: the components, contracts and tools they
+  name and what they say those do today. Restate only what the document states or implies;
+  what you know from elsewhere does not count, and a gap you can fill only from outside the
+  document is a gap in the document.
+- `### Could not restate` — one list per file (`.spec.md`, `.plan.md`, `.tasks.md`,
+  `.tests.md`); each item names the unit you could not restate — an `R-id`, a
+  `## Files to change` row by its first cell, a task by its `T<n>` id, a tests-table row by
+  its `R-id`, or a section heading — and one line on what is missing or contradictory. Write
+  `none` for a file whose every unit you could restate. A unit counts only when its own
+  meaning is missing from the four files, not when it cites a file, test, lesson or check you
+  cannot open: a cross-reference whose purpose the unit states is restated.
+
+The lints and every other check of this checkpoint run after the paraphrase is written.
+Each `### Could not restate` item is a **blocking finding** with the stable id
+`could-not-restate`, repeated in your findings as
+`could-not-restate <file> <unit> — <what is missing>`. Blocking means the Architect must fix
+the unit or record it under `## Accepted trade-offs` in the `.spec.md` before hand-off,
+bounded by one re-audit (`agents/architect.md`, *Doc-critic checkpoint*). It names the
+Architect's obligation, not a gate: you still never block the Architect, there is no new
+status and no new human gate, and every finding outside this list stays advisory as before.
+On a re-audit — the Architect's second spawn, with the revised files — write the paraphrase
+again from the revised files and list only what you still cannot restate. A unit you can
+restate but think wrong is an ordinary finding under the five dimensions, not a
+`could-not-restate`. This section applies at `target-type=feature-spec` only; the
+`plan-output` and `epic-decomposition` checkpoints are unchanged.
+
 ## Plan-row citations and stage-aware NFRs (E36-F04)
 
 At `target-type=feature-spec`, also run the plan-row citation lint on the feature's plan:

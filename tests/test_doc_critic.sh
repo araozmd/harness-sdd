@@ -13,6 +13,11 @@ ARCHITECT="$SRC/agents/architect.md"
 WORKFLOW="$SRC/docs/WORKFLOW.md"
 SCHEMA="$SRC/store/tasks.schema.json"
 STATE="$SRC/state/tasks.json"
+REVIEWER="$SRC/agents/reviewer.md"
+TEMPLATE="$SRC/specs/_templates/feature.spec.md"
+README="$SRC/README.md"
+RATIONALE="$SRC/docs/RATIONALE.md"
+FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -192,6 +197,59 @@ test_portability() {
   pass "portability: doc-critic role is CLI-agnostic"
 }
 
+# ── E37-F02 helpers ───────────────────────────────────────────────────────────
+# slice <file> <heading-prefix>: the fence-aware text of a "## " section, heading to the next
+# "## " heading (inclusive of the heading line). Fenced "## " lines never end or start a slice.
+slice() {
+  awk "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^## / { keep = (index($0, h) == 1); if (keep) print; next }
+    keep
+  ' h="$2" "$1"
+}
+# folded: newlines to spaces, runs of spaces squeezed — anchors span wrapped lines.
+folded() { tr '\n' ' ' | tr -s ' '; }
+# lineno <file> <exact heading line>: first line number of an exact line, empty when absent.
+lineno() { grep -nxF -- "$2" "$1" | head -n 1 | cut -d: -f1; }
+
+# ── E37-F02:R1 — paraphrase-back section exists, is positioned, four-files-only ─
+test_paraphrase_section() {
+  _h='## Paraphrase-back comprehension (E37-F02)'
+  [ "$(grep -cxF -- "$_h" "$ROLE" || true)" -eq 1 ] \
+    || fail "E37-F02:R1: doc-critic must carry exactly one '$_h' heading"
+  _rs="$(lineno "$ROLE" '## Review scope and calibration (what to flag)')"
+  _ps="$(lineno "$ROLE" "$_h")"
+  _pc="$(lineno "$ROLE" '## Plan-row citations and stage-aware NFRs (E36-F04)')"
+  [ -n "$_rs" ] && [ -n "$_ps" ] && [ -n "$_pc" ] && [ "$_rs" -lt "$_ps" ] && [ "$_ps" -lt "$_pc" ] \
+    || fail "E37-F02:R1: the section must sit after Review scope and before the E36-F04 section"
+  _sec="$(slice "$ROLE" "$_h" | folded)"
+  _need() {
+    case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R1: $2" ;; esac
+  }
+  _need 'At `target-type=feature-spec`, before you evaluate the five dimensions, prove you understood the spec: your note opens with a `## Paraphrase` section written from the four spec files alone' \
+    "opening sentence missing"
+  _need 'Do not open the inbox brief under `progress/inbox/`, the epic'"'"'s `epic.md`, the architecture or any other file while you write it, and read no chat history: the Builder receives only these four files, in a clean context, and the paraphrase measures what they carry on their own.' \
+    "four-files-only sentence missing"
+  _need 'Quoting the spec'"'"'s sentences back is not a paraphrase.' "quoting-is-not-paraphrase sentence missing"
+  _need 'what you know from elsewhere does not count, and a gap you can fill only from outside the document is a gap in the document' \
+    "outside-knowledge sentence missing"
+  _need 'Write `none` for a file whose every unit you could restate.' "none rule missing"
+  _need 'The lints and every other check of this checkpoint run after the paraphrase is written.' \
+    "paraphrase-before-lints sentence missing"
+  # three parts, in order (offsets in the folded slice)
+  _o1="$(printf '%s' "$_sec" | awk '{print index($0, "`### What this proposes`")}')"
+  _o2="$(printf '%s' "$_sec" | awk '{print index($0, "`### How the existing system works, per this document`")}')"
+  _o3="$(printf '%s' "$_sec" | awk '{print index($0, "`### Could not restate`")}')"
+  [ "$_o1" -gt 0 ] && [ "$_o1" -lt "$_o2" ] && [ "$_o2" -lt "$_o3" ] \
+    || fail "E37-F02:R1: the three parts must appear in order: proposes, existing system, could not restate"
+  # negative: nothing lets the critic read the brief or chat
+  if printf '%s' "$_sec" | grep -qiE '(may|can|should|free to)[^.]{0,60}(read|open|consult)[^.]{0,40}(inbox brief|progress/inbox|chat)'; then
+    fail "E37-F02:R1: a sentence lets the critic read the inbox brief or chat for the paraphrase"
+  fi
+  grep -qiF 'Claude Code' "$ROLE" && fail "E37-F02:R1: role contains CLI-specific wording"
+  pass "E37-F02:R1: paraphrase-back section present, positioned, four-files-only"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -210,5 +268,6 @@ test_workflow_docs
 test_no_schema_change
 test_no_new_gate
 test_portability
+test_paraphrase_section
 
 echo "All doc-critic contract tests passed."
