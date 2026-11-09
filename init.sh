@@ -524,8 +524,8 @@ fi
 
 # 2e. Implementation-readiness sweep (WARN-ONLY, E37-F01). tools/readiness-check.py lints
 #     every board feature in `spec-ready`, `in-progress` or `in-review` with `sdd: true` and
-#     a `spec_path`: every path and symbol its plan's `## Files to change`, tasks and tests
-#     name must resolve or be declared `create`. Every finding WARNS and NEVER fails the
+#     a `spec_path`: every path and symbol it recognises in the plan's `## Files to change`,
+#     tasks and tests must resolve or be declared `create`. Every finding WARNS and NEVER fails the
 #     gate — the Reviewer's check 9 owns the verdict. Exit 2 is "the check did not run"
 #     (a target that is no git work tree, a missing plan), reported as such, never as clean.
 #     NO `--root`: the cwd here is $HARNESS_DIR (`.harness/` in a target), so `--root .`

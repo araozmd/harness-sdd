@@ -213,12 +213,15 @@ production code — including in the child repos.
 ## Implementation readiness — every named path resolves (E37-F01)
 
 Run `python3 "$HARNESS_DIR/tools/readiness-check.py" <feature-dir>` before the doc-critic
-checkpoint; it must exit 0 — the Reviewer rejects on exit 1 (check 9). The tool checks that
-every path the plan's `## Files to change` first cells, the `.tasks.md` list items and the
-`.tests.md` rows and items name exists in the repository, and that every symbol they name
-(`name()` in a single-path modify row, `path:name` anywhere) occurs in its file — the
-Builder reads only these four files, in a clean context, and cannot tell a renamed tool
-from a typo. Declare every file the feature creates with `create` as the first word of its
+checkpoint; it must exit 0 — the Reviewer rejects on exit 1 (check 9). The tool checks
+the backticked repo-rooted paths it recognises in the plan's `## Files to change` first
+cells, the `.tasks.md` list items and the `.tests.md` rows and items: each must exist in the
+repository, and each symbol they name (`name()` in a single-path modify row, `path:name`
+anywhere) must occur in its file — the Builder reads only these four files, in a clean
+context, and cannot tell a renamed tool from a typo. An unrecognised token is ignored, never
+flagged (precision over recall — see `docs/SPEC-FORMAT.md`): a first-segment typo such as
+`tols/x.py` is ignored, not caught, so a clean exit is not proof that every path is right.
+Declare every file the feature creates with `create` as the first word of its
 `## Files to change` Change cell; tasks and tests references to a created path, or to a
 path under a created directory, resolve through that declaration. Write a path that is not
 in this repository (a fixture-internal path, a consumer's file) with a placeholder prefix

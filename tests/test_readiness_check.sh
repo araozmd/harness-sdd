@@ -995,6 +995,10 @@ slice "$_ar" "$_ah" > "$T/ar.txt"
 has R9_architect_section "$T/ar.txt" 'Run `python3 "$HARNESS_DIR/tools/readiness-check.py" <feature-dir>` before the doc-critic checkpoint; it must exit 0 — the Reviewer rejects on exit 1 (check 9).'
 has R9_architect_section "$T/ar.txt" 'Declare every file the feature creates with `create` as the first word of its `## Files to change` Change cell; tasks and tests references to a created path, or to a path under a created directory, resolve through that declaration.'
 has R9_architect_section "$T/ar.txt" 'Exit 2 means the check did not run: fix the invocation and run it again.'
+# The section states the tool's bound, never 'every path': the reader trusts the exit code.
+has R9_architect_section "$T/ar.txt" 'An unrecognised token is ignored, never flagged (precision over recall — see `docs/SPEC-FORMAT.md`): a first-segment typo such as `tols/x.py` is ignored, not caught, so a clean exit is not proof that every path is right.'
+folded "$T/ar.txt" | grep -qF 'checks that every path' \
+  && fail "R9_architect_section: the section claims the tool checks every path; it checks the ones it recognises"
 has R9_architect_section "$T/ar.txt" 'Write a path that is not in this repository (a fixture-internal path, a consumer'"'"'s file) with a placeholder prefix (`<repo>/tools/x.py`) or inside fenced code.'
 pass "R9_architect_section"
 
@@ -1201,7 +1205,9 @@ has R11_workflow_paragraph "$T/wf.sec" 'and `init.sh` sweeps every in-flight fea
 pass "R11_workflow_paragraph"
 
 span "$ROOT/README.md" '## How it works' '## Quick start' "$T/rm.sec"
-has R11_readme_sentence "$T/rm.sec" 'Three deterministic spec lints gate a feature before the Builder sees it — `tools/tasks-pair-check.py` (red/green pair shape, ADR-0008), `tools/plan-cite-check.py` (every plan row cites an R-id or an ADR, ADR-0009) and `tools/readiness-check.py` (every path and symbol the plan, tasks and tests name resolves or is declared created, E37-F01); each exits 0/1/2 and the Reviewer rejects on exit 1.'
+has R11_readme_sentence "$T/rm.sec" 'Three deterministic spec lints gate a feature before the Builder sees it — `tools/tasks-pair-check.py` (red/green pair shape, ADR-0008), `tools/plan-cite-check.py` (every plan row cites an R-id or an ADR, ADR-0009) and `tools/readiness-check.py` (every backticked repo-rooted path and symbol it recognises in the plan, tasks and tests resolves or is declared created — an unrecognised token is ignored, never flagged, E37-F01); each exits 0/1/2 and the Reviewer rejects on exit 1.'
+folded "$T/rm.sec" | grep -qF 'every path and symbol the plan, tasks and tests name' \
+  && fail "R11_readme_sentence: the README claims every path the files name is checked; the tool checks the ones it recognises"
 pass "R11_readme_sentence"
 
 # ── R12: VERSION ↔ newest CHANGELOG heading (read at runtime, no literal); ledger row C11 ─

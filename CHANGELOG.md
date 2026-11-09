@@ -8,7 +8,7 @@ All notable changes to the harness body are recorded here. Versions follow
 
 ### Added — implementation-readiness lint and Reviewer gate (E37-F01)
 - `tools/readiness-check.py <feature-dir | feature.plan.md> [--root <dir>]`: a stdlib-only
-  lint that every path and symbol a feature's spec files name resolves. It scans the plan's
+  lint that every path and symbol it recognises in a feature's spec files resolves. It scans the plan's
   `## Files to change` rows (paths from the first cell), every `.tasks.md` list item and every
   `.tests.md` table row and list item; a reference is a whitespace-free backtick span holding
   a `/` or a dotted extension. A file the feature creates is declared with `create` as the

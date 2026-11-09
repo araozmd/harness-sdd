@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""readiness-check — lint a feature's spec files: every path and symbol they name resolves.
+"""readiness-check — lint a feature's spec files: every path and symbol it recognises resolves.
 
 E37-F01.  Usage:
 
@@ -166,7 +166,8 @@ def is_separator(row):
 def parse_sections(lines):
     """Return [{name, line, body: [(n, text)], tables: [[(n, text, kind)]]}] in file order.
 
-    kind is 'header', 'separator' or 'data'.  Only the four checked headings open a section.
+    kind is 'header', 'separator' or 'data'.  Only the one checked heading (CHECKED_RE,
+    `## Files to change`) opens a section; every other `#`/`##` heading closes one.
     """
     sections = []
     cur = None
