@@ -399,6 +399,27 @@ test_readme_paraphrase_sentence() {
   pass "E37-F02:R6: README carries the paraphrase sentence"
 }
 
+# ── E37-F02:R8 — ledger row C12, VERSION/CHANGELOG pairing ─────────────────────
+test_ledger_row_c12() {
+  _row="$(grep -E '^\| C12 — Doc-critic paraphrase-back comprehension \| Capability compensation \|' "$RATIONALE" | head -n 1 || true)"
+  [ -n "$_row" ] || fail "E37-F02:R8: docs/RATIONALE.md lacks the C12 capability-compensation row"
+  printf '%s' "$_row" | grep -qE 'Ablation when a model generation ships[^|]*controlled runs[^|]*Keep only while its absence reproduces a spec defect reaching review' \
+    || fail "E37-F02:R8: the C12 evidence cell lacks the ablation threshold and retention rule"
+  _v="$(cat "$SRC/VERSION")"
+  _top="$(grep -m 1 '^## \[' "$SRC/CHANGELOG.md" || true)"
+  case "$_top" in
+    "## [$_v]"*) : ;;
+    *) fail "E37-F02:R8: newest CHANGELOG heading '$_top' does not match VERSION $_v" ;;
+  esac
+  awk '
+    /^## \[/ { if (hit_f && hit_p) found = 1; hit_f = 0; hit_p = 0; next }
+    /E37-F02/ { hit_f = 1 }
+    /Paraphrase/ { hit_p = 1 }
+    END { if (hit_f && hit_p) found = 1; exit(found ? 0 : 1) }
+  ' "$SRC/CHANGELOG.md" || fail "E37-F02:R8: no CHANGELOG section names both E37-F02 and Paraphrase"
+  pass "E37-F02:R8: C12 ledger row and CHANGELOG/VERSION pairing"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -424,5 +445,6 @@ test_reviewer_reads_trade_offs
 test_template_trade_offs_section
 test_workflow_paraphrase_paragraph
 test_readme_paraphrase_sentence
+test_ledger_row_c12
 
 echo "All doc-critic contract tests passed."
