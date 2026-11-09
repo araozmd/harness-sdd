@@ -239,6 +239,22 @@ findings inline, then proceed to the hand-off. If the critic invocation errors o
 out, proceed best-effort and append a note to `progress/<run>/` recording the skipped or
 failed review.
 
+**Paraphrase first, one re-audit, then record (E37-F02).** The critic's note opens with a
+`## Paraphrase` written from the four files alone — pass it nothing else: not the inbox brief,
+not this conversation. Read the paraphrase before the findings: where the cold reader restated
+something other than what you meant, the document, not the reader, is wrong. Each
+`could-not-restate` finding is blocking for your hand-off: fix the unit it names, then spawn
+the critic once more on the revised files — at most **one** re-audit per feature. Every
+`could-not-restate` still listed after the re-audit — including one your fixes introduced —
+or that you choose not to fix, is recorded in the `.spec.md` under `## Accepted trade-offs` as
+`- <unit> — <what the cold reader could not restate> — accepted because <why>` before you hand
+off; a leftover that is neither fixed nor recorded is not a finished checkpoint. The Reviewer
+reads that section and treats a recorded trade-off as a decision, not a defect
+(`agents/reviewer.md`); the human at the gate approves the spec with it visible. When the
+first pass lists no `could-not-restate`, there is no re-audit — apply the advisory findings
+inline as before. When the critic errors or times out there is no list to act on: proceed
+best-effort and record the skip as the paragraph above says.
+
 ## The `complexity` tag (E17-F03)
 
 Your `.spec.md` frontmatter carries `complexity: standard | complex`. It decides which

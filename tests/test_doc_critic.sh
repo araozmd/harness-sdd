@@ -283,6 +283,32 @@ test_could_not_restate_blocking() {
   pass "E37-F02:R2: could-not-restate is blocking-for-hand-off, advisory critic, one re-audit"
 }
 
+# ── E37-F02:R3 — Architect: paraphrase first, ONE re-audit, then record ───────
+test_architect_paraphrase_step() {
+  _sec="$(slice "$ARCHITECT" '## Doc-critic checkpoint before' | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R3: $2" ;; esac; }
+  _need 'spawn the **Doc-critic** (`agents/doc-critic.md`) as a sub-agent with `target-type=feature-spec`' \
+    "existing spawn sentence lost"
+  _need '**Paraphrase first, one re-audit, then record (E37-F02).**' "bold lead-in missing"
+  _need 'pass it nothing else: not the inbox brief, not this conversation' "nothing-else rule missing"
+  _need 'where the cold reader restated something other than what you meant, the document, not the reader, is wrong' \
+    "document-not-reader sentence missing"
+  _need 'Each `could-not-restate` finding is blocking for your hand-off: fix the unit it names, then spawn the critic once more on the revised files — at most **one** re-audit per feature.' \
+    "one-re-audit sentence missing"
+  _need 'Every `could-not-restate` still listed after the re-audit — including one your fixes introduced — or that you choose not to fix, is recorded in the `.spec.md` under `## Accepted trade-offs` as `- <unit> — <what the cold reader could not restate> — accepted because <why>` before you hand off' \
+    "record-leftovers sentence missing"
+  _need 'a leftover that is neither fixed nor recorded is not a finished checkpoint' "unfinished-checkpoint rule missing"
+  _need 'The Reviewer reads that section and treats a recorded trade-off as a decision, not a defect' \
+    "Reviewer sentence missing"
+  _need 'When the first pass lists no `could-not-restate`, there is no re-audit' "no-re-audit-when-none sentence missing"
+  _need 'When the critic errors or times out there is no list to act on: proceed best-effort and record the skip as the paragraph above says.' \
+    "best-effort sentence missing"
+  if printf '%s' "$_sec" | grep -qiE '(two|three|several|further|unlimited|as many)[^.]{0,12}re-audit'; then
+    fail "E37-F02:R3: the checkpoint permits more than one re-audit"
+  fi
+  pass "E37-F02:R3: architect checkpoint is paraphrase first, one re-audit, then record"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -303,5 +329,6 @@ test_no_new_gate
 test_portability
 test_paraphrase_section
 test_could_not_restate_blocking
+test_architect_paraphrase_step
 
 echo "All doc-critic contract tests passed."
