@@ -65,6 +65,19 @@ These findings are advisory like every other finding: you never block the Archit
 Reviewer's check 8 rejects on the lint's exit 1; whether a cited row is justified stays your
 YAGNI finding.
 
+## Implementation readiness (E37-F01)
+
+At `target-type=feature-spec`, also run the implementation-readiness lint on the feature
+directory: `python3 "$HARNESS_DIR/tools/readiness-check.py" <feature-dir>`
+(`tools/readiness-check.py` in the harness source repo, `.harness/tools/readiness-check.py`
+in an installed target) and report each line it prints as an advisory finding; an exit 2 is
+recorded as the finding "readiness lint did not run: <stderr>". If your host gives you no
+shell tool, the lint does not run: record the finding "implementation-readiness lint did not
+run: no shell tool" in your note, and never judge the plan's references resolved by reading
+them — the Reviewer's check 9 stays the gate. These findings are advisory like every other
+finding: you never block the Architect; whether a resolving path is the right one stays your
+judgment.
+
 ## Epic-decomposition checks — observable slices (ADR-0008)
 
 At `target-type=epic-decomposition`, beyond the five dimensions above, check the *shape* of

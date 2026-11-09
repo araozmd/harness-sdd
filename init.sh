@@ -522,6 +522,64 @@ PCEOF
   fi
 fi
 
+# 2e. Implementation-readiness sweep (WARN-ONLY, E37-F01). tools/readiness-check.py lints
+#     every board feature in `spec-ready`, `in-progress` or `in-review` with `sdd: true` and
+#     a `spec_path`: every path and symbol it recognises in the plan's `## Files to change`,
+#     tasks and tests must resolve or be declared `create`. Every finding WARNS and NEVER fails the
+#     gate — the Reviewer's check 9 owns the verdict. Exit 2 is "the check did not run"
+#     (a target that is no git work tree, a missing plan), reported as such, never as clean.
+#     NO `--root`: the cwd here is $HARNESS_DIR (`.harness/` in a target), so `--root .`
+#     would resolve against the harness body while the Architect and the Reviewer resolve
+#     against the project; the tool discovers the root from the plan's `.git` ancestor, the
+#     same root every surface gets. The board is read, never written. Every call that may
+#     exit non-zero is captured with `|| rd_rc=$?`, and a first line is taken by parameter
+#     expansion, never `printf | head` (SIGPIPE under pipefail kills a warn-only block once
+#     the output passes the pipe buffer — E36-F04 review round 1, F1).
+if [ -f tools/readiness-check.py ] && [ -f state/tasks.json ]; then
+  RD_WARN=0; RD_FEATURES_N=0
+  rd_nl='
+'
+  rd_rc=0
+  RD_FEATURES="$(python3 - state/tasks.json <<'PY' 2>&1
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as fh:
+    board = json.load(fh)
+for epic in board.get("epics", []) if isinstance(board, dict) else []:
+    for f in (epic.get("features", []) if isinstance(epic, dict) else []):
+        if not isinstance(f, dict):
+            continue
+        if f.get("status") in ("spec-ready", "in-progress", "in-review") \
+                and f.get("sdd") is True and f.get("spec_path"):
+            print("%s\t%s" % (f.get("id", "?"), f["spec_path"]))
+PY
+)" || rd_rc=$?
+  if [ "$rd_rc" -ne 0 ]; then
+    echo "⚠️  readiness: board read failed: ${RD_FEATURES##*"$rd_nl"} (warn-only)"
+    RD_WARN=$((RD_WARN+1)); RD_FEATURES=""
+  fi
+  while IFS="$(printf '\t')" read -r rd_id rd_dir; do
+    [ -n "$rd_id" ] || continue
+    RD_FEATURES_N=$((RD_FEATURES_N+1))
+    rd_rc=0
+    rd_out="$(python3 tools/readiness-check.py "$rd_dir" 2>&1)" || rd_rc=$?
+    case "$rd_rc" in
+      0) ;;
+      1) rd_n="$(printf '%s\n' "$rd_out" | grep -c '^readiness-check: ' || true)"  # grep reads all: no SIGPIPE
+         rd_first="${rd_out%%"$rd_nl"*}"; rd_first="${rd_first#readiness-check: }"
+         echo "⚠️  readiness: $rd_id $rd_first (+$((rd_n-2)) more; warn-only — Reviewer check 9 rejects)"
+         RD_WARN=$((RD_WARN+1)) ;;
+      *) rd_first="${rd_out%%"$rd_nl"*}"; rd_first="${rd_first#readiness-check: }"
+         echo "⚠️  readiness: $rd_id check did not run: $rd_first (warn-only)"
+         RD_WARN=$((RD_WARN+1)) ;;
+    esac
+  done <<RDEOF
+$RD_FEATURES
+RDEOF
+  if [ "$RD_WARN" -eq 0 ]; then
+    ok "implementation readiness clean ($RD_FEATURES_N feature(s) checked)"
+  fi
+fi
+
 # 2z. Escalation visibility (2026-09-04). `escalation.after_rejections > 0` READS as
 #     active in the config, but the feature fires only when `.harness/.escalation-arming`
 #     says `armed` — and that file is written by the installer, so a target that set the

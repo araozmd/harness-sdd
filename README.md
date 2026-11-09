@@ -60,6 +60,13 @@ contracts it invokes) and the build↔review loop is **multi-round until green**
 Parallel Reviewer mutation campaigns use private fixtures so shared tracked files
 remain stable; see `agents/reviewer.md` check 3b.
 
+Three deterministic spec lints gate a feature before the Builder sees it —
+`tools/tasks-pair-check.py` (red/green pair shape, ADR-0008), `tools/plan-cite-check.py`
+(every plan row cites an R-id or an ADR, ADR-0009) and `tools/readiness-check.py` (every
+backticked repo-rooted path and symbol it recognises in the plan, tasks and tests resolves or
+is declared created — an unrecognised token is ignored, never flagged, E37-F01); each exits
+0/1/2 and the Reviewer rejects on exit 1.
+
 ## Quick start in this source checkout (Claude Code)
 
 To use the harness in your own project, follow

@@ -4,6 +4,39 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.106.0] — 2026-11-09
+
+### Added — implementation-readiness lint and Reviewer gate (E37-F01)
+- `tools/readiness-check.py <feature-dir | feature.plan.md> [--root <dir>]`: a stdlib-only
+  lint that every path and symbol it recognises in a feature's spec files resolves. It scans the plan's
+  `## Files to change` rows (paths from the first cell), every `.tasks.md` list item and every
+  `.tests.md` table row and list item; a reference is a whitespace-free backtick span holding
+  a `/` or a dotted extension. A file the feature creates is declared with `create` as the
+  first word of its Change cell, and tasks/tests references resolve through it. The root is
+  `--root`, else the plan's nearest `.git` ancestor; the `.harness/` remap is tried both
+  ways. Exit 0 with one `ok` line, 1 with `unresolved-path` / `unresolved-symbol` findings
+  (plan, then tasks, then tests), 2 on any usage, input or internal error ("did not run").
+  Precision over recall: placeholders, globs, variables, URLs, absolute paths, flags, bare
+  extensions, `scratchpad/` / `progress/` and a path whose first segment is no known root
+  are ignored, never flagged. Symbols: `name()` in a single-path modify row and `path:name`
+  anywhere must occur in the file as a whole word.
+- `--grandfathered <plan> [--base <ref>]`: the E36-F01/E36-F04 merge-time rule keyed on THIS
+  tool's paths — a plan authored before the tool's first-parent merge is flagged, not
+  rejected.
+- The section/table/fence grammar is a deliberate copy of `tools/plan-cite-check.py`'s,
+  parity-tested against `tests/lib/fence.awk` and against plan-cite-check's
+  `parse_sections()`.
+- `init.sh` section 2e sweeps every in-flight `sdd` feature warn-only (no `--root`: the root
+  is the project, never `.harness/`); Reviewer check 9 rejects on exit 1 with the grandfather
+  rule; the Architect runs the lint before the doc-critic checkpoint; the doc-critic reports
+  its lines as advisory findings (and records "did not run" without a shell tool).
+- `docs/SPEC-FORMAT.md` gains the *Implementation readiness* schema section (including the
+  `<repo>/` placeholder convention for paths not in the repository), `docs/WORKFLOW.md` a
+  paragraph at the doc-critic checkpoints, `README.md` a sentence naming the three spec
+  lints; `docs/RATIONALE.md` ledger row `C11 — Implementation-readiness lint`.
+- The installer `chmod +x`es the tool; new suite `tests/test_readiness_check.sh` with
+  fixtures under `tests/fixtures/readiness/`.
+
 ## [0.105.1] — 2026-11-01
 
 ### Fixed — `landed` write shape and recorded repository name (E99-F34)

@@ -1509,7 +1509,13 @@
           "id": "E99-F182",
           "title": "Escalation to builder-heavy can arm in self mode and per front-end",
           "status": "done",
-          "landed": {"base": "origin/main", "commit": "b41d5c9c0a354113ce81feff47f41ec63d34be96", "ref": "b41d5c9c0a354113ce81feff47f41ec63d34be96", "repo": "harness-sdd-chore-F182", "verified": "ancestor"},
+          "landed": {
+            "base": "origin/main",
+            "commit": "b41d5c9c0a354113ce81feff47f41ec63d34be96",
+            "ref": "b41d5c9c0a354113ce81feff47f41ec63d34be96",
+            "repo": "harness-sdd-chore-F182",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
@@ -2248,6 +2254,50 @@
           "autonomous": true,
           "depends_on": [],
           "spec_path": "specs/epics/E34-resource-hygiene/F01-cleanup-discipline/"
+        }
+      ]
+    },
+    {
+      "id": "E37",
+      "title": "Goldfish spec review: fail-closed readiness lint, paraphrase-back comprehension, living-doc drift",
+      "status": "pending",
+      "features": [
+        {
+          "id": "E37-F01",
+          "title": "Implementation-readiness lint: every path and symbol a plan/tasks file names must resolve",
+          "status": "in-review",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F01-readiness-lint/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (319)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E37-F01 done --evidence <merge-ref>`",
+            "pr": "319"
+          }
+        },
+        {
+          "id": "E37-F02",
+          "title": "Doc-critic paraphrase-back comprehension mode at the feature-spec checkpoint",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E37-F01"
+          ],
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F02-paraphrase-back/"
+        },
+        {
+          "id": "E37-F03",
+          "title": "Advisory drift report: living docs (product, architecture, ADRs) versus current code",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E37-F02"
+          ],
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F03-living-doc-drift/"
         }
       ]
     }

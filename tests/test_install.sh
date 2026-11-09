@@ -633,6 +633,23 @@ test_plan_cite_check_installed_contract() {
     fail "E36-F04: installed plan template's Data model header has no R-id column"
 }
 
+test_readiness_check_installed_contract() {
+  [ -x "$T/.harness/tools/readiness-check.py" ] ||
+    fail "E37-F01: installed readiness-check.py missing or not executable"
+  # The SOURCE mode is the one a commit can drop: the installer chmods its own copy, so the
+  # installed -x alone cannot see a lost git mode (lesson 2026-09-16).
+  [ -x "$SRC/tools/readiness-check.py" ] ||
+    fail "E37-F01: source tools/readiness-check.py is not executable"
+  cmp -s "$SRC/tools/readiness-check.py" "$T/.harness/tools/readiness-check.py" ||
+    fail "E37-F01: installed readiness-check.py differs from source"
+  grep -qF 'chmod +x "$H/tools/readiness-check.py"' "$SRC/harness-install.sh" ||
+    fail "E37-F01: installer lacks explicit readiness-check executable wiring"
+  for f in init.sh agents/architect.md agents/reviewer.md agents/doc-critic.md docs/SPEC-FORMAT.md; do
+    grep -qF 'tools/readiness-check.py' "$T/.harness/$f" ||
+      fail "E37-F01: installed $f does not name tools/readiness-check.py"
+  done
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -796,6 +813,7 @@ test_sweep_scratch_helper_installed_executable
 test_dependency_diagnostics_installed_contract
 test_tasks_pair_check_installed_contract
 test_plan_cite_check_installed_contract
+test_readiness_check_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
 test_e99_throughput_helpers_installed_contract

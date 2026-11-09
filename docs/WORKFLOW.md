@@ -326,6 +326,12 @@ errors or times out, the agent proceeds **best-effort** and appends a short note
 `progress/<run>/` so the skipped pass is auditable. The critic reviews **documents only**;
 production-code review remains the Reviewer's job (E05).
 
+Beside the critic at the `feature-spec` checkpoint sits the implementation-readiness lint
+(E37-F01): the Architect runs `tools/readiness-check.py <feature-dir>` before hand-off and it
+must exit 0, the doc-critic reports its lines as advisory findings, the Reviewer rejects on
+exit 1 (check 9; a plan written before the tool merged is flagged, not rejected), and
+`init.sh` sweeps every in-flight feature warn-only at session start (section 2e).
+
 ## Drift check on epic rollup
 
 Rolling-wave planning has a failure mode: a plan sketched early goes **stale** as you learn.
