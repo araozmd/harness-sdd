@@ -860,6 +860,23 @@ grep -qxF "⚠️  readiness: E01-F01 unresolved-path specs/epics/E01-x/F01-good
   || fail "R7_init_large_output_never_fails: no whole warn line counting the other 1999 findings ($(both))"
 pass "R7_init_large_output_never_fails"
 
+# A board 2e cannot read is ONE whole 'board read failed' warn line, rc 0, never the clean
+# line and never a per-line 'did not run'. Section 2 validates state/tasks.json only for
+# `tasks: local`, so another backend is how init.sh reaches 2e with malformed JSON
+# (review round 1, V31).
+cp "$I/harness.config.yaml" "$T/config.bak"; cp "$I/state/tasks.json" "$T/board.bak"
+sed 's/^  tasks: local$/  tasks: obsidian/' "$T/config.bak" > "$I/harness.config.yaml"
+grep -qx '  tasks: obsidian' "$I/harness.config.yaml" || fail "R7_init_board_read_failed: precondition: the backend rewrite did not apply"
+printf '{ not json\n' > "$I/state/tasks.json"
+init_run; cp "$T/config.bak" "$I/harness.config.yaml"; cp "$T/board.bak" "$I/state/tasks.json"
+init_ok R7_init_board_read_failed
+[ "$(grep -c '^⚠️  readiness: ' "$T/out")" -eq 1 ] \
+  && grep -qxE '⚠️  readiness: board read failed: [^ ]*JSONDecodeError: .* \(warn-only\)' "$T/out" \
+  || fail "R7_init_board_read_failed: a malformed board is not ONE whole 'readiness: board read failed: …JSONDecodeError… (warn-only)' line ($(both))"
+grep -qF 'implementation readiness clean' "$T/out" && fail "R7_init_board_read_failed: the clean line printed though the board was not read ($(both))"
+pass "R7_init_board_read_failed"
+
+
 # ── R8: --grandfathered — flag a plan written before THIS tool merged, else reject class ─
 # The tool's date is its MERGE: the committer time of the first first-parent commit on the
 # default branch touching tools/readiness-check.py or .harness/tools/readiness-check.py. The
