@@ -481,4 +481,94 @@ lint "$GD"; expect_fail R5_whole_word_only
   || fail "R5_whole_word_only: help() matched inside helper ($(both))"
 pass "R5_whole_word_only"
 
+# ── R6: usage / input / internal errors ⇒ exit 2, `error:` + usage on stderr, stdout empty ─
+# chk_exit2 <row> <stderr-fixed-string> — each row's argv is the minimal one ONLY that branch
+# rejects; the string names the branch so a second producer cannot pass it.
+chk_exit2() {
+  [ "$rc" -eq 2 ] || fail "$1: expected rc 2, got $rc ($(both))"
+  head -n 1 "$T/err" | grep -q '^readiness-check: error: ' || fail "$1: stderr's first line is not 'readiness-check: error: ...' ($(both))"
+  grep -q 'usage:' "$T/err" || fail "$1: no usage on stderr ($(both))"
+  [ ! -s "$T/out" ] || fail "$1: stdout is not empty on an error ($(both))"
+  grep -qF -- "$2" "$T/err" || fail "$1: the error does not name '$2' ($(both))"
+  pass "$1"
+}
+fresh r6
+run_tool; chk_exit2 R6_no_arg 'expected exactly one <feature-dir | feature.plan.md>'
+run_tool "$GD" "$BD" --root "$R"; chk_exit2 R6_two_args 'expected exactly one <feature-dir | feature.plan.md>'
+run_tool "$GD" --bogus; chk_exit2 R6_unknown_flag 'unknown flag: --bogus'
+run_tool "$GD" --root; chk_exit2 R6_root_flag_no_value '--root needs a directory'
+run_tool --grandfathered "$GP" --base; chk_exit2 R6_base_flag_no_value '--base needs a ref'
+run_tool "$R/docs" --root "$R"; chk_exit2 R6_dir_without_plan "no *.plan.md in $R/docs"
+cp "$GP" "$GD/second.plan.md"
+run_tool "$GD" --root "$R"; chk_exit2 R6_dir_two_plans "2 *.plan.md files in $GD"
+rm "$GD/second.plan.md"
+run_tool "$T/nope.plan.md" --root "$R"; chk_exit2 R6_plan_missing "cannot read $T/nope.plan.md: no such file"
+mkdir -p "$T/r6dir/x.plan.md"
+run_tool "$T/r6dir" --root "$R"; chk_exit2 R6_plan_is_dir "cannot read $T/r6dir/x.plan.md: not a regular file"
+run_tool "$T/r6dir/x.plan.md" --root "$R"; chk_exit2 R6_plan_is_dir "cannot read $T/r6dir/x.plan.md: not a regular file"
+run_tool "$T/nope-dir" --root "$R"; chk_exit2 R6_positional_neither_dir_nor_plan "expected a feature directory or a *.plan.md: $T/nope-dir"
+mkdir -p "$T/r6lock"; chmod 000 "$T/r6lock"
+run_tool "$T/r6lock" --root "$R"; chmod 755 "$T/r6lock"; chk_exit2 R6_dir_unreadable "cannot read $T/r6lock: "
+fresh r6bad8
+printf '\377\n' >> "$GP"
+lint "$GD"; chk_exit2 R6_plan_invalid_utf8 "cannot read $GP: "
+fresh r6bad8t
+printf '\377\n' >> "$GT"
+lint "$GD"; chk_exit2 R6_tasks_invalid_utf8 "cannot read $GT: "
+fresh r6root
+run_tool "$GD" --root "$T/nope-root"; chk_exit2 R6_root_not_a_dir "--root is not a directory: $T/nope-root"
+: > "$T/root-file"
+run_tool "$GD" --root "$T/root-file"; chk_exit2 R6_root_not_a_dir "--root is not a directory: $T/root-file"
+# No .git below the ceiling: the walk never reads the .git that sits ABOVE it.
+rm -rf "$T/r6ceil"; mkdir -p "$T/r6ceil/.git" "$T/r6ceil/c/x"
+cp "$GD/E01-F01.plan.md" "$T/r6ceil/c/x/"
+set +e; GIT_CEILING_DIRECTORIES="$T/r6ceil/c" python3 "$TOOL" "$T/r6ceil/c/x" >"$T/out" 2>"$T/err"; rc=$?; set -e
+chk_exit2 R6_no_git_ancestor_no_root "no ancestor of $T/r6ceil/c/x/E01-F01.plan.md holds .git; pass --root"
+fresh r6out
+run_tool "$GD" --bogus; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: unknown flag wrote to stdout ($(both))"
+run_tool "$R/docs" --root "$R"; [ ! -s "$T/out" ] || fail "R6_stdout_empty_on_error: a dir without a plan wrote to stdout ($(both))"
+[ -s "$T/err" ] || fail "R6_stdout_empty_on_error: a dir without a plan wrote nothing to stderr"
+pass "R6_stdout_empty_on_error"
+
+rm -rf "$T/dir with space"; mkdir -p "$T/dir with space/it's"; cp -R "$FX/repo" "$T/dir with space/it's/repo"
+_q="$T/dir with space/it's/repo/specs/epics/E01-x/F01-good"
+run_tool "$_q" --root "$T/dir with space/it's/repo"; expect_ok R6_argv_path_verbatim
+grep -qF "readiness-check: ok $_q/E01-F01.plan.md: " "$T/out" || fail "R6_argv_path_verbatim: the ok line does not print the argv path verbatim ($(both))"
+pass "R6_argv_path_verbatim"
+fresh r6eq
+run_tool "$GD" "--root=$R"; expect_ok R6_flag_equals_form
+pass "R6_flag_equals_form"
+
+for _h in -h --help; do
+  run_tool "$_h"
+  [ "$rc" -eq 0 ] || fail "R6_help_exit0: '$_h' rc $rc ($(both))"
+  grep -q '^usage: ' "$T/out" || fail "R6_help_exit0: '$_h' printed no usage on stdout ($(both))"
+  [ ! -s "$T/err" ] || fail "R6_help_exit0: '$_h' wrote to stderr ($(both))"
+done
+pass "R6_help_exit0"
+run_tool "$GD" --root --help; chk_exit2 R6_help_as_value_is_not_help '--root is not a directory: --help'
+grep -q '^usage: ' "$T/out" && fail "R6_help_as_value_is_not_help: '--root --help' printed the usage on stdout ($(both))"
+run_tool --grandfathered "$GP" --base --help; chk_exit2 R6_help_as_value_is_not_help 'is not inside a git work tree'
+
+# An unexpected exception is "the check did not run" (exit 2), never 1. stdout is a pipe with
+# no reader (a FIFO opened read-write on fd 4 so the write open on fd 5 does not block, then
+# fd 4 closed); > 16 KB of findings overflow the 8 KB buffer, so the BrokenPipeError lands
+# INSIDE main(), not at exit-time flush (lesson 2026-10-27).
+fresh r6pipe
+{ printf '%s\n' '# p' '' '## Files to change' '' '| File | Change | R-id |' '|---|---|---|'
+  _i=0; while [ "$_i" -lt 300 ]; do printf '| `tools/missing%d.py` | modify it | R1 |\n' "$_i"; _i=$((_i + 1)); done
+} > "$GP"
+lint "$GD"
+[ "$rc" -eq 1 ] && [ "$(wc -c < "$T/out" | tr -d ' ')" -gt 16384 ] \
+  || fail "R6_internal_error_exit2: precondition: the 300-row plan does not give exit 1 with > 16 KB of findings ($rc)"
+mkfifo "$T/r6pipe/fifo"
+exec 4<>"$T/r6pipe/fifo"; exec 5>"$T/r6pipe/fifo"; exec 4<&-
+set +e; python3 "$TOOL" "$GD" --root "$R" >&5 2>"$T/err"; rc=$?; set -e
+exec 5>&-
+[ "$rc" -eq 2 ] || fail "R6_internal_error_exit2: a BrokenPipeError exited $rc, not 2 ($(tr '\n' '|' < "$T/err"))"
+head -n 1 "$T/err" | grep -q '^readiness-check: error: internal: BrokenPipeError: ' \
+  || fail "R6_internal_error_exit2: stderr's first line is not 'readiness-check: error: internal: BrokenPipeError: …' ($(tr '\n' '|' < "$T/err"))"
+grep -q 'Traceback' "$T/err" && fail "R6_internal_error_exit2: a traceback reached stderr ($(tr '\n' '|' < "$T/err"))"
+pass "R6_internal_error_exit2"
+
 echo "all readiness-check checks passed"
