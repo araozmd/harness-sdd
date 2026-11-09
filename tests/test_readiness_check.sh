@@ -943,4 +943,24 @@ span "$ROOT/README.md" '## How it works' '## Quick start' "$T/rm.sec"
 has R11_readme_sentence "$T/rm.sec" 'Three deterministic spec lints gate a feature before the Builder sees it — `tools/tasks-pair-check.py` (red/green pair shape, ADR-0008), `tools/plan-cite-check.py` (every plan row cites an R-id or an ADR, ADR-0009) and `tools/readiness-check.py` (every path and symbol the plan, tasks and tests name resolves or is declared created, E37-F01); each exits 0/1/2 and the Reviewer rejects on exit 1.'
 pass "R11_readme_sentence"
 
+# ── R12: VERSION ↔ newest CHANGELOG heading (read at runtime, no literal); ledger row C11 ─
+_v="$(cat "$ROOT/VERSION")"
+[ -n "$_v" ] || fail "R12_version_changelog_ledger: VERSION is empty"
+_head="$(grep -m1 '^## \[' "$ROOT/CHANGELOG.md" || true)"
+case "$_head" in "## [$_v]"*) ;; *) fail "R12_version_changelog_ledger: newest CHANGELOG heading '$_head' != VERSION '$_v'" ;; esac
+# historical anchor: SOME release section names E37-F01 and readiness-check, so a later
+# release prepended above stays green
+awk '/^## \[/ { if (sec ~ /E37-F01/ && sec ~ /readiness-check/) ok = 1; sec = ""; next } { sec = sec "\n" $0 }
+     END { if (sec ~ /E37-F01/ && sec ~ /readiness-check/) ok = 1; exit ok ? 0 : 1 }' "$ROOT/CHANGELOG.md" \
+  || fail "R12_version_changelog_ledger: no CHANGELOG section names both E37-F01 and readiness-check"
+slice "$ROOT/docs/RATIONALE.md" '## Deletion ledger' > "$T/led.txt"
+_c11="$(grep -E '^\| C11 — Implementation-readiness lint \| Capability compensation \|' "$T/led.txt" || true)"
+[ -n "$_c11" ] || fail "R12_version_changelog_ledger: no '| C11 — Implementation-readiness lint | Capability compensation |' row in the Deletion ledger"
+# the evidence cell (the 4th) states the ablation condition, not just a token
+printf '%s\n' "$_c11" | awk -F'|' '{ print $5 }' | grep -qE 'Ablation[^|]*unresolved-path[^|]*Retain while' \
+  || fail "R12_version_changelog_ledger: the C11 evidence cell does not state the ablation condition (Ablation … unresolved-path … Retain while)"
+printf '%s\n' "$_c11" | grep -qF '[`tools/readiness-check.py`](../tools/readiness-check.py)' \
+  || fail "R12_version_changelog_ledger: the C11 row does not point at tools/readiness-check.py"
+pass "R12_version_changelog_ledger"
+
 echo "all readiness-check checks passed"
