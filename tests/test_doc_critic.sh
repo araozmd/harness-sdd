@@ -309,6 +309,41 @@ test_architect_paraphrase_step() {
   pass "E37-F02:R3: architect checkpoint is paraphrase first, one re-audit, then record"
 }
 
+# ── E37-F02:R4 — Reviewer reads ## Accepted trade-offs; a recorded one is not a defect ─
+test_reviewer_reads_trade_offs() {
+  _h='## Accepted trade-offs (E37-F02)'
+  [ "$(grep -cxF -- "$_h" "$REVIEWER" || true)" -eq 1 ] \
+    || fail "E37-F02:R4: reviewer must carry exactly one '$_h' heading"
+  _wy="$(lineno "$REVIEWER" '## What you check')"
+  _at="$(lineno "$REVIEWER" "$_h")"
+  _ac="$(lineno "$REVIEWER" '## ADR-citation check (architecture-aligned specs)')"
+  [ -n "$_wy" ] && [ -n "$_at" ] && [ -n "$_ac" ] && [ "$_wy" -lt "$_at" ] && [ "$_at" -lt "$_ac" ] \
+    || fail "E37-F02:R4: the section must sit after '## What you check' and before '## ADR-citation check'"
+  _sec="$(slice "$REVIEWER" "$_h" | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R4: $2" ;; esac; }
+  _need 'When the `.spec.md` under review carries a `## Accepted trade-offs` section' "trigger clause missing"
+  _need 'read it before you judge the spec'"'"'s prose' "read-before-judging clause missing"
+  _need 'A recorded trade-off is a decision recorded by the Architect and visible at the human gate, not a defect: do not reject or flag the named unit for the comprehension gap it records, and do not ask the Builder to resolve it.' \
+    "decision-not-defect sentence missing"
+  _need 'The record waives only that, and every other check is unchanged — the unit'"'"'s `R-id` still needs a passing test (check 2), the three spec lints still decide on their exit codes (checks 7, 8 and 9), an over-claiming sentence is still a defect (3c), and a contradiction with a collaborator file is still check 5'"'"'s reject.' \
+    "waives-only-that sentence missing"
+  _need 'An entry that names no unit or gives no reason is itself a flag ("record the unit and the why"), not a reject.' \
+    "malformed-entry sentence missing"
+  _need 'A spec without the section has no trade-offs to read; nothing here fires.' "absent-section sentence missing"
+  # item 9 of '## What you check' is unchanged and names no trade-off
+  _i9="$(awk "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && keep && (/^## / || /^[0-9]+\. /) { keep = 0 }
+    !fence && /^9\. / { keep = 1 }
+    keep
+  ' "$REVIEWER" | folded)"
+  case "$_i9" in *'Checks 2, 7 and 8 are unchanged.'*) : ;; *) fail "E37-F02:R4: item 9 lost its closing sentence" ;; esac
+  if printf '%s' "$_i9" | grep -qiF 'trade-off'; then
+    fail "E37-F02:R4: item 9 must name no trade-off (the rule is its own section)"
+  fi
+  pass "E37-F02:R4: reviewer section present, positioned, waives only the comprehension gap"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -330,5 +365,6 @@ test_portability
 test_paraphrase_section
 test_could_not_restate_blocking
 test_architect_paraphrase_step
+test_reviewer_reads_trade_offs
 
 echo "All doc-critic contract tests passed."

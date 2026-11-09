@@ -227,6 +227,20 @@ saying "it works" means nothing until you prove it. AI-generated code is often
    path is the right one stays check 5 and the doc-critic's judgment. `sdd: false` items are
    exempt (they have no `.plan.md`). Checks 2, 7 and 8 are unchanged.
 
+## Accepted trade-offs (E37-F02)
+
+When the `.spec.md` under review carries a `## Accepted trade-offs` section — what the
+Doc-critic's cold reader could not restate from the four files after the Architect's one
+re-audit, recorded as `- <unit> — <gap> — accepted because <why>` — read it before you judge
+the spec's prose. A recorded trade-off is a decision recorded by the Architect and visible at
+the human gate, not a defect: do not reject or flag the named unit for the comprehension gap
+it records, and do not ask the Builder to resolve it. The record waives only that, and every
+other check is unchanged — the unit's `R-id` still needs a passing test (check 2), the three
+spec lints still decide on their exit codes (checks 7, 8 and 9), an over-claiming sentence is
+still a defect (3c), and a contradiction with a collaborator file is still check 5's reject.
+An entry that names no unit or gives no reason is itself a flag ("record the unit and the
+why"), not a reject. A spec without the section has no trade-offs to read; nothing here fires.
+
 ## ADR-citation check (architecture-aligned specs)
 
 This additive check fires **only where** the project has a recorded architecture **and**
