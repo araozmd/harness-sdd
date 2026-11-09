@@ -134,4 +134,91 @@ run_tool "$ROOT/specs/epics/E37-goldfish-spec-review/F01-readiness-lint/"; expec
 grep -qE '^readiness-check: ok .*tasks: read, tests: read$' "$T/out" || fail "R1_dogfood_own_dir: not every sibling was read ($(both))"
 pass "R1_dogfood_own_dir"
 
+# ── R2: a `## Files to change` first-cell path that does not resolve ⇒ unresolved-path ──
+# lno <file> <fixed-string> — the line number of the first line holding the string (a
+# precondition: the fixture README states each planted defect's line).
+lno() { grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1; }
+# readme_says <file-basename:line> — the fixture README documents the planted defect there.
+readme_says() { grep -qF "| $1 |" "$FX/README.md" || fail "setup: the fixture README does not document $1"; }
+
+fresh r1fencectl
+insert_before "$GP" '## Deferred' "$T/decoys.md"
+grep -vE '^ *(```|~~~)' "$GP" > "$GP.live"; mv "$GP.live" "$GP"
+lint "$GD"; expect_fail "R1_ok_fenced_decoys control"
+[ "$(count '^readiness-check: unresolved-path .*E01-F01\.plan\.md:[0-9]+ tools/decoy\.py$')" -ge 2 ] \
+  || fail "R1_ok_fenced_decoys control: the unfenced decoys did not each give a finding ($(both))"
+pass "R1_ok_fenced_decoys control"
+
+fresh r2
+_l="$(lno "$BP" '`tools/missing.py`')"; readme_says "E01-F02.plan.md:$_l"
+lint "$BD"; expect_fail R2_unresolved_path_plan_row
+[ "$(count "^readiness-check: unresolved-path .*E01-F02\\.plan\\.md:$_l tools/missing\\.py\$")" -eq 1 ] \
+  || fail "R2_unresolved_path_plan_row: expected exactly one 'unresolved-path <plan>:$_l tools/missing.py' ($(both))"
+grep -qxF "readiness-check: unresolved-path $BD/E01-F02.plan.md:$_l tools/missing.py" "$T/out" \
+  || fail "R2_unresolved_path_plan_row: the finding does not name the plan as derived from argv ($(both))"
+pass "R2_unresolved_path_plan_row"
+
+_l="$(lno "$BP" '`REDME.md`')"; readme_says "E01-F02.plan.md:$_l"
+[ "$(count "^readiness-check: unresolved-path .*E01-F02\\.plan\\.md:$_l REDME\\.md\$")" -eq 1 ] \
+  || fail "R2_bare_first_cell_checked: a bare first-cell basename that resolves nowhere is not a finding ($(both))"
+fresh r2bare
+grep -qF '| `README.md` | modify' "$GP" || fail "R2_bare_first_cell_checked: precondition: the positive plan lost its README.md row"
+lint "$GD"; expect_ok R2_bare_first_cell_checked
+pass "R2_bare_first_cell_checked"
+
+fresh r2create
+_l="$(lno "$GP" '| `tools/new.py` |')"
+sed 's/^| `tools\/new.py` | \*\*create\*\* /| `tools\/new.py` | **modify** /' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+grep -qF '| `tools/new.py` | **modify** ' "$GP" || fail "R2_create_row_exempt: precondition: the verb rewrite did not apply"
+lint "$GD"; expect_fail R2_create_row_exempt
+[ "$(count "^readiness-check: unresolved-path .*E01-F01\\.plan\\.md:$_l tools/new\\.py\$")" -eq 1 ] \
+  || fail "R2_create_row_exempt: a modify row on a file that does not exist is not a finding ($(both))"
+pass "R2_create_row_exempt"
+
+fresh r2under
+printf '%s\n' '| `tests/fixtures/new/deep/x.md` | modify the fixture | R2 |' > "$T/row.md"
+insert_before "$GP" '| `README.md` |' "$T/row.md"
+lint "$GD"; expect_ok R2_under_created_dir
+grep -v '^| `tests/fixtures/new/` |' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+lint "$GD"; expect_fail R2_under_created_dir
+[ "$(count '^readiness-check: unresolved-path .*E01-F01\.plan\.md:[0-9]+ tests/fixtures/new/deep/x\.md$')" -eq 1 ] \
+  || fail "R2_under_created_dir: with the create row gone the deep path is not a finding ($(both))"
+pass "R2_under_created_dir"
+
+fresh r2add
+_l="$(lno "$BP" '`tests/test_gone.sh`')"; readme_says "E01-F02.plan.md:$_l"
+grep -qF '| `tests/test_gone.sh` | add a case, then create the fixture |' "$BP" || fail "R2_add_row_path_checked: precondition: the add row changed"
+lint "$BD"; expect_fail R2_add_row_path_checked
+[ "$(count "^readiness-check: unresolved-path .*E01-F02\\.plan\\.md:$_l tests/test_gone\\.sh\$")" -eq 1 ] \
+  || fail "R2_add_row_path_checked: an add row whose cell names create later was exempted ($(both))"
+sed 's/^| `tests\/test_gone.sh` | add a case/| `tests\/test_gone.sh` | create a case/' "$BP" > "$BP.new"; mv "$BP.new" "$BP"
+lint "$BD"
+[ "$(count 'tests/test_gone\.sh')" -eq 0 ] || fail "R2_add_row_path_checked: a create row's path was checked ($(both))"
+pass "R2_add_row_path_checked"
+
+fresh r2hdr
+# The header names a missing path under a known root and the separator carries alignment
+# colons: both stay exempt because the header is found by POSITION, not by text.
+sed -e 's/^| File | Change | R-id |$/| `tools\/nope-a.md` | `tools\/nope-b.md` | R |/' \
+    -e '/^| `tools\/nope-a.md` /{n;s/^|---|---|---|$/|:---|---:|---|/;}' "$GP" > "$GP.new"; mv "$GP.new" "$GP"
+grep -qxF '| `tools/nope-a.md` | `tools/nope-b.md` | R |' "$GP" && grep -qxF '|:---|---:|---|' "$GP" \
+  || fail "R2_header_separator_exempt: precondition: the header/separator rewrite did not apply"
+lint "$GD"; expect_ok R2_header_separator_exempt
+pass "R2_header_separator_exempt"
+
+fresh r2other
+grep -qxF '| `tools/nowhere.md` | a row in an unscanned section | R1 |' "$GP" \
+  && grep -qxF '| `tools/nowhere.md` | a pipe row under DO NOT TOUCH |' "$GP" \
+  || fail "R2_other_sections_unscanned: precondition: the positive plan lost its Data model / DO NOT TOUCH rows"
+lint "$GD"; expect_ok R2_other_sections_unscanned
+pass "R2_other_sections_unscanned"
+
+fresh r2multi
+printf '%s\n' '| `tools/real.py`, `tools/nope.py` | modify both | R1 |' > "$T/row.md"
+insert_before "$GP" '| `README.md` |' "$T/row.md"
+lint "$GD"; expect_fail R2_multi_span_first_cell
+[ "$(count '^readiness-check: unresolved-path ')" -eq 1 ] && [ "$(count ' tools/nope\.py$')" -eq 1 ] \
+  || fail "R2_multi_span_first_cell: expected exactly one finding, naming tools/nope.py ($(both))"
+pass "R2_multi_span_first_cell"
+
 echo "all readiness-check checks passed"

@@ -344,18 +344,25 @@ def check_feature(plan, tasks, tests, root):
     findings = []
     resolved = [0]
 
+    def emit(rank, fname, n, text):
+        key = (rank, n, text)
+        if key not in findings:
+            findings.append(key)
+
     def ref(path):
         if resolve(path, root, feature_dir, created) is not None:
             resolved[0] += 1
+            return True
+        return False
 
-    for _n, text in rows:
+    for n, text in rows:
         cs = cells(text)
         if plan_verb(cs[1] if len(cs) > 1 else "") == "create":
             continue
         for sp in spans(cs[0]):
-            _d, p, _name = classify(sp)
-            if p is not None:
-                ref(p)
+            display, p, _name = classify(sp)
+            if p is not None and not ref(p):
+                emit(0, plan, n, "unresolved-path %s:%d %s" % (plan, n, display))
     for lines in (tasks_lines, tests_lines):
         if lines is None:
             continue
@@ -369,6 +376,7 @@ def check_feature(plan, tasks, tests, root):
                     _d, p, _name = classify(sp)
                     if p is not None:
                         ref(p)
+    findings.sort(key=lambda f: (f[0], f[1]))  # stable: order of discovery within a line
     return findings, resolved[0], len(created)
 
 
@@ -408,6 +416,11 @@ def main_lint(args):
     if root is None:
         root = find_root(plan)
     findings, n_resolved, n_created = check_feature(plan, tasks, tests, root)
+    if findings:
+        for _rank, _n, text in findings:
+            print(PFX + text)
+        print("%sFAIL %d finding(s)" % (PFX, len(findings)))
+        return 1
     print("%sok %s: %d reference(s) resolved, %d created, tasks: %s, tests: %s" % (
         PFX, plan, n_resolved, n_created, "read" if tasks else "absent",
         "read" if tests else "absent"))
