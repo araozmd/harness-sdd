@@ -170,7 +170,9 @@ the Reviewer's job (E05).
 ## Output summary
 
 In addition to inline fixes, write a concise progress note at
-`progress/<run>/doc-critic-<checkpoint>.md` (or a similarly scoped path) listing:
+`progress/<run>/doc-critic-<checkpoint>.md` (or a similarly scoped path). At
+`target-type=feature-spec` the note opens with the `## Paraphrase` section (E37-F02) before
+the list below. It lists:
 
 - the `target-type` reviewed;
 - the files reviewed;

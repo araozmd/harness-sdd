@@ -250,6 +250,39 @@ test_paraphrase_section() {
   pass "E37-F02:R1: paraphrase-back section present, positioned, four-files-only"
 }
 
+# ── E37-F02:R2 — could-not-restate is a blocking finding, bounded by one re-audit ─
+test_could_not_restate_blocking() {
+  _sec="$(slice "$ROLE" '## Paraphrase-back comprehension (E37-F02)' | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R2: $2" ;; esac; }
+  _need 'Each `### Could not restate` item is a **blocking finding** with the stable id `could-not-restate`, repeated in your findings as `could-not-restate <file> <unit> — <what is missing>`.' \
+    "blocking-finding sentence with id and shape missing"
+  _need 'Blocking means the Architect must fix the unit or record it under `## Accepted trade-offs` in the `.spec.md` before hand-off, bounded by one re-audit' \
+    "fix-or-record sentence missing"
+  _need 'you still never block the Architect, there is no new status and no new human gate, and every finding outside this list stays advisory as before' \
+    "never-block / no-new-status sentence missing"
+  _need 'write the paraphrase again from the revised files and list only what you still cannot restate' \
+    "re-audit sentence missing"
+  _need 'A unit counts only when its own meaning is missing from the four files, not when it cites a file, test, lesson or check you cannot open: a cross-reference whose purpose the unit states is restated.' \
+    "calibration sentence missing"
+  _need 'A unit you can restate but think wrong is an ordinary finding under the five dimensions, not a `could-not-restate`.' \
+    "restate-but-wrong sentence missing"
+  _need 'This section applies at `target-type=feature-spec` only; the `plan-output` and `epic-decomposition` checkpoints are unchanged.' \
+    "feature-spec-only sentence missing"
+  _out="$(slice "$ROLE" '## Output summary' | folded)"
+  case "$_out" in
+    *'At `target-type=feature-spec` the note opens with the `## Paraphrase` section (E37-F02) before the list below.'*) : ;;
+    *) fail "E37-F02:R2: ## Output summary must say the feature-spec note opens with the ## Paraphrase section" ;;
+  esac
+  case "$_out" in
+    *'progress/<run>/doc-critic-<checkpoint>.md'*) : ;;
+    *) fail "E37-F02:R2: ## Output summary lost the progress note path" ;;
+  esac
+  grep -qiE 'advisory[- ]only' "$ROLE" || fail "E37-F02:R2: advisory-only anchor lost"
+  grep -qF 'never block' "$ROLE" || fail "E37-F02:R2: never-block anchor lost"
+  grep -qiF 'best-effort' "$ROLE" || fail "E37-F02:R2: best-effort anchor lost"
+  pass "E37-F02:R2: could-not-restate is blocking-for-hand-off, advisory critic, one re-audit"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -269,5 +302,6 @@ test_no_schema_change
 test_no_new_gate
 test_portability
 test_paraphrase_section
+test_could_not_restate_blocking
 
 echo "All doc-critic contract tests passed."
