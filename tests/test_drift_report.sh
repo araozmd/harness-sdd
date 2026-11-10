@@ -540,6 +540,47 @@ PYEOF
   grep -q 'doc-names-missing-symbol' "$R/progress/drift/2026-01-02.md" && grep -q '^- code-unnamed' "$R/progress/drift/2026-01-02.md" && grep -q '^- doc-names-missing ' "$R/progress/drift/2026-01-02.md" \
     || fail "R6_tree_unchanged_but_report: setup: the run did not exercise every finding code"
   pass R6_tree_unchanged_but_report
+R7_no_own_definitions; R7_no_local_binding; R7_sibling_missing_exit2
+}
+
+# ── R7: the resolver is imported by file path; none of its names is defined here ──────────
+RESOLVER_NAMES='classify ignored shape_ignored resolve spans iter_unfenced _read symbol_present find_root parse_args wants_help'
+# defines_any <file> — 0 iff the file defines or binds (column 0) any resolver name.
+defines_any() {
+  for _n in $RESOLVER_NAMES; do
+    [ "$(grep -cE "^def $_n\\(" "$1" || true)" -eq 0 ] || return 0
+    [ "$(grep -cE "^$_n *=" "$1" || true)" -eq 0 ] || return 0
+  done
+  return 1
+}
+R7_no_own_definitions() {
+  printf 'def classify(x): pass\n' | cat "$TOOL" - > "$T/planted.py"
+  defines_any "$T/planted.py" || fail "R7_no_own_definitions CONTROL: a planted def classify( was not seen"
+  printf 'ignored = 1\n' | cat "$TOOL" - > "$T/planted.py"
+  defines_any "$T/planted.py" || fail "R7_no_own_definitions CONTROL: a planted binding 'ignored = 1' was not seen"
+  if defines_any "$TOOL"; then fail "R7_no_own_definitions: tools/drift-report.py defines or binds a resolver name itself"; fi
+  pass R7_no_own_definitions
+}
+R7_no_local_binding() {
+  python3 -B - "$TOOL" "$ROOT/tools/readiness-check.py" "$RESOLVER_NAMES" <<'PYEOF' || fail "R7_no_local_binding: the drift module binds a resolver name, or its resolver is not tools/readiness-check.py (see above)"
+import importlib.util, os, sys
+tool, resolver, names = sys.argv[1], sys.argv[2], sys.argv[3].split()
+spec = importlib.util.spec_from_file_location("drift", tool)
+drift = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(drift)
+rc = drift._load_resolver()
+for n in names:
+    assert not hasattr(drift, n), "drift module has attribute " + n
+assert os.path.realpath(rc.__file__) == os.path.realpath(resolver), "resolver is " + rc.__file__
+assert callable(rc.classify)
+PYEOF
+  pass R7_no_local_binding
+}
+R7_sibling_missing_exit2() {
+  fresh r7sib; rm -rf "$T/alone7"; mkdir -p "$T/alone7/tools"; cp "$TOOL" "$T/alone7/tools/"
+  set +e; env -u HARNESS_DIR python3 "$T/alone7/tools/drift-report.py" --root "$R" >"$T/out" 2>"$T/err"; rc=$?; set -e
+  chk_exit2 R7_sibling_missing_exit2 'readiness-check.py'
+  grep -qF 'cannot load' "$T/err" || fail "R7_sibling_missing_exit2: the error does not say 'cannot load'"
 }
 
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
