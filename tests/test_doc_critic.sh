@@ -209,6 +209,11 @@ slice() {
 }
 # folded: newlines to spaces, runs of spaces squeezed — anchors span wrapped lines.
 folded() { tr '\n' ' ' | tr -s ' '; }
+# sentences: count of sentence terminators ([.!?] then space or end) in folded text on stdin.
+# A closed world for additive sentences: any added sentence carries a terminator, whatever its
+# words. It cannot see an in-place edit or reorder of an existing sentence (same terminator
+# count), so every clause is ALSO pinned by its own whole-sentence anchor.
+sentences() { grep -oE '[.!?]( |$)' | wc -l | tr -d ' '; }
 # lineno <file> <exact heading line>: first line number of an exact line, empty when absent.
 lineno() { grep -nxF -- "$2" "$1" | head -n 1 | cut -d: -f1; }
 
@@ -246,8 +251,12 @@ test_paraphrase_section() {
   if printf '%s' "$_sec" | grep -qiE '(may|can|should|free to)[^.]{0,60}(read|open|consult)[^.]{0,40}(inbox brief|progress/inbox|chat)'; then
     fail "E37-F02:R1: a sentence lets the critic read the inbox brief or chat for the paraphrase"
   fi
-  # closed-world: every inbox/chat mention lies inside the single pinned four-files-only
-  # sentence (2 x inbox, 1 x chat); an additive sentence of ANY wording adds a mention.
+  # closed-world, two nets. (1) Token counts: every inbox/chat mention lies inside the single
+  # pinned four-files-only sentence (2 x inbox, 1 x chat) — catches an added sentence or clause
+  # that USES those words. (2) The sentence count below: catches an added sentence that avoids
+  # them ("the intake brief", "the conversation", "the transcript"). Neither sees an in-place
+  # rewording of, or a clause added to, an existing sentence; the anchors above see that only
+  # over the span each one pins.
   [ "$(printf '%s' "$_sec" | grep -oi 'inbox' | wc -l | tr -d ' ')" -eq 2 ] \
     || fail "E37-F02:R1: an inbox mention lies outside the pinned four-files-only sentence"
   [ "$(printf '%s' "$_sec" | grep -oi 'chat' | wc -l | tr -d ' ')" -eq 1 ] \
@@ -256,6 +265,10 @@ test_paraphrase_section() {
   _need '`### Could not restate` — one list per file (`.spec.md`, `.plan.md`, `.tasks.md`, `.tests.md`); each item names the unit you could not restate' \
     "one-list-per-file sentence missing"
   _need 'and one line on what is missing or contradictory.' "item-shape tail missing"
+  # closed-world by sentence: the section holds exactly 16 sentences (a later feature editing a
+  # NEIGHBOURING section cannot move this; the slice ends at the next "## " heading).
+  [ "$(printf '%s' "$_sec" | sentences)" -eq 16 ] \
+    || fail "E37-F02:R1: the paraphrase section must hold exactly its 16 sentences (an added or removed sentence changes the count)"
   grep -qiF 'Claude Code' "$ROLE" && fail "E37-F02:R1: role contains CLI-specific wording"
   pass "E37-F02:R1: paraphrase-back section present, positioned, four-files-only"
 }
@@ -301,6 +314,7 @@ test_architect_paraphrase_step() {
     "existing spawn sentence lost"
   _need '**Paraphrase first, one re-audit, then record (E37-F02).**' "bold lead-in missing"
   _need 'pass it nothing else: not the inbox brief, not this conversation' "nothing-else rule missing"
+  _need 'Read the paraphrase before the findings:' "read-the-paraphrase-before-the-findings clause missing or reordered"
   _need 'where the cold reader restated something other than what you meant, the document, not the reader, is wrong' \
     "document-not-reader sentence missing"
   _need 'Each `could-not-restate` finding is blocking for your hand-off: fix the unit it names, then spawn the critic once more on the revised files — at most **one** re-audit per feature.' \
@@ -316,12 +330,22 @@ test_architect_paraphrase_step() {
   if printf '%s' "$_sec" | grep -qiE '(two|three|several|further|unlimited|as many|second|another|again|repeat)[^.]{0,12}re-audit'; then
     fail "E37-F02:R3: the checkpoint permits more than one re-audit"
   fi
-  # closed-world: the four pinned sentences carry every re-audit mention and the single
-  # re-spawn; ANY additive sentence (second, another, repeat until empty, ...) adds one.
+  # closed-world, three nets. (1) Token counts: the four pinned sentences carry every
+  # re-audit mention and the single "spawn the critic" — catches an added sentence that USES
+  # those words. (2) The sentence count below: catches an added sentence that avoids them ("run
+  # the critic again", "spawn the Doc-critic again", "you may pass it the inbox brief"). Neither
+  # sees an in-place rewording of, or a clause added to, an existing sentence; the anchors above
+  # see that only over the span each one pins. (3) The vocabulary regex
+  # above is a third, narrower net (its word list only).
   [ "$(printf '%s' "$_sec" | grep -oi 're-audit' | wc -l | tr -d ' ')" -eq 4 ] \
     || fail "E37-F02:R3: a re-audit mention lies outside the four pinned sentences (the bound is one)"
   [ "$(printf '%s' "$_sec" | grep -oi 'spawn the critic' | wc -l | tr -d ' ')" -eq 1 ] \
     || fail "E37-F02:R3: the checkpoint spawns the critic more than the one pinned time"
+  # The count spans the whole R12 section (its pre-existing first paragraph has 4 sentences, the
+  # E37-F02 paragraph 7), so a NEW paragraph inside the section is caught too; editing the R12
+  # paragraph is a same-section edit and updates this number. Neighbouring sections cannot move it.
+  [ "$(printf '%s' "$_sec" | sentences)" -eq 11 ] \
+    || fail "E37-F02:R3: the checkpoint section must hold exactly its 11 sentences (an added sentence may permit a further re-audit or pass the critic more)"
   pass "E37-F02:R3: architect checkpoint is paraphrase first, one re-audit, then record"
 }
 
@@ -346,6 +370,9 @@ test_reviewer_reads_trade_offs() {
   _need 'An entry that names no unit or gives no reason is itself a flag ("record the unit and the why"), not a reject.' \
     "malformed-entry sentence missing"
   _need 'A spec without the section has no trade-offs to read; nothing here fires.' "absent-section sentence missing"
+  # closed-world by sentence: exactly 5 sentences (an added "flag it anyway" reds)
+  [ "$(printf '%s' "$_sec" | sentences)" -eq 5 ] \
+    || fail "E37-F02:R4: the Accepted trade-offs section must hold exactly its 5 sentences"
   # item 9 of '## What you check' is unchanged and names no trade-off
   _i9="$(awk "$FENCE_AWK"'
     fence_delim($0) { if (keep) print; next }
@@ -381,6 +408,9 @@ test_template_trade_offs_section() {
     || fail "E37-F02:R5: the template note mentions re-audit outside its pinned sentence"
   case "$_sec" in *'Optional (E37-F02).'*) : ;; *) fail "E37-F02:R5: optional marker missing" ;; esac
   case "$_sec" in *'Omit the section when there is nothing to record.'*) : ;; *) fail "E37-F02:R5: omit sentence missing" ;; esac
+  # closed-world by sentence: exactly 3 sentences (the placeholder line has none)
+  [ "$(printf '%s' "$_note" | sentences)" -eq 3 ] \
+    || fail "E37-F02:R5: the template section must hold exactly its 3 sentences"
   printf '%s\n' "$_sl" | grep -qxF -- '- <unit: R-id, plan row, T<n> or section> — <what the cold reader could not restate> — accepted because <why>' \
     || fail "E37-F02:R5: placeholder entry missing"
   _bm="$(lineno "$TEMPLATE" '## Business rules')"
@@ -410,6 +440,16 @@ test_workflow_paraphrase_paragraph() {
   _l2="$(grep -nF -- "At the \`feature-spec\` checkpoint the critic's note opens with" "$WORKFLOW" | head -n 1 | cut -d: -f1)"
   [ -n "$_l1" ] && [ -n "$_l2" ] && [ "$_l1" -lt "$_l2" ] \
     || fail "E37-F02:R6: the paraphrase paragraph must come after the E37-F01 paragraph"
+  # closed-world by sentence, scoped to the E37-F02 PARAGRAPH only (opener line to the next blank
+  # line): the section is shared with E37-F01 and later features, so a section-wide count would
+  # trip on their edits. A new separate paragraph in the section is not counted (accepted limit).
+  _par="$(slice "$WORKFLOW" '## Doc-critic checkpoints' | awk -v s="At the \`feature-spec\` checkpoint the critic's note opens with" '
+    index($0, s) == 1 { k = 1 }
+    k && /^[[:space:]]*$/ { exit }
+    k
+  ' | folded)"
+  [ "$(printf '%s' "$_par" | sentences)" -eq 3 ] \
+    || fail "E37-F02:R6: WORKFLOW E37-F02 paragraph must hold exactly its 3 sentences"
   pass "E37-F02:R6: WORKFLOW carries the paraphrase paragraph, E37-F01 paragraph kept"
 }
 
