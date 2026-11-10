@@ -156,6 +156,67 @@ R1_dogfood_archive_copy() {
   pass R1_dogfood_archive_copy
 }
 
+# ── R4: the fixed report shape, --date, overwrite, stdout ────────────────────────────────
+ADVISORY='Advisory: this report changes nothing. For each finding a human decides: update the doc, or update the code.'
+NOT_CHECKED='Replaced patterns — a document that describes a mechanism the code now implements differently — are not detected; "No drift detected" means every named path and symbol resolves and nothing in the requested inventory is unnamed.'
+R4_shape() {
+  fresh r4shape
+  run_tool --root "$R" --date 2026-01-02; expect_ok R4_shape
+  _r="$(report)"
+  [ "$(head -n 1 "$_r")" = '# Living-doc drift report — 2026-01-02' ] || fail "R4_shape: the title line is wrong ($(head -n 1 "$_r"))"
+  grep -qxF -- "$ADVISORY" "$_r" || fail "R4_shape: the advisory sentence is missing or altered"
+  grep -qxF -- "- root: $R" "$_r" || fail "R4_shape: the root header line is wrong"
+  grep -qxF -- "- harness: $R" "$_r" || fail "R4_shape: the harness header line is wrong"
+  [ "$(awk '/^- documents:$/ { f = 1; next } f && /^  / { print; next } f { exit }' "$_r")" = "  - specs/product.md (read)
+  - specs/architecture.md (read)
+  - specs/adr/0001-clean.md (read)
+  - specs/shop/adr/0001-shop.md (read)" ] || fail "R4_shape: the documents list is not the four items in report order"
+  grep -qxF -- '- inventory: not requested (pass --inventory <dir>)' "$_r" || fail "R4_shape: the inventory header line is wrong"
+  [ "$(grep '^## ' "$_r" | tr '\n' '|')" = '## specs/product.md|## specs/architecture.md|## specs/adr/0001-clean.md|## specs/shop/adr/0001-shop.md|## Not checked by this tool|## Summary|' ] \
+    || fail "R4_shape: the section headings are not the fixed set in order ($(grep '^## ' "$_r" | tr '\n' '|'))"
+  for _d in specs/product.md specs/architecture.md specs/adr/0001-clean.md specs/shop/adr/0001-shop.md; do
+    [ "$(section "$_r" "$_d" | grep -c '^No drift detected\.$')" -eq 1 ] || fail "R4_shape: section $_d does not hold 'No drift detected.'"
+  done
+  section "$_r" 'Not checked by this tool' | grep -qxF -- "$NOT_CHECKED" || fail "R4_shape: the not-checked section lacks the replaced-patterns sentence"
+  [ "$(grep -c '^drift-report: ' "$_r")" -eq 1 ] || fail "R4_shape: there is not exactly one drift-report: line"
+  [ "$(last_line "$_r")" = 'drift-report: No drift detected (4 document(s) read)' ] || fail "R4_shape: the file's last line is not the summary line"
+  [ "$(grep '^## ' "$_r" | tail -n 1)" = '## Summary' ] || fail "R4_shape: ## Summary is not the last section"
+  # no ADR at all => one 'ADRs: none found' item
+  rm -f "$R"/specs/adr/*.md; rm -rf "$R/specs/shop"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R4_shape
+  grep -qxF '  - ADRs: none found' "$(report)" || fail "R4_shape: no ADR does not read '  - ADRs: none found'"
+  pass R4_shape
+}
+R4_date_override() {
+  fresh r4date
+  run_tool --root "$R" --date 2026-01-02; expect_ok R4_date_override
+  case "$(report)" in */2026-01-02.md) ;; *) fail "R4_date_override: --date 2026-01-02 did not name the file 2026-01-02.md ($(both))";; esac
+  run_tool --root "$R" --date=2026-01-03; expect_ok R4_date_override
+  case "$(report)" in */2026-01-03.md) ;; *) fail "R4_date_override: --date=2026-01-03 did not name the file 2026-01-03.md ($(both))";; esac
+  pass R4_date_override
+}
+R4_same_day_overwrite() {
+  fresh r4same
+  run_tool --root "$R" --date 2026-01-02; expect_ok R4_same_day_overwrite
+  cp "$(report)" "$T/first.md"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R4_same_day_overwrite
+  cmp -s "$T/first.md" "$(report)" || fail "R4_same_day_overwrite: a rerun on the same tree and date is not byte-identical"
+  plant_bad
+  run_tool --root "$R" --date 2026-01-02; expect_ok R4_same_day_overwrite
+  _r="$(report)"
+  [ "$(grep -c '^# Living-doc drift report' "$_r")" -eq 1 ] || fail "R4_same_day_overwrite: the rerun left more than one title line (append, not overwrite)"
+  [ "$(grep -c 'tools/missing\.py' "$_r")" -eq 1 ] || fail "R4_same_day_overwrite: the planted defect is not reported exactly once"
+  [ "$(grep -c 'No drift detected (' "$_r" || true)" -eq 0 ] || fail "R4_same_day_overwrite: a line from the previous run survived the overwrite"
+  pass R4_same_day_overwrite
+}
+R4_stdout_is_path_only() {
+  fresh r4out; plant_bad
+  run_tool --root "$R" --date 2026-01-02; expect_ok R4_stdout_is_path_only
+  [ "$(cat "$T/out")" = "$R/progress/drift/2026-01-02.md" ] || fail "R4_stdout_is_path_only: stdout is not exactly the report path ($(both))"
+  pass R4_stdout_is_path_only
+}
+
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
 R1_installed_layout; R1_dogfood_archive_copy
+R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only
 echo "test_drift_report.sh: all rows passed"

@@ -119,6 +119,11 @@ def parse_date(value):
     return value
 
 
+ADVISORY = ("Advisory: this report changes nothing. For each finding a human decides: update the "
+            "doc, or update the code.")
+NOT_CHECKED = ('Replaced patterns — a document that describes a mechanism the code now implements '
+               'differently — are not detected; "No drift detected" means every named path and '
+               'symbol resolves and nothing in the requested inventory is unnamed.')
 CHOICE_PATH = ("update doc (rewrite the path as it is today, or give it a placeholder prefix if "
                "it is not in this repository, or supersede the decision) or update code (restore it)")
 
@@ -139,13 +144,16 @@ def scan_document(rc, root, abs_path):
 
 
 def render(date, root, harness, docs, results):
-    lines = ["# Living-doc drift report — %s" % date, "",
+    lines = ["# Living-doc drift report — %s" % date, "", ADVISORY, "",
              "- root: %s" % root, "- harness: %s" % harness, "- documents:"]
     present = 0
     total = 0
     for rel, p in docs:
         lines.append("  - %s (%s)" % (rel, "read" if p else "absent"))
         present += 1 if p else 0
+    if not any(rel.endswith("/adr") or "/adr/" in rel for rel, _p in docs):
+        lines.append("  - ADRs: none found")
+    lines.append("- inventory: not requested (pass --inventory <dir>)")
     for rel, p in docs:
         lines += ["", "## %s" % rel, ""]
         if p is None:
@@ -156,7 +164,7 @@ def render(date, root, harness, docs, results):
             total += len(results[rel])
         else:
             lines.append("No drift detected.")
-    lines += ["", "## Summary", ""]
+    lines += ["", "## Not checked by this tool", "", NOT_CHECKED, "", "## Summary", ""]
     if total:
         lines.append("drift-report: %d finding(s) across %d document(s) read, 0 code entries unnamed"
                      % (total, present))
