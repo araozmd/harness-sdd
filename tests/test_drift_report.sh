@@ -541,6 +541,7 @@ PYEOF
     || fail "R6_tree_unchanged_but_report: setup: the run did not exercise every finding code"
   pass R6_tree_unchanged_but_report
 R7_no_own_definitions; R7_no_local_binding; R7_sibling_missing_exit2
+R9_workflow_section; R9_readme_sentence
 }
 
 # ── R7: the resolver is imported by file path; none of its names is defined here ──────────
@@ -581,6 +582,63 @@ R7_sibling_missing_exit2() {
   set +e; env -u HARNESS_DIR python3 "$T/alone7/tools/drift-report.py" --root "$R" >"$T/out" 2>"$T/err"; rc=$?; set -e
   chk_exit2 R7_sibling_missing_exit2 'readiness-check.py'
   grep -qF 'cannot load' "$T/err" || fail "R7_sibling_missing_exit2: the error does not say 'cannot load'"
+}
+
+# ── R9: the docs/WORKFLOW.md section and the README sentence ─────────────────────────────
+# slice_doc <file> <exact-heading> — the fence-aware slice, heading line included, to the next
+# heading, folded onto one line (newlines → spaces, runs squeezed).
+slice_doc() {
+  awk -v h="$2" "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^#+ / { keep = ($0 == h); if (keep) print; next }
+    keep
+  ' "$1" | tr '\n' ' ' | tr -s ' '
+}
+WF_HEAD='## Living-doc drift report (E37-F03)'
+R9_workflow_section() {
+  _wf="$ROOT/docs/WORKFLOW.md"
+  [ "$(grep -cxF -- "$WF_HEAD" "$_wf" || true)" -eq 1 ] || fail "R9_workflow_section: docs/WORKFLOW.md does not carry exactly one '$WF_HEAD' heading"
+  _a="$(grep -nxF '## Drift check on epic rollup' "$_wf" | cut -d: -f1)"
+  _b="$(grep -nxF -- "$WF_HEAD" "$_wf" | cut -d: -f1)"
+  _c="$(grep -nxF '## Epic lifecycle' "$_wf" | cut -d: -f1)"
+  { [ -n "$_a" ] && [ "$_a" -lt "$_b" ] && [ "$_b" -lt "$_c" ]; } \
+    || fail "R9_workflow_section: the section is not between '## Drift check on epic rollup' ($_a) and '## Epic lifecycle' ($_c): $_b"
+  slice_doc "$_wf" "$WF_HEAD" > "$T/wf.folded"
+  cat > "$T/wf.anchors" <<'ANCHORS'
+`python3 tools/drift-report.py` (installed: `python3 .harness/tools/drift-report.py`) compares them with the tree
+writes `progress/drift/<YYYY-MM-DD>.md` — one section per document listing each `doc-names-missing` and `doc-names-missing-symbol` finding with the reconciliation choice (update the doc, or update the code) left to a human
+and, when `--inventory <dir>` is passed, each `code-unnamed` file directly under that directory that no living document names.
+It is advisory: no gate, no board write, no edit to any document or code; it exits 0 whenever the report was written and 2 only when it could not run, and it prints the report path.
+Run it on demand — suggested once per release, before the `VERSION` bump — and read the report; a run on the same day overwrites that day's report.
+It is distinct from the epic-rollup drift check above (the Scout re-validating planned epics), from `init.sh`'s installed-body drift guard and from `tools/test-drift-check.sh`'s weakened-assertion check.
+Replaced patterns — a document that describes a mechanism the code now implements differently — are not detected
+ANCHORS
+  [ "$(wc -l < "$T/wf.anchors" | tr -d ' ')" -eq 7 ] || fail "R9_workflow_section: setup: the anchor list is not seven sentences"
+  while IFS= read -r _s; do
+    grep -qF -- "$_s" "$T/wf.folded" || fail "R9_workflow_section: the section lacks the sentence: $_s"
+  done < "$T/wf.anchors"
+  for _re in '(Reviewer|Orchestrator)[^.]{0,60}(reject|block)' 'exit(s)? 1' 'gate(s|d)? on'; do
+    ! grep -qiE -- "$_re" "$T/wf.folded" || fail "R9_workflow_section: the section matches the gate pattern /$_re/ — the report must stay advisory"
+  done
+  # closed world: any NET change in the folded word count reds (a word-count-neutral edit is
+  # seen only by the sentence anchors above — a stated limit, not a guarantee)
+  [ "$(wc -w < "$T/wf.folded" | tr -d ' ')" -eq 241 ] \
+    || fail "R9_workflow_section: the section holds $(wc -w < "$T/wf.folded" | tr -d ' ') words, not the pasted 241"
+  pass R9_workflow_section
+}
+R9_readme_sentence() {
+  _rd="$ROOT/README.md"
+  slice_doc "$_rd" '## How it works' > "$T/rd.folded"
+  [ -s "$T/rd.folded" ] || fail "R9_readme_sentence: setup: could not slice '## How it works' from README.md"
+  _b='On demand — suggested once per release — `tools/drift-report.py` compares the living documents (`specs/product.md`, `specs/architecture.md`, the ADRs) with the tree and writes an advisory `progress/drift/<date>.md` naming every path or symbol a document names that the code lacks, and every file in a requested inventory that no document names, each with the reconciliation choice (doc or code) left to a human (E37-F03).'
+  grep -qF -- "$_b" "$T/rd.folded" || fail "R9_readme_sentence: README '## How it works' lacks the drift-report sentence"
+  _e2='Before the Builder sees a spec, the Doc-critic also paraphrases it back'
+  grep -qF -- "$_e2" "$T/rd.folded" || fail "R9_readme_sentence: the E37-F02 sentence is gone from '## How it works'"
+  grep -qF 'the Reviewer rejects on exit 1.' "$T/rd.folded" || fail "R9_readme_sentence: the E37-F01 three-lints sentence is gone"
+  _la="$(grep -nF -- "$_e2" "$_rd" | head -n 1 | cut -d: -f1)"
+  _lb="$(grep -nF -- 'On demand — suggested once per release —' "$_rd" | head -n 1 | cut -d: -f1)"
+  [ -n "$_lb" ] && [ "$_lb" -gt "$_la" ] || fail "R9_readme_sentence: the drift-report sentence ($_lb) is not after the E37-F02 sentence ($_la)"
+  pass R9_readme_sentence
 }
 
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
