@@ -439,6 +439,8 @@ R5_inventory_not_relative() {
   chk_exit2 "R5_inventory_not_relative (absolute)" '--inventory must be a path relative to the root: /tmp'
   run_tool --root "$R" --inventory ../x
   chk_exit2 "R5_inventory_not_relative (..)" '--inventory must be a path relative to the root: ../x'
+  run_tool --root "$R" --inventory ''
+  chk_exit2 "R5_inventory_not_relative (empty)" '--inventory must be a path relative to the root:'
 }
 R5_no_git_ancestor_no_root() {
   rm -rf "$T/ceil"; mkdir -p "$T/ceil/.git" "$T/ceil/nogit/tools"
