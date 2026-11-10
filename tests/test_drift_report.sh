@@ -542,6 +542,7 @@ PYEOF
   pass R6_tree_unchanged_but_report
 R7_no_own_definitions; R7_no_local_binding; R7_sibling_missing_exit2
 R9_workflow_section; R9_readme_sentence
+R10_version_changelog_ledger
 }
 
 # ── R7: the resolver is imported by file path; none of its names is defined here ──────────
@@ -639,6 +640,28 @@ R9_readme_sentence() {
   _lb="$(grep -nF -- 'On demand — suggested once per release —' "$_rd" | head -n 1 | cut -d: -f1)"
   [ -n "$_lb" ] && [ "$_lb" -gt "$_la" ] || fail "R9_readme_sentence: the drift-report sentence ($_lb) is not after the E37-F02 sentence ($_la)"
   pass R9_readme_sentence
+}
+
+# ── R10: ledger row C13, CHANGELOG/VERSION pairing ───────────────────────────────────────
+# (that VERSION moved by one MINOR over main is the Reviewer's diff check — never a row here)
+R10_version_changelog_ledger() {
+  _rat="$ROOT/docs/RATIONALE.md"
+  grep -qE '^\| C13 — Living-doc drift report \| Capability compensation \|' "$_rat" \
+    || fail "R10_version_changelog_ledger: docs/RATIONALE.md has no C13 — Living-doc drift report row in the Capability compensation layer"
+  grep '^| C13 ' "$_rat" | awk -F'|' '{ print $5 }' | grep -qE 'Ablation[^|]*controlled runs[^|]*doc-names-missing[^|]*Retain while it catches any' \
+    || fail "R10_version_changelog_ledger: the C13 evidence cell lacks the ablation / retention wording"
+  [ "$(grep -n '^| C13 ' "$_rat" | cut -d: -f1)" -eq "$(( $(grep -n '^| C12 ' "$_rat" | cut -d: -f1) + 1 ))" ] \
+    || fail "R10_version_changelog_ledger: the C13 row is not directly after C12"
+  _v="$(cat "$ROOT/VERSION")"
+  [ "$(grep -m1 '^## \[' "$ROOT/CHANGELOG.md" | cut -c1-$(( ${#_v} + 5 )))" = "## [$_v]" ] \
+    || fail "R10_version_changelog_ledger: the newest CHANGELOG heading is not ## [$_v]"
+  awk 'function chk() { if (a && b) ok = 1 }
+       /^## \[/ { chk(); a = 0; b = 0 }
+       /E37-F03/ { a = 1 }
+       /drift-report/ { b = 1 }
+       END { chk(); exit ok ? 0 : 1 }' "$ROOT/CHANGELOG.md" \
+    || fail "R10_version_changelog_ledger: no CHANGELOG section names both E37-F03 and drift-report"
+  pass R10_version_changelog_ledger
 }
 
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git

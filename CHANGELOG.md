@@ -4,6 +4,28 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.108.0] — 2026-11-10
+
+### Added — advisory living-doc drift report (E37-F03)
+- `tools/drift-report.py [--root <dir>] [--inventory <dir>]… [--date <YYYY-MM-DD>]`: an
+  on-demand, advisory comparison of the living documents (`specs/product.md`,
+  `specs/architecture.md`, every ADR under `specs/adr/` and `specs/<product>/adr/`) with the
+  tree. It scans every unfenced line, extracts each backticked repo-rooted path and
+  `path:name` symbol with the implementation-readiness lint's own resolver (imported from
+  `tools/readiness-check.py`, never copied), and writes `progress/drift/<YYYY-MM-DD>.md`: one
+  section per document with `doc-names-missing` / `doc-names-missing-symbol` findings, an
+  opt-in `code-unnamed` inventory of files no document names, a fixed "not checked" section
+  (replaced patterns are a judgment read, not detected) and a summary. Each finding names the
+  reconciliation choice — update the doc, or update the code — for a human. Exit 0 whenever
+  the report was written (findings are not a failure; the tool never exits 1), 2 only when it
+  could not run; the path is printed; a same-day run overwrites that day's report; nothing
+  else is written — no gate, no board write, no edit.
+- `docs/WORKFLOW.md` gains `## Living-doc drift report (E37-F03)` (cadence: on demand,
+  suggested once per release); `README.md` a sentence; `docs/RATIONALE.md` ledger row
+  `C13 — Living-doc drift report` with its ablation threshold.
+- The installer `chmod +x`es the tool; `tests/test_install.sh` asserts the installed contract;
+  new suite `tests/test_drift_report.sh` with fixtures under `tests/fixtures/drift/`.
+
 ## [0.107.0] — 2026-11-09
 
 ### Added — Doc-critic paraphrase-back comprehension mode (E37-F02)
