@@ -2287,7 +2287,13 @@
           "depends_on": [
             "E37-F01"
           ],
-          "spec_path": "specs/epics/E37-goldfish-spec-review/F02-paraphrase-back/"
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F02-paraphrase-back/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (321)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E37-F02 done --evidence <merge-ref>`",
+            "pr": "321"
+          }
         },
         {
           "id": "E37-F03",
