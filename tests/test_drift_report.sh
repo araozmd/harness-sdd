@@ -424,6 +424,86 @@ R3_inventory_missing_dir_exit2() {
   chk_exit2 R3_inventory_missing_dir_exit2 nope
 }
 
+# ── R5: usage / input / internal errors ⇒ exit 2; never exit 1; help semantics ────────────
+R5_unknown_flag() { run_tool --bogus; chk_exit2 R5_unknown_flag 'unknown flag: --bogus'; }
+R5_fix_flag_rejected() { run_tool --fix; chk_exit2 R5_fix_flag_rejected 'unknown flag: --fix'; }
+R5_positional() { run_tool x; chk_exit2 R5_positional 'unexpected argument: x'; }
+R5_root_no_value() { run_tool --root; chk_exit2 R5_root_no_value '--root needs'; }
+R5_inventory_no_value() { fresh r5inv; run_tool --root "$R" --inventory; chk_exit2 R5_inventory_no_value '--inventory needs'; }
+R5_date_no_value() { fresh r5dnv; run_tool --root "$R" --date; chk_exit2 R5_date_no_value '--date needs'; }
+R5_root_not_a_dir() { run_tool --root "$T/nodir"; chk_exit2 R5_root_not_a_dir '--root is not a directory'; }
+R5_inventory_not_relative() {
+  fresh r5rel
+  mkdir -p "$T/r5rel/x"  # so a joined `$R/../x` WOULD resolve under a mutant that skips the check
+  run_tool --root "$R" --inventory /tmp
+  chk_exit2 "R5_inventory_not_relative (absolute)" '--inventory must be a path relative to the root: /tmp'
+  run_tool --root "$R" --inventory ../x
+  chk_exit2 "R5_inventory_not_relative (..)" '--inventory must be a path relative to the root: ../x'
+}
+R5_no_git_ancestor_no_root() {
+  rm -rf "$T/ceil"; mkdir -p "$T/ceil/.git" "$T/ceil/nogit/tools"
+  cp "$TOOL" "$ROOT/tools/readiness-check.py" "$T/ceil/nogit/tools/"
+  set +e; env -u HARNESS_DIR GIT_CEILING_DIRECTORIES="$T/ceil" python3 "$T/ceil/nogit/tools/drift-report.py" >"$T/out" 2>"$T/err"; rc=$?; set -e
+  chk_exit2 R5_no_git_ancestor_no_root '--root'
+}
+R5_zero_docs() { fresh r5zero; rm -r "$R"/specs/*; run_tool --root "$R"; chk_exit2 R5_zero_docs 'no living documents'; }
+R5_doc_invalid_utf8() {
+  fresh r5utf; printf '\377' >> "$R/specs/adr/0001-clean.md"
+  run_tool --root "$R"; chk_exit2 R5_doc_invalid_utf8 '0001-clean.md'
+}
+R5_date_malformed() { fresh r5dm; run_tool --root "$R" --date 2026-1-1; chk_exit2 R5_date_malformed '--date is not a YYYY-MM-DD date: 2026-1-1'; }
+R5_date_impossible() { fresh r5di; run_tool --root "$R" --date 2026-02-30; chk_exit2 R5_date_impossible '--date is not a YYYY-MM-DD date: 2026-02-30'; }
+R5_progress_is_a_file() {
+  fresh r5prog; rm -r "$R/progress"; : > "$R/progress"
+  run_tool --root "$R"; chk_exit2 R5_progress_is_a_file 'progress'
+}
+R5_sibling_missing() {
+  fresh r5sib; rm -rf "$T/alone"; mkdir -p "$T/alone/tools"; cp "$TOOL" "$T/alone/tools/"
+  set +e; env -u HARNESS_DIR python3 "$T/alone/tools/drift-report.py" --root "$R" >"$T/out" 2>"$T/err"; rc=$?; set -e
+  chk_exit2 R5_sibling_missing 'readiness-check.py'
+}
+R5_no_report_on_error() {
+  fresh r5norep; rm -r "$R"/specs/*
+  run_tool --root "$R"; [ "$rc" -eq 2 ] || fail "R5_no_report_on_error: setup: zero documents did not exit 2"
+  [ ! -e "$R/progress/drift" ] || fail "R5_no_report_on_error: a report was written on the zero-documents error"
+  fresh r5norep2
+  run_tool --root "$R" --date 2026-1-1; [ "$rc" -eq 2 ] || fail "R5_no_report_on_error: setup: a malformed date did not exit 2"
+  [ ! -e "$R/progress/drift" ] || fail "R5_no_report_on_error: a report was written on the malformed-date error"
+  pass R5_no_report_on_error
+}
+R5_stdout_empty_on_error() {
+  run_tool --bogus; [ ! -s "$T/out" ] || fail "R5_stdout_empty_on_error: --bogus wrote to stdout"
+  run_tool x; [ ! -s "$T/out" ] || fail "R5_stdout_empty_on_error: a positional argument wrote to stdout"
+  pass R5_stdout_empty_on_error
+}
+R5_help_exit0() {
+  fresh r5help
+  for _h in -h --help; do
+    run_tool --root "$R" "$_h"
+    [ "$rc" -eq 0 ] || fail "R5_help_exit0: $_h exited $rc"
+    grep -q '^usage:' "$T/out" || fail "R5_help_exit0: $_h printed no usage on stdout"
+    [ ! -s "$T/err" ] || fail "R5_help_exit0: $_h wrote to stderr"
+    [ ! -e "$R/progress/drift" ] || fail "R5_help_exit0: $_h wrote a report"
+  done
+  pass R5_help_exit0
+}
+R5_help_as_value_is_not_help() { run_tool --root --help; chk_exit2 R5_help_as_value_is_not_help '--root is not a directory: --help'; }
+R5_internal_error_no_traceback() {
+  [ "$(id -u)" -ne 0 ] || { pass "R5_internal_error_no_traceback (skipped: root ignores directory modes)"; return 0; }
+  fresh r5int; chmod 000 "$R/specs/adr"
+  run_tool --root "$R"
+  chmod 755 "$R/specs/adr"
+  chk_exit2 R5_internal_error_no_traceback 'error: internal: PermissionError'
+  [ "$(grep -c Traceback "$T/err" || true)" -eq 0 ] || fail "R5_internal_error_no_traceback: a traceback reached stderr"
+}
+R5_never_exit_1() {
+  fresh r5one; plant_bad
+  run_tool --root "$R"; [ "$rc" -eq 0 ] || fail "R5_never_exit_1: a run with findings exited $rc, not 0"
+  [ "$(grep -cE '^[[:space:]]*(return 1|sys\.exit\(1\)|exit\(1\))[[:space:]]*(#.*)?$' "$TOOL" || true)" -eq 0 ] \
+    || fail "R5_never_exit_1: the tool source holds a return 1 / exit(1)"
+  pass R5_never_exit_1
+}
+
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
 R1_installed_layout; R1_dogfood_archive_copy
 R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only
@@ -433,4 +513,9 @@ R2_duplicate_on_one_line_collapsed; R2_order_by_document_then_line
 R2_crlf_and_bom_keep_findings; R2_non_utf8_target_not_searched; R2_exit0_with_findings
 R3_inventory_unnamed; R3_hidden_and_subdir_skipped; R3_named_via_remap; R3_dir_ref_names_nothing
 R3_inventory_repeat; R3_inventory_not_requested; R3_inventory_missing_dir_exit2
+R5_unknown_flag; R5_fix_flag_rejected; R5_positional; R5_root_no_value; R5_inventory_no_value
+R5_date_no_value; R5_root_not_a_dir; R5_inventory_not_relative; R5_no_git_ancestor_no_root
+R5_zero_docs; R5_doc_invalid_utf8; R5_date_malformed; R5_date_impossible; R5_progress_is_a_file
+R5_sibling_missing; R5_no_report_on_error; R5_stdout_empty_on_error; R5_help_exit0
+R5_help_as_value_is_not_help; R5_internal_error_no_traceback; R5_never_exit_1
 echo "test_drift_report.sh: all rows passed"
