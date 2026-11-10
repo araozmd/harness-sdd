@@ -664,6 +664,42 @@ R10_version_changelog_ledger() {
   pass R10_version_changelog_ledger
 }
 
+R3_inventory_counts_and_precedence() {
+  fresh r3cnt
+  # one entry, named: the header reads '1 entry', nothing is unnamed
+  run_tool --root "$R" --date 2026-01-02 --inventory docs; expect_ok R3_inventory_counts_and_precedence
+  grep -qxF -- '- inventory: docs (1 entry)' "$(report)" || fail "R3_inventory_counts_and_precedence: one entry does not read '(1 entry)'"
+  section "$(report)" "$INV" | grep -qxF 'No drift detected.' || fail "R3_inventory_counts_and_precedence: a fully named inventory does not read 'No drift detected.'"
+  [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] || fail "R3_inventory_counts_and_precedence: a clean inventory changed the summary"
+  # an empty inventory (only a hidden file): '0 entries'
+  run_tool --root "$R" --date 2026-01-02 --inventory scratchpad; expect_ok R3_inventory_counts_and_precedence
+  grep -qxF -- '- inventory: scratchpad (0 entries)' "$(report)" || fail "R3_inventory_counts_and_precedence: an empty directory does not read '(0 entries)'"
+  # a trailing slash is stripped from the printed entry; a nested directory is an inventory
+  run_tool --root "$R" --date 2026-01-02 --inventory tools/; expect_ok R3_inventory_counts_and_precedence
+  section "$(report)" "$INV" | grep -qxF -- "- code-unnamed \`tools/unnamed.py\` — reconcile: $CHOICE_CODE" || fail "R3_inventory_counts_and_precedence: 'tools/' did not print entries as tools/<file>"
+  run_tool --root "$R" --date 2026-01-02 --inventory tools/sub; expect_ok R3_inventory_counts_and_precedence
+  section "$(report)" "$INV" | grep -qxF -- "- code-unnamed \`tools/sub/inner.py\` — reconcile: $CHOICE_CODE" || fail "R3_inventory_counts_and_precedence: a nested directory was not inventoried"
+  # <root>/<dir> wins over <root>/.harness/<dir> when both are directories
+  installed_layout r3prec
+  mkdir "$R/tools"; : > "$R/tools/solo.py"
+  run_tool --root "$R" --date 2026-01-02 --inventory tools; expect_ok R3_inventory_counts_and_precedence
+  [ "$(section "$(report)" "$INV" | grep '^- ')" = "- code-unnamed \`tools/solo.py\` — reconcile: $CHOICE_CODE" ] \
+    || fail "R3_inventory_counts_and_precedence: <root>/tools did not win over <root>/.harness/tools"
+  grep -qxF -- '- inventory: tools (1 entry)' "$(report)" || fail "R3_inventory_counts_and_precedence: the header is not '- inventory: tools (1 entry)'"
+  pass R3_inventory_counts_and_precedence
+}
+R1_harness_dir_env() {
+  fresh r1env
+  mkdir -p "$T/r1env/h/specs"; cp "$R/specs/product.md" "$R/specs/glossary.md" "$T/r1env/h/specs/"
+  set +e; env HARNESS_DIR="$T/r1env/h" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  expect_ok R1_harness_dir_env
+  [ "$(cat "$T/out")" = "$T/r1env/h/progress/drift/2026-01-02.md" ] || fail "R1_harness_dir_env: the report is not under \$HARNESS_DIR ($(both))"
+  grep -qxF -- "- harness: $T/r1env/h" "$(report)" || fail "R1_harness_dir_env: the harness header is not \$HARNESS_DIR"
+  grep -qxF '  - specs/architecture.md (absent)' "$(report)" || fail "R1_harness_dir_env: documents were not read from \$HARNESS_DIR/specs"
+  [ ! -e "$R/progress/drift" ] || fail "R1_harness_dir_env: a report was written under the root"
+  pass R1_harness_dir_env
+}
+
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
 R1_installed_layout; R1_dogfood_archive_copy
 R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only
@@ -673,6 +709,7 @@ R2_duplicate_on_one_line_collapsed; R2_order_by_document_then_line
 R2_crlf_and_bom_keep_findings; R2_non_utf8_target_not_searched; R2_exit0_with_findings
 R3_inventory_unnamed; R3_hidden_and_subdir_skipped; R3_named_via_remap; R3_dir_ref_names_nothing
 R3_inventory_repeat; R3_inventory_not_requested; R3_inventory_missing_dir_exit2
+R3_inventory_counts_and_precedence; R1_harness_dir_env
 R5_unknown_flag; R5_fix_flag_rejected; R5_positional; R5_root_no_value; R5_inventory_no_value
 R5_date_no_value; R5_root_not_a_dir; R5_inventory_not_relative; R5_no_git_ancestor_no_root
 R5_zero_docs; R5_doc_invalid_utf8; R5_date_malformed; R5_date_impossible; R5_progress_is_a_file
