@@ -384,9 +384,12 @@ per release, before the `VERSION` bump — and read the report; a run on the sam
 that day's report. It is distinct from the epic-rollup drift check above (the Scout
 re-validating planned epics), from `init.sh`'s installed-body drift guard and from
 `tools/test-drift-check.sh`'s weakened-assertion check. Replaced patterns — a document that
-describes a mechanism the code now implements differently — are not detected; "No drift
-detected" means every named path and symbol resolves and nothing in the requested inventory is
-unnamed.
+describes a mechanism the code now implements differently — are not detected, and neither is a
+token outside the shapes the tool extracts: a backticked path whose first directory does not
+exist at the root (a typo such as tols/x.py), a bare file name found nowhere, or any token the
+implementation-readiness grammar ignores (placeholders, globs, URLs, absolute paths). "No drift
+detected" means every backticked repo-rooted path and path:name symbol the tool recognised
+resolves, and nothing in the requested inventory is unnamed.
 
 ## Epic lifecycle
 

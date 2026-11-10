@@ -74,9 +74,9 @@ the cold reader could not restate is fixed or recorded in the spec as an accepte
 
 On demand — suggested once per release — `tools/drift-report.py` compares the living documents
 (`specs/product.md`, `specs/architecture.md`, the ADRs) with the tree and writes an advisory
-`progress/drift/<date>.md` naming every path or symbol a document names that the code lacks,
-and every file in a requested inventory that no document names, each with the reconciliation
-choice (doc or code) left to a human (E37-F03).
+`progress/drift/<date>.md` naming each backticked repo-rooted path or path:name symbol it
+recognises that the code lacks, and every file in a requested inventory that no document names,
+each with the reconciliation choice (doc or code) left to a human (E37-F03).
 
 ## Quick start in this source checkout (Claude Code)
 

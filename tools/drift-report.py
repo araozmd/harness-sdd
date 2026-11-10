@@ -122,8 +122,12 @@ def parse_date(value):
 ADVISORY = ("Advisory: this report changes nothing. For each finding a human decides: update the "
             "doc, or update the code.")
 NOT_CHECKED = ('Replaced patterns — a document that describes a mechanism the code now implements '
-               'differently — are not detected; "No drift detected" means every named path and '
-               'symbol resolves and nothing in the requested inventory is unnamed.')
+               'differently — are not detected, and neither is a token outside the shapes the tool '
+               'extracts: a backticked path whose first directory does not exist at the root (a typo '
+               'such as tols/x.py), a bare file name found nowhere, or any token the '
+               'implementation-readiness grammar ignores (placeholders, globs, URLs, absolute paths). '
+               '"No drift detected" means every backticked repo-rooted path and path:name symbol the '
+               'tool recognised resolves, and nothing in the requested inventory is unnamed.')
 CHOICE_CODE = "update doc (name it in the decision that owns it) or update code (remove it)"
 CHOICE_SYMBOL = "update doc (name the symbol as it is today) or update code (restore it)"
 CHOICE_PATH = ("update doc (rewrite the path as it is today, or give it a placeholder prefix if "

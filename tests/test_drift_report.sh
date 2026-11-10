@@ -29,7 +29,10 @@ trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-1
 GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
-pass() { echo "ok - $1"; }
+pass() { echo "ok - $1"; echo "$1" >> "$T/passed"; }
+# row <name> — run one row and require that it passed under its own name: a row that returns
+# early without `pass` (a platform skip, a stray return) is a failure, never a silent skip.
+row() { "$1"; grep -qE "^$1( |\$)" "$T/passed" || fail "$1: the row returned without passing"; }
 
 command -v python3 >/dev/null 2>&1 || fail "python3 is a hard harness dependency and is absent"
 [ -d "$FX/repo/specs" ] || fail "setup: fixture tree $FX/repo is missing"
@@ -158,7 +161,7 @@ R1_dogfood_archive_copy() {
 
 # ── R4: the fixed report shape, --date, overwrite, stdout ────────────────────────────────
 ADVISORY='Advisory: this report changes nothing. For each finding a human decides: update the doc, or update the code.'
-NOT_CHECKED='Replaced patterns — a document that describes a mechanism the code now implements differently — are not detected; "No drift detected" means every named path and symbol resolves and nothing in the requested inventory is unnamed.'
+NOT_CHECKED='Replaced patterns — a document that describes a mechanism the code now implements differently — are not detected, and neither is a token outside the shapes the tool extracts: a backticked path whose first directory does not exist at the root (a typo such as tols/x.py), a bare file name found nowhere, or any token the implementation-readiness grammar ignores (placeholders, globs, URLs, absolute paths). "No drift detected" means every backticked repo-rooted path and path:name symbol the tool recognised resolves, and nothing in the requested inventory is unnamed.'
 R4_shape() {
   fresh r4shape
   run_tool --root "$R" --date 2026-01-02; expect_ok R4_shape
@@ -357,7 +360,10 @@ R2_exit0_with_findings() {
 }
 
 # chk_exit2 <row> <stderr-fixed-string> — each row's argv is the minimal one ONLY that branch
-# rejects; the string names the branch so a second producer cannot pass it.
+# rejects, and it asserts exit 2, the stderr shape and the fixed string. Whether the string
+# also excludes a second producer of exit 2 is each row's own choice of string (the usage text
+# and the internal catch-all both carry common words): R5_progress_is_a_file anchors the
+# write_report message for that reason.
 chk_exit2() {
   [ "$rc" -eq 2 ] || fail "$1: expected rc 2, got $rc ($(both))"
   head -n 1 "$T/err" | grep -q '^drift-report: error: ' || fail "$1: stderr's first line is not 'drift-report: error: ...' ($(both))"
@@ -465,6 +471,9 @@ R5_inventory_not_relative() {
   chk_exit2 "R5_inventory_not_relative (..)" '--inventory must be a path relative to the root: ../x'
   run_tool --root "$R" --inventory ''
   chk_exit2 "R5_inventory_not_relative (empty)" '--inventory must be a path relative to the root:'
+  # a `..` segment in a NON-leading position: tools/../../x reaches $T/r5rel/x outside the root
+  run_tool --root "$R" --inventory tools/../../x
+  chk_exit2 "R5_inventory_not_relative (inner ..)" '--inventory must be a path relative to the root: tools/../../x'
 }
 R5_no_git_ancestor_no_root() {
   rm -rf "$T/ceil"; mkdir -p "$T/ceil/.git" "$T/ceil/nogit/tools" "$T/ceil/specs"
@@ -478,11 +487,18 @@ R5_doc_invalid_utf8() {
   fresh r5utf; printf '\377' >> "$R/specs/adr/0001-clean.md"
   run_tool --root "$R"; chk_exit2 R5_doc_invalid_utf8 '0001-clean.md'
 }
-R5_date_malformed() { fresh r5dm; run_tool --root "$R" --date 2026-1-1; chk_exit2 R5_date_malformed '--date is not a YYYY-MM-DD date: 2026-1-1'; }
+R5_date_malformed() {
+  fresh r5dm
+  run_tool --root "$R" --date 2026-1-1; chk_exit2 R5_date_malformed '--date is not a YYYY-MM-DD date: 2026-1-1'
+  # Python >= 3.11's date.fromisoformat accepts these two on its own: only the shape check rejects them
+  run_tool --root "$R" --date 20260102; chk_exit2 "R5_date_malformed (basic form)" '--date is not a YYYY-MM-DD date: 20260102'
+  run_tool --root "$R" --date 2026-W01-1; chk_exit2 "R5_date_malformed (ISO week)" '--date is not a YYYY-MM-DD date: 2026-W01-1'
+  [ ! -e "$R/progress/drift" ] || fail "R5_date_malformed: a report was written for a malformed date"
+}
 R5_date_impossible() { fresh r5di; run_tool --root "$R" --date 2026-02-30; chk_exit2 R5_date_impossible '--date is not a YYYY-MM-DD date: 2026-02-30'; }
 R5_progress_is_a_file() {
   fresh r5prog; rm -r "$R/progress"; : > "$R/progress"
-  run_tool --root "$R"; chk_exit2 R5_progress_is_a_file 'progress'
+  run_tool --root "$R"; chk_exit2 R5_progress_is_a_file 'cannot write the report'
 }
 R5_sibling_missing() {
   fresh r5sib; rm -rf "$T/alone"; mkdir -p "$T/alone/tools"; cp "$TOOL" "$T/alone/tools/"
@@ -571,10 +587,7 @@ PYEOF
   tree_unchanged "$TOOL" || fail "R6_tree_unchanged_but_report: the run changed, added or removed a file other than the report"
   grep -q 'doc-names-missing-symbol' "$R/progress/drift/2026-01-02.md" && grep -q '^- code-unnamed' "$R/progress/drift/2026-01-02.md" && grep -q '^- doc-names-missing ' "$R/progress/drift/2026-01-02.md" \
     || fail "R6_tree_unchanged_but_report: setup: the run did not exercise every finding code"
-  pass R6_tree_unchanged_but_report; R6_no_bytecode_written
-R7_no_own_definitions; R7_no_local_binding; R7_sibling_missing_exit2
-R9_workflow_section; R9_readme_sentence
-R10_version_changelog_ledger
+  pass R6_tree_unchanged_but_report
 }
 
 # ── R7: the resolver is imported by file path; none of its names is defined here ──────────
@@ -644,9 +657,10 @@ and, when `--inventory <dir>` is passed, each `code-unnamed` file directly under
 It is advisory: no gate, no board write, no edit to any document or code; it exits 0 whenever the report was written and 2 only when it could not run, and it prints the report path.
 Run it on demand — suggested once per release, before the `VERSION` bump — and read the report; a run on the same day overwrites that day's report.
 It is distinct from the epic-rollup drift check above (the Scout re-validating planned epics), from `init.sh`'s installed-body drift guard and from `tools/test-drift-check.sh`'s weakened-assertion check.
-Replaced patterns — a document that describes a mechanism the code now implements differently — are not detected
+Replaced patterns — a document that describes a mechanism the code now implements differently — are not detected, and neither is a token outside the shapes the tool extracts: a backticked path whose first directory does not exist at the root (a typo such as tols/x.py), a bare file name found nowhere, or any token the implementation-readiness grammar ignores (placeholders, globs, URLs, absolute paths).
+"No drift detected" means every backticked repo-rooted path and path:name symbol the tool recognised resolves, and nothing in the requested inventory is unnamed.
 ANCHORS
-  [ "$(wc -l < "$T/wf.anchors" | tr -d ' ')" -eq 7 ] || fail "R9_workflow_section: setup: the anchor list is not seven sentences"
+  [ "$(wc -l < "$T/wf.anchors" | tr -d ' ')" -eq 8 ] || fail "R9_workflow_section: setup: the anchor list is not eight sentences"
   while IFS= read -r _s; do
     grep -qF -- "$_s" "$T/wf.folded" || fail "R9_workflow_section: the section lacks the sentence: $_s"
   done < "$T/wf.anchors"
@@ -655,15 +669,15 @@ ANCHORS
   done
   # closed world: any NET change in the folded word count reds (a word-count-neutral edit is
   # seen only by the sentence anchors above — a stated limit, not a guarantee)
-  [ "$(wc -w < "$T/wf.folded" | tr -d ' ')" -eq 241 ] \
-    || fail "R9_workflow_section: the section holds $(wc -w < "$T/wf.folded" | tr -d ' ') words, not the pasted 241"
+  [ "$(wc -w < "$T/wf.folded" | tr -d ' ')" -eq 292 ] \
+    || fail "R9_workflow_section: the section holds $(wc -w < "$T/wf.folded" | tr -d ' ') words, not the pasted 292"
   pass R9_workflow_section
 }
 R9_readme_sentence() {
   _rd="$ROOT/README.md"
   slice_doc "$_rd" '## How it works' > "$T/rd.folded"
   [ -s "$T/rd.folded" ] || fail "R9_readme_sentence: setup: could not slice '## How it works' from README.md"
-  _b='On demand — suggested once per release — `tools/drift-report.py` compares the living documents (`specs/product.md`, `specs/architecture.md`, the ADRs) with the tree and writes an advisory `progress/drift/<date>.md` naming every path or symbol a document names that the code lacks, and every file in a requested inventory that no document names, each with the reconciliation choice (doc or code) left to a human (E37-F03).'
+  _b='On demand — suggested once per release — `tools/drift-report.py` compares the living documents (`specs/product.md`, `specs/architecture.md`, the ADRs) with the tree and writes an advisory `progress/drift/<date>.md` naming each backticked repo-rooted path or path:name symbol it recognises that the code lacks, and every file in a requested inventory that no document names, each with the reconciliation choice (doc or code) left to a human (E37-F03).'
   grep -qF -- "$_b" "$T/rd.folded" || fail "R9_readme_sentence: README '## How it works' lacks the drift-report sentence"
   _e2='Before the Builder sees a spec, the Doc-critic also paraphrases it back'
   grep -qF -- "$_e2" "$T/rd.folded" || fail "R9_readme_sentence: the E37-F02 sentence is gone from '## How it works'"
@@ -682,6 +696,8 @@ R10_version_changelog_ledger() {
     || fail "R10_version_changelog_ledger: docs/RATIONALE.md has no C13 — Living-doc drift report row in the Capability compensation layer"
   grep '^| C13 ' "$_rat" | awk -F'|' '{ print $5 }' | grep -qE 'Ablation[^|]*controlled runs[^|]*doc-names-missing[^|]*Retain while it catches any' \
     || fail "R10_version_changelog_ledger: the C13 evidence cell lacks the ablation / retention wording"
+  grep '^| C13 ' "$_rat" | awk -F'|' '{ print $4 }' | grep -qF 'the report extracts the backticked repo-rooted paths and `path:name` symbols it recognises' \
+    || fail "R10_version_changelog_ledger: the C13 why cell does not say the report extracts only the symbols it recognises"
   [ "$(grep -n '^| C13 ' "$_rat" | cut -d: -f1)" -eq "$(( $(grep -n '^| C12 ' "$_rat" | cut -d: -f1) + 1 ))" ] \
     || fail "R10_version_changelog_ledger: the C13 row is not directly after C12"
   _v="$(cat "$ROOT/VERSION")"
@@ -694,6 +710,55 @@ R10_version_changelog_ledger() {
        END { chk(); exit ok ? 0 : 1 }' "$ROOT/CHANGELOG.md" \
     || fail "R10_version_changelog_ledger: no CHANGELOG section names both E37-F03 and drift-report"
   pass R10_version_changelog_ledger
+}
+
+R2_line_token_pairs_distinct() {
+  fresh r2pairs
+  printf '\nA `tools/gone.py` and `tools/also.py`.\n\nAgain `tools/gone.py`.\n' >> "$R/specs/product.md"
+  _n="$(lno "$R/specs/product.md" 'A `tools/gone.py` and `tools/also.py`.')"
+  _m="$(lno "$R/specs/product.md" 'Again `tools/gone.py`.')"
+  [ -n "$_n" ] && [ -n "$_m" ] && [ "$_n" -lt "$_m" ] || fail "R2_line_token_pairs_distinct: setup: the two lines are not in order ($_n / $_m)"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_line_token_pairs_distinct
+  [ "$(section "$(report)" specs/product.md | grep '^- ' | sed 's/ — reconcile:.*//')" = "- doc-names-missing specs/product.md:$_n \`tools/gone.py\`
+- doc-names-missing specs/product.md:$_n \`tools/also.py\`
+- doc-names-missing specs/product.md:$_m \`tools/gone.py\`" ] \
+    || fail "R2_line_token_pairs_distinct: the findings are not the three distinct (line, token) pairs in order ($(section "$(report)" specs/product.md | grep '^- ' | tr '\n' '|'))"
+  [ "$(last_line "$(report)")" = 'drift-report: 3 finding(s) across 4 document(s) read, 0 code entries unnamed' ] \
+    || fail "R2_line_token_pairs_distinct: the summary does not count 3 finding(s)"
+  pass R2_line_token_pairs_distinct
+}
+R1_bare_name_resolves_beside_document() {
+  fresh r1bare
+  grep -qF 'a bare `glossary.md`' "$R/specs/product.md" || fail "R1_bare_name_resolves_beside_document: setup: product.md no longer names the bare glossary.md"
+  [ -f "$R/specs/glossary.md" ] && ! grep -q 'Nothere' "$R/specs/glossary.md" || fail "R1_bare_name_resolves_beside_document: setup: the sibling is missing or already holds Nothere"
+  run_tool --root "$R" --date 2026-01-02 --inventory specs; expect_ok R1_bare_name_resolves_beside_document
+  [ "$(section "$(report)" "$INV" | grep -c 'specs/glossary.md')" -eq 0 ] \
+    || fail "R1_bare_name_resolves_beside_document: a sibling named by a bare file name is listed as unnamed"
+  [ "$(section "$(report)" "$INV" | grep -c '^- code-unnamed `specs/architecture.md`')" -eq 1 ] \
+    || fail "R1_bare_name_resolves_beside_document: setup: the inventory does not list the genuinely unnamed sibling (an empty section proves nothing)"
+  printf '\nIt also names `glossary.md:Nothere`.\n' >> "$R/specs/product.md"
+  _n="$(lno "$R/specs/product.md" 'It also names `glossary.md:Nothere`.')"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R1_bare_name_resolves_beside_document
+  [ "$(section "$(report)" specs/product.md | grep '^- ' | sed 's/ — reconcile:.*//')" = "- doc-names-missing-symbol specs/product.md:$_n \`glossary.md:Nothere\`" ] \
+    || fail "R1_bare_name_resolves_beside_document: a missing symbol on a bare sibling is not exactly one finding ($(section "$(report)" specs/product.md | grep '^- ' | tr '\n' '|'))"
+  pass R1_bare_name_resolves_beside_document
+}
+R1_non_adr_namespaces_excluded() {
+  fresh r1ns
+  for _d in specs/epics/adr specs/_templates/adr specs/adr/adr; do
+    mkdir -p "$R/$_d"; printf '# X\n\nIt names `tools/missing.py`.\n' > "$R/$_d/0001-x.md"
+  done
+  run_tool --root "$R" --date 2026-01-02; expect_ok R1_non_adr_namespaces_excluded
+  [ "$(grep -c 'tools/missing\.py' "$(report)" || true)" -eq 0 ] || fail "R1_non_adr_namespaces_excluded: a document under epics/, _templates/ or adr/adr/ was read"
+  [ "$(grep -c '^  - specs/' "$(report)")" -eq 4 ] || fail "R1_non_adr_namespaces_excluded: the documents list is not the four fixture documents"
+  [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] \
+    || fail "R1_non_adr_namespaces_excluded: the document count moved ($(last_line "$(report)"))"
+  # control: the same document under a real product space IS read
+  mkdir -p "$R/specs/other/adr"; cp "$R/specs/epics/adr/0001-x.md" "$R/specs/other/adr/"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R1_non_adr_namespaces_excluded
+  [ "$(grep -c '^- doc-names-missing specs/other/adr/0001-x.md:' "$(report)" || true)" -eq 1 ] \
+    || fail "R1_non_adr_namespaces_excluded: control: the same file under a product space is not read"
+  pass R1_non_adr_namespaces_excluded
 }
 
 R3_inventory_counts_and_precedence() {
@@ -732,21 +797,26 @@ R1_harness_dir_env() {
   pass R1_harness_dir_env
 }
 
-R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
-R1_installed_layout; R1_dogfood_archive_copy
-R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only; R4_report_mode
-R2_path_missing; R2_symbol_missing; R2_unresolved_path_colon_name_single_finding
-R2_fenced_decoy_invisible; R2_every_line_kind_scanned; R2_ignored_shapes
-R2_duplicate_on_one_line_collapsed; R2_order_by_document_then_line
-R2_crlf_and_bom_keep_findings; R2_non_utf8_target_not_searched; R2_directory_target_not_searched
-R2_exit0_with_findings
-R3_inventory_unnamed; R3_hidden_and_subdir_skipped; R3_named_via_remap; R3_dir_ref_names_nothing
-R3_inventory_repeat; R3_inventory_not_requested; R3_inventory_missing_dir_exit2
-R3_inventory_counts_and_precedence; R1_harness_dir_env
-R5_unknown_flag; R5_fix_flag_rejected; R5_positional; R5_root_no_value; R5_inventory_no_value
-R5_date_no_value; R5_root_not_a_dir; R5_inventory_not_relative; R5_no_git_ancestor_no_root
-R5_zero_docs; R5_doc_invalid_utf8; R5_date_malformed; R5_date_impossible; R5_progress_is_a_file
-R5_sibling_missing; R5_no_report_on_error; R5_stdout_empty_on_error; R5_help_exit0
-R5_help_as_value_is_not_help; R5_internal_error_no_traceback; R5_never_exit_1
-R6_tree_unchanged_but_report
+row R1_clean_positive; row R1_architecture_absent; row R1_product_space_adr;
+row R1_root_discovered_from_git; row R1_installed_layout; row R1_dogfood_archive_copy;
+row R4_shape; row R4_date_override; row R4_same_day_overwrite; row R4_stdout_is_path_only;
+row R4_report_mode; row R2_path_missing; row R2_symbol_missing;
+row R2_unresolved_path_colon_name_single_finding; row R2_fenced_decoy_invisible;
+row R2_every_line_kind_scanned; row R2_ignored_shapes; row R2_duplicate_on_one_line_collapsed;
+row R2_line_token_pairs_distinct; row R2_order_by_document_then_line;
+row R1_bare_name_resolves_beside_document; row R1_non_adr_namespaces_excluded;
+row R2_crlf_and_bom_keep_findings; row R2_non_utf8_target_not_searched;
+row R2_directory_target_not_searched; row R2_exit0_with_findings; row R3_inventory_unnamed;
+row R3_hidden_and_subdir_skipped; row R3_named_via_remap; row R3_dir_ref_names_nothing;
+row R3_inventory_repeat; row R3_inventory_not_requested; row R3_inventory_missing_dir_exit2;
+row R3_inventory_counts_and_precedence; row R1_harness_dir_env; row R5_unknown_flag;
+row R5_fix_flag_rejected; row R5_positional; row R5_root_no_value; row R5_inventory_no_value;
+row R5_date_no_value; row R5_root_not_a_dir; row R5_inventory_not_relative;
+row R5_no_git_ancestor_no_root; row R5_zero_docs; row R5_doc_invalid_utf8;
+row R5_date_malformed; row R5_date_impossible; row R5_progress_is_a_file;
+row R5_sibling_missing; row R5_no_report_on_error; row R5_stdout_empty_on_error;
+row R5_help_exit0; row R5_help_as_value_is_not_help; row R5_internal_error_no_traceback;
+row R5_never_exit_1; row R6_tree_unchanged_but_report; row R6_no_bytecode_written;
+row R7_no_own_definitions; row R7_no_local_binding; row R7_sibling_missing_exit2;
+row R9_workflow_section; row R9_readme_sentence; row R10_version_changelog_ledger;
 echo "test_drift_report.sh: all rows passed"
