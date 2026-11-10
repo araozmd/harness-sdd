@@ -542,3 +542,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-11-10T14:01:51Z E37-F02 Reviewer round 5 APPROVE (abab212): F1/F2 wording closed, no findings; Q1/Q3/Q6/Q6b survive as disclosed, Q6c/Q4(UTF-8) killed; 6/6 regression mutants killed; 8/8 R-ids covered; gate: 4 known-env reds only. Opening PR.
 - 2026-11-10T14:02:30Z E37-F02 PR #321 opened (0.107.0); await-merge recorded; starting /sdd-pr-loop 321.
 - 2026-11-10T14:14:38Z E37-F02 PR #321 merged at 020f46ae (Codex clean round 1, auto-merge); in-review → done (evidence 020f46ae); scratch swept; VERSION 0.107.0 on main.
+- 2026-11-10T14:46:40Z E37-F03 pending → spec-ready → in-progress (Architect 8c9e07f: plain tool tools/drift-report.py importing F01 resolver, judgment part deferred with `## Not checked by this tool`, 10 R-ids, complexity standard, VERSION 0.108.0, ledger C13; Doc-critic checkpoint 1 could-not-restate fixed + re-audit 2 fixed/recorded; lints 0/0/0; autonomous gate skipped). Builder round 1.
