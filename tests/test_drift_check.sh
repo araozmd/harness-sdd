@@ -247,8 +247,10 @@ tr '\n' ' ' < "$STORE" | grep -qiE 'drift check[^.]{0,40}rolling-wave' || fail "
 if ls .claude/commands/sdd-drift*.md >/dev/null 2>&1; then
   fail "R18: F06 added a .claude/commands/sdd-drift*.md slash command"
 fi
-# F06 does not newly wire the installer for the drift check
-grep -qi 'drift' harness-install.sh && fail "R18: harness-install.sh newly references drift"
+# F06 does not newly wire the installer for the drift check; the one exemption is E37-F03's
+# own installed tool, tools/drift-report.py (an installed tool, not drift-check glue)
+grep -v 'tools/drift-report\.py' harness-install.sh | grep -qi 'drift' \
+  && fail "R18: harness-install.sh newly references drift outside tools/drift-report.py's own line"
 pass "R18 portable_no_glue"
 
 # ── R19: one MINOR bump recorded in CHANGELOG (no literal frozen; marker across file)
