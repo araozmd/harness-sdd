@@ -2281,19 +2281,20 @@
         {
           "id": "E37-F02",
           "title": "Doc-critic paraphrase-back comprehension mode at the feature-spec checkpoint",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "020f46ae2cb5d6c45426212284b55e299f9b62ad",
+            "ref": "020f46ae2cb5d6c45426212284b55e299f9b62ad",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E37-F01"
           ],
-          "spec_path": "specs/epics/E37-goldfish-spec-review/F02-paraphrase-back/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (321)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E37-F02 done --evidence <merge-ref>`",
-            "pr": "321"
-          }
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F02-paraphrase-back/"
         },
         {
           "id": "E37-F03",

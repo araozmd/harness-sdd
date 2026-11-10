@@ -541,3 +541,4 @@ asked) — recorded in `progress/lessons.md`.
 - 2026-11-10T13:11:42Z — E37-F02 in-progress → in-review (builder-heavy round 5 at abab212: wording only — net-count claims in test_doc_critic.sh comments and tests.md rows, R6 opener-to-blank-line span disclosure, Q1–Q11/K1–K5 in the mutant table, three Known-limits classes; 10/10 regression mutants killed; gate: 4 known-env reds only).
 - 2026-11-10T14:01:51Z E37-F02 Reviewer round 5 APPROVE (abab212): F1/F2 wording closed, no findings; Q1/Q3/Q6/Q6b survive as disclosed, Q6c/Q4(UTF-8) killed; 6/6 regression mutants killed; 8/8 R-ids covered; gate: 4 known-env reds only. Opening PR.
 - 2026-11-10T14:02:30Z E37-F02 PR #321 opened (0.107.0); await-merge recorded; starting /sdd-pr-loop 321.
+- 2026-11-10T14:14:38Z E37-F02 PR #321 merged at 020f46ae (Codex clean round 1, auto-merge); in-review → done (evidence 020f46ae); scratch swept; VERSION 0.107.0 on main.
