@@ -210,12 +210,15 @@ slice() {
 # folded: newlines to spaces, runs of spaces squeezed — anchors span wrapped lines.
 folded() { tr '\n' ' ' | tr -s ' '; }
 # words: the number of whitespace-separated words on stdin (wc -w). Used as an exact count over
-# a sliced span (heading line, fenced lines and markup included): ANY word added to or removed
-# from the span changes it, whatever the punctuation around it — a bold, parenthesised or
-# unterminated sentence, a clause, or a merge of two sentences that frees room for another.
-# It does NOT see an in-place substitution that keeps the number of words (one word swapped for
-# another, a reorder): the whole-sentence anchors catch that only inside the spans they pin, and
-# the token counts only when the substitution adds or removes a counted token.
+# a sliced span (heading line, fenced lines and markup included): any NET change in the number
+# of words in the span reds it, whatever the punctuation around the change — a bold,
+# parenthesised or unterminated sentence, a clause, or a merge of two sentences that frees room
+# for another, as long as the words added and removed do not balance. It does NOT see any edit
+# that keeps the number of words: a word swapped for another, a reorder, or an added sentence
+# paid for by deleting as many unpinned words elsewhere in the span. The whole-sentence anchors
+# catch such an edit only inside the spans they pin, and the token counts only when it adds or
+# removes a counted token. What wc -w calls whitespace depends on the locale (macOS wc splits a
+# non-breaking space under UTF-8, not under LC_ALL=C); none of the five counted spans holds one.
 words() { wc -w | tr -d ' '; }
 # lineno <file> <exact heading line>: first line number of an exact line, empty when absent.
 lineno() { grep -nxF -- "$2" "$1" | head -n 1 | cut -d: -f1; }
@@ -257,10 +260,11 @@ test_paraphrase_section() {
   # closed-world, two nets. (1) Token counts: every inbox/chat mention lies inside the single
   # pinned four-files-only sentence (2 x inbox, 1 x chat) — catches an edit that adds or removes
   # one of those words, including a same-length substitution that swaps one in. (2) The word
-  # count below: catches any added or removed word in the section, whatever its punctuation
+  # count below: catches any net change in the section's word count, whatever its punctuation
   # ("the intake brief", "the conversation", a bold or unterminated sentence). Neither sees a
-  # same-word-count substitution that avoids the tokens; the anchors above see that only over
-  # the span each one pins.
+  # word-count-neutral edit (a swap, a reorder, or an added sentence offset by a deletion
+  # elsewhere in the section) that avoids the tokens; the anchors above see that only over the
+  # span each one pins.
   [ "$(printf '%s' "$_sec" | grep -oi 'inbox' | wc -l | tr -d ' ')" -eq 2 ] \
     || fail "E37-F02:R1: an inbox mention lies outside the pinned four-files-only sentence"
   [ "$(printf '%s' "$_sec" | grep -oi 'chat' | wc -l | tr -d ' ')" -eq 1 ] \
@@ -338,11 +342,12 @@ test_architect_paraphrase_step() {
   # closed-world, three nets. (1) Token counts: the four pinned sentences carry every
   # re-audit mention and the single "spawn the critic" — catches an edit that adds or removes
   # those words, including a same-length substitution that swaps one in. (2) The word count
-  # below: catches any added or removed word in the section, whatever its punctuation ("run the
-  # critic again", a bold or parenthesised sentence, a merge that frees room for another).
-  # Neither sees a same-word-count substitution that avoids the tokens; the anchors above see
-  # that only over the span each one pins. (3) The vocabulary regex above is a third, narrower
-  # net (its word list only).
+  # below: catches any net change in the section's word count, whatever its punctuation ("run
+  # the critic again", a bold or parenthesised sentence, a merge that frees room for another).
+  # Neither sees a word-count-neutral edit (a swap, a reorder, or an added sentence offset by a
+  # deletion elsewhere in the section) that avoids the tokens; the anchors above see that only
+  # over the span each one pins. (3) The vocabulary regex above is a third, narrower net (its
+  # word list only).
   [ "$(printf '%s' "$_sec" | grep -oi 're-audit' | wc -l | tr -d ' ')" -eq 4 ] \
     || fail "E37-F02:R3: a re-audit mention lies outside the four pinned sentences (the bound is one)"
   [ "$(printf '%s' "$_sec" | grep -oi 'spawn the critic' | wc -l | tr -d ' ')" -eq 1 ] \
@@ -377,7 +382,8 @@ test_reviewer_reads_trade_offs() {
     "malformed-entry sentence missing"
   _need 'A spec without the section has no trade-offs to read; nothing here fires.' "absent-section sentence missing"
   # closed-world by word count: exactly 187 words, heading line included (an added "flag it
-  # anyway", terminated or not, reds; a same-length substitution does not)
+  # anyway", terminated or not, reds unless as many words are deleted elsewhere in the section;
+  # a same-length substitution does not)
   [ "$(printf '%s' "$_sec" | words)" -eq 187 ] \
     || fail "E37-F02:R4: the Accepted trade-offs section must hold exactly its 187 words (a word was added or removed)"
   # item 9 of '## What you check' is unchanged and names no trade-off
@@ -416,8 +422,8 @@ test_template_trade_offs_section() {
   case "$_sec" in *'Optional (E37-F02).'*) : ;; *) fail "E37-F02:R5: optional marker missing" ;; esac
   case "$_sec" in *'Omit the section when there is nothing to record.'*) : ;; *) fail "E37-F02:R5: omit sentence missing" ;; esac
   # closed-world by word count over the "> "-stripped section, heading and placeholder line
-  # included: exactly 69 words (an added note line, terminated or not, reds; a same-length
-  # substitution does not)
+  # included: exactly 69 words (an added note line, terminated or not, reds unless as many
+  # words are deleted elsewhere in the section; a same-length substitution does not)
   [ "$(printf '%s' "$_note" | words)" -eq 69 ] \
     || fail "E37-F02:R5: the template section must hold exactly its 69 words (a word was added or removed)"
   printf '%s\n' "$_sl" | grep -qxF -- '- <unit: R-id, plan row, T<n> or section> — <what the cold reader could not restate> — accepted because <why>' \
@@ -451,8 +457,10 @@ test_workflow_paraphrase_paragraph() {
     || fail "E37-F02:R6: the paraphrase paragraph must come after the E37-F01 paragraph"
   # closed-world by word count, scoped to the E37-F02 PARAGRAPH only (opener line to the next
   # blank line): the section is shared with E37-F01 and later features, so a section-wide count
-  # would trip on their edits. A new separate paragraph in the section is not counted, and a
-  # same-length substitution inside the paragraph is not seen (accepted limits).
+  # would trip on their edits. Anything in the section outside the span from the E37-F02 opener
+  # line to the next blank line is not counted — a new paragraph (P6), a line placed just before
+  # the opener (Q6), a sentence added to the E37-F01 paragraph (Q6b) — and a word-count-neutral
+  # edit inside the paragraph is not seen (accepted limits).
   _par="$(slice "$WORKFLOW" '## Doc-critic checkpoints' | awk -v s="At the \`feature-spec\` checkpoint the critic's note opens with" '
     index($0, s) == 1 { k = 1 }
     k && /^[[:space:]]*$/ { exit }
