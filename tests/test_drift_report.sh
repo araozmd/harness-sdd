@@ -216,7 +216,142 @@ R4_stdout_is_path_only() {
   pass R4_stdout_is_path_only
 }
 
+# ── R2: the two document finding codes and the inherited ignore rules ────────────────────
+CHOICE_PATH='update doc (rewrite the path as it is today, or give it a placeholder prefix if it is not in this repository, or supersede the decision) or update code (restore it)'
+CHOICE_SYMBOL='update doc (name the symbol as it is today) or update code (restore it)'
+BAD=specs/adr/0002-bad.md
+# one_line <report> <section-doc> <exact-line> — the section holds exactly one such line.
+one_line() {
+  [ "$(section "$1" "$2" | grep -cxF -- "$3" || true)" -eq 1 ] || fail "${4:-R2}: section $2 does not hold exactly one line: $3"
+}
+R2_path_missing() {
+  fresh r2path; plant_bad
+  readme_says 0002-bad.md:6; readme_says 0002-bad.md:4
+  [ "$(lno "$FX/defects/0002-bad.md" 'tools/missing.py')" -eq 6 ] || fail "R2_path_missing: setup: tools/missing.py is not on line 6 of the planted file"
+  [ "$(lno "$FX/defects/0002-bad.md" 'docs/gone.md')" -eq 4 ] || fail "R2_path_missing: setup: docs/gone.md is not on line 4 of the planted file"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_path_missing
+  one_line "$(report)" "$BAD" "- doc-names-missing $BAD:6 \`tools/missing.py\` — reconcile: $CHOICE_PATH" R2_path_missing
+  one_line "$(report)" "$BAD" "- doc-names-missing $BAD:4 \`docs/gone.md\` — reconcile: $CHOICE_PATH" R2_path_missing
+  pass R2_path_missing
+}
+R2_symbol_missing() {
+  fresh r2sym; plant_bad
+  readme_says 0002-bad.md:8
+  [ "$(lno "$FX/defects/0002-bad.md" 'tools/real.py:nothere')" -eq 8 ] || fail "R2_symbol_missing: setup: the symbol is not on line 8 of the planted file"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_symbol_missing
+  one_line "$(report)" "$BAD" "- doc-names-missing-symbol $BAD:8 \`tools/real.py:nothere\` — reconcile: $CHOICE_SYMBOL" R2_symbol_missing
+  # control: a present symbol is no finding; renaming it in the copy makes it one
+  fresh r2sym2
+  grep -qF 'tools/real.py:helper' "$R/specs/product.md" || fail "R2_symbol_missing: setup: the fixture product.md no longer names tools/real.py:helper"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_symbol_missing
+  [ "$(grep -c 'doc-names-missing-symbol' "$(report)" || true)" -eq 0 ] || fail "R2_symbol_missing: a present symbol was reported"
+  sed 's/def helper/def helpr/' "$R/tools/real.py" > "$T/real.py"; cp "$T/real.py" "$R/tools/real.py"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_symbol_missing
+  [ "$(section "$(report)" specs/product.md | grep -c '^- doc-names-missing-symbol specs/product.md:[0-9]* `tools/real.py:helper` ')" -eq 1 ] \
+    || fail "R2_symbol_missing: a renamed symbol is not exactly one finding under specs/product.md"
+  pass R2_symbol_missing
+}
+R2_unresolved_path_colon_name_single_finding() {
+  fresh r2unres; plant_bad
+  [ "$(lno "$FX/defects/0002-bad.md" 'tools/nope.py:x')" -eq 10 ] || fail "R2_unresolved_path: setup: the table row is not on line 10"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_unresolved_path_colon_name_single_finding
+  one_line "$(report)" "$BAD" "- doc-names-missing $BAD:10 \`tools/nope.py:x\` — reconcile: $CHOICE_PATH" R2_unresolved_path_colon_name_single_finding
+  [ "$(section "$(report)" "$BAD" | grep -c ':10 ')" -eq 1 ] || fail "R2_unresolved_path: line 10 yields more than one finding"
+  [ "$(grep -c 'doc-names-missing-symbol.*nope' "$(report)" || true)" -eq 0 ] || fail "R2_unresolved_path: an unresolved path also reported its symbol"
+  pass R2_unresolved_path_colon_name_single_finding
+}
+R2_fenced_decoy_invisible() {
+  fresh r2fence; plant_bad
+  [ "$(lno "$R/$BAD" 'fenced-decoy')" -eq 2 ] || fail "R2_fenced_decoy_invisible: setup: the decoy is not on line 2 of the planted file"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_fenced_decoy_invisible
+  [ "$(grep -c 'fenced-decoy' "$(report)" || true)" -eq 0 ] || fail "R2_fenced_decoy_invisible: a token inside fenced code was reported"
+  pass R2_fenced_decoy_invisible
+}
+R2_every_line_kind_scanned() {
+  fresh r2kinds; plant_bad
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_every_line_kind_scanned
+  [ "$(section "$(report)" "$BAD" | sed -n 's/^- [a-z-]* [^ ]*:\([0-9]*\) .*/\1/p' | tr '\n' ' ')" = '4 6 8 10 ' ] \
+    || fail "R2_every_line_kind_scanned: the heading, paragraph, blockquote and table-row findings are not at lines 4 6 8 10"
+  [ "$(last_line "$(report)")" = 'drift-report: 4 finding(s) across 5 document(s) read, 0 code entries unnamed' ] \
+    || fail "R2_every_line_kind_scanned: the summary does not count 4 finding(s)"
+  pass R2_every_line_kind_scanned
+}
+R2_ignored_shapes() {
+  fresh r2tok
+  grep '^Ignored shapes:' "$R/specs/product.md" | grep -o '`[^`]*`' | tr -d '`' > "$T/tokens"
+  [ "$(wc -l < "$T/tokens" | tr -d ' ')" -eq 13 ] || fail "R2_ignored_shapes: setup: the fixture names $(wc -l < "$T/tokens" | tr -d ' ') ignored tokens, not 13"
+  _i=0
+  while IFS= read -r _tok; do
+    _i=$((_i + 1))
+    fresh "r2tok$_i"
+    [ -d "$R/scratchpad" ] && [ -d "$R/progress" ] || fail "R2_ignored_shapes: setup: scratchpad/ and progress/ must exist so only the run-time rule ignores them"
+    grep -v '^Ignored shapes:' "$R/specs/product.md" > "$T/p.md"; cp "$T/p.md" "$R/specs/product.md"
+    printf '\n- `%s`\n' "$_tok" >> "$R/specs/product.md"
+    run_tool --root "$R" --date 2026-01-02; expect_ok "R2_ignored_shapes ($_tok)"
+    [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] \
+      || fail "R2_ignored_shapes: the ignored shape '$_tok' produced a finding ($(grep '^- ' "$(report)" | head -n 2 | tr '\n' '|'))"
+  done < "$T/tokens"
+  [ "$_i" -eq 13 ] || fail "R2_ignored_shapes: the loop ran $_i iterations, not 13"
+  pass R2_ignored_shapes
+}
+R2_duplicate_on_one_line_collapsed() {
+  fresh r2dup
+  printf '\nIt names `tools/nope.py` and again `tools/nope.py`.\n' >> "$R/specs/product.md"
+  _n="$(lno "$R/specs/product.md" 'It names `tools/nope.py` and again')"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_duplicate_on_one_line_collapsed
+  [ "$(grep -c "^- doc-names-missing specs/product.md:$_n " "$(report)" || true)" -eq 1 ] || fail "R2_duplicate_on_one_line_collapsed: a token repeated on one line is not exactly one finding"
+  [ "$(last_line "$(report)")" = 'drift-report: 1 finding(s) across 4 document(s) read, 0 code entries unnamed' ] \
+    || fail "R2_duplicate_on_one_line_collapsed: the summary does not count 1 finding(s)"
+  pass R2_duplicate_on_one_line_collapsed
+}
+R2_order_by_document_then_line() {
+  fresh r2order; plant_bad
+  printf '\nIt names `tools/zzz.py`.\n' >> "$R/specs/product.md"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_order_by_document_then_line
+  _r="$(report)"
+  _a="$(grep -n '^## specs/product.md$' "$_r" | cut -d: -f1)"
+  _b="$(grep -n "^## $BAD\$" "$_r" | cut -d: -f1)"
+  [ "$_a" -lt "$_b" ] || fail "R2_order_by_document_then_line: the product section does not precede the planted ADR's"
+  [ "$(section "$_r" "$BAD" | sed -n 's/^- [a-z-]* [^ ]*:\([0-9]*\) .*/\1/p' | tr '\n' ' ')" = '4 6 8 10 ' ] \
+    || fail "R2_order_by_document_then_line: the lines inside the ADR section do not ascend 4 6 8 10"
+  pass R2_order_by_document_then_line
+}
+R2_crlf_and_bom_keep_findings() {
+  fresh r2enc; plant_bad
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_crlf_and_bom_keep_findings
+  section "$(report)" "$BAD" > "$T/lf.sec"
+  [ "$(grep -c '^- ' "$T/lf.sec")" -eq 4 ] || fail "R2_crlf_and_bom_keep_findings: setup: the LF run does not hold four findings"
+  awk '{ printf "%s\r\n", $0 }' "$R/$BAD" > "$T/bad.crlf"; cp "$T/bad.crlf" "$R/$BAD"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_crlf_and_bom_keep_findings
+  section "$(report)" "$BAD" | cmp -s - "$T/lf.sec" || fail "R2_crlf_and_bom_keep_findings: a CRLF-terminated document yields different findings"
+  fresh r2bom; plant_bad
+  printf '\357\273\277' | cat - "$FX/defects/0002-bad.md" > "$R/$BAD"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_crlf_and_bom_keep_findings
+  section "$(report)" "$BAD" | cmp -s - "$T/lf.sec" || fail "R2_crlf_and_bom_keep_findings: a BOM-prefixed document yields different findings (the fence on line 1 must still open)"
+  pass R2_crlf_and_bom_keep_findings
+}
+R2_non_utf8_target_not_searched() {
+  fresh r2bin
+  printf '\377' >> "$R/tools/real.py"
+  printf '\nIt names `tools/real.py:nothere`.\n' >> "$R/specs/product.md"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_non_utf8_target_not_searched
+  [ "$(grep -c 'doc-names-missing-symbol' "$(report)" || true)" -eq 0 ] || fail "R2_non_utf8_target_not_searched: a symbol was searched in a target that is not valid UTF-8"
+  pass R2_non_utf8_target_not_searched
+}
+R2_exit0_with_findings() {
+  fresh r2exit; plant_bad
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_exit0_with_findings
+  [ "$(cat "$T/out")" = "$R/progress/drift/2026-01-02.md" ] || fail "R2_exit0_with_findings: stdout is not exactly the path"
+  [ "$(last_line "$(report)")" = 'drift-report: 4 finding(s) across 5 document(s) read, 0 code entries unnamed' ] \
+    || fail "R2_exit0_with_findings: the summary is wrong"
+  pass R2_exit0_with_findings
+}
+
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
 R1_installed_layout; R1_dogfood_archive_copy
 R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only
+R2_path_missing; R2_symbol_missing; R2_unresolved_path_colon_name_single_finding
+R2_fenced_decoy_invisible; R2_every_line_kind_scanned; R2_ignored_shapes
+R2_duplicate_on_one_line_collapsed; R2_order_by_document_then_line
+R2_crlf_and_bom_keep_findings; R2_non_utf8_target_not_searched; R2_exit0_with_findings
 echo "test_drift_report.sh: all rows passed"

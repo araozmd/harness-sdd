@@ -124,22 +124,33 @@ ADVISORY = ("Advisory: this report changes nothing. For each finding a human dec
 NOT_CHECKED = ('Replaced patterns — a document that describes a mechanism the code now implements '
                'differently — are not detected; "No drift detected" means every named path and '
                'symbol resolves and nothing in the requested inventory is unnamed.')
+CHOICE_SYMBOL = "update doc (name the symbol as it is today) or update code (restore it)"
 CHOICE_PATH = ("update doc (rewrite the path as it is today, or give it a placeholder prefix if "
                "it is not in this repository, or supersede the decision) or update code (restore it)")
 
 
 def scan_document(rc, root, abs_path):
     """[(code, line, display)] for one document, in line order: every unfenced line, every
-    span the resolver classifies as a path candidate it does not ignore."""
+    span the resolver classifies as a path candidate it does not ignore; one finding per
+    (line, code, token)."""
     findings = []
     doc_dir = os.path.dirname(abs_path)
+
+    def emit(code, n, display):
+        if (code, n, display) not in findings:
+            findings.append((code, n, display))
+
     for n, text in rc.iter_unfenced(rc._read(abs_path), numbered=True):
         for sp in rc.spans(text):
-            display, p, _name = rc.classify(sp)
+            display, p, name = rc.classify(sp)
             if p is None or rc.ignored(p, root, []):
                 continue
-            if rc.resolve(p, root, doc_dir, []) is None and "/" in p:
-                findings.append(("doc-names-missing", n, display))
+            target = rc.resolve(p, root, doc_dir, [])
+            if target is None:
+                if "/" in p:  # a `/`-less candidate found nowhere is prose, never a finding
+                    emit("doc-names-missing", n, display)
+            elif name is not None and os.path.isfile(target) and not rc.symbol_present(target, name):
+                emit("doc-names-missing-symbol", n, display)
     return findings
 
 
@@ -160,7 +171,9 @@ def render(date, root, harness, docs, results):
             lines.append("Absent — not a finding.")
         elif results[rel]:
             for code, n, display in results[rel]:
-                lines.append("- %s %s:%d `%s` — reconcile: %s" % (code, rel, n, display, CHOICE_PATH))
+                lines.append("- %s %s:%d `%s` — reconcile: %s" % (
+                    code, rel, n, display,
+                    CHOICE_PATH if code == "doc-names-missing" else CHOICE_SYMBOL))
             total += len(results[rel])
         else:
             lines.append("No drift detected.")
