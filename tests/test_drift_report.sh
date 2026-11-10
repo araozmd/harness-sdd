@@ -41,7 +41,7 @@ fresh() {
   R="$T/$1/repo"
 }
 # run_tool <args...> — stdout to $T/out, stderr to $T/err, exit code to $rc.
-run_tool() { set +e; env -u HARNESS_DIR python3 "$TOOL" "$@" >"$T/out" 2>"$T/err"; rc=$?; set -e; }
+run_tool() { set +e; env -u HARNESS_DIR -u PYTHONDONTWRITEBYTECODE python3 "$TOOL" "$@" >"$T/out" 2>"$T/err"; rc=$?; set -e; }
 both() { cat "$T/out" "$T/err" 2>/dev/null | tr '\n' '|'; }
 # report — the report path the tool printed (stdout is exactly that one line).
 report() { head -n 1 "$T/out"; }
@@ -338,6 +338,15 @@ R2_non_utf8_target_not_searched() {
   [ "$(grep -c 'doc-names-missing-symbol' "$(report)" || true)" -eq 0 ] || fail "R2_non_utf8_target_not_searched: a symbol was searched in a target that is not valid UTF-8"
   pass R2_non_utf8_target_not_searched
 }
+R2_directory_target_not_searched() {
+  fresh r2dirsym
+  printf '\nIt names `tools/sub:thing`, a directory with a symbol form.\n' >> "$R/specs/product.md"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R2_directory_target_not_searched
+  [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] \
+    || fail "R2_directory_target_not_searched: a symbol form on a directory is a finding or an error ($(tail -n 3 "$(report)" | tr '\n' '|'))"
+  pass R2_directory_target_not_searched
+}
+
 R2_exit0_with_findings() {
   fresh r2exit; plant_bad
   run_tool --root "$R" --date 2026-01-02; expect_ok R2_exit0_with_findings
@@ -425,6 +434,21 @@ R3_inventory_missing_dir_exit2() {
 }
 
 # ── R5: usage / input / internal errors ⇒ exit 2; never exit 1; help semantics ────────────
+R4_report_mode() {
+  fresh r4mode
+  (umask 022; env -u HARNESS_DIR python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err") || fail "R4_report_mode: setup: the run failed"
+  [ "$(python3 -c 'import os, sys; print("%o" % (os.stat(sys.argv[1]).st_mode & 0o777))' "$R/progress/drift/2026-01-02.md")" = 644 ] \
+    || fail "R4_report_mode: under umask 022 the report is not mode 644 (a temp file's 0600 leaked through)"
+  pass R4_report_mode
+}
+R6_no_bytecode_written() {
+  fresh r6pyc; plant_bad
+  cp "$TOOL" "$ROOT/tools/readiness-check.py" "$R/tools/"
+  tree_unchanged "$R/tools/drift-report.py" || fail "R6_no_bytecode_written: running a copy beside its resolver changed or added a file other than the report (a __pycache__?)"
+  [ ! -e "$R/tools/__pycache__" ] || fail "R6_no_bytecode_written: a __pycache__ was written beside the resolver"
+  pass R6_no_bytecode_written
+}
+
 R5_unknown_flag() { run_tool --bogus; chk_exit2 R5_unknown_flag 'unknown flag: --bogus'; }
 R5_fix_flag_rejected() { run_tool --fix; chk_exit2 R5_fix_flag_rejected 'unknown flag: --fix'; }
 R5_positional() { run_tool x; chk_exit2 R5_positional 'unexpected argument: x'; }
@@ -443,10 +467,11 @@ R5_inventory_not_relative() {
   chk_exit2 "R5_inventory_not_relative (empty)" '--inventory must be a path relative to the root:'
 }
 R5_no_git_ancestor_no_root() {
-  rm -rf "$T/ceil"; mkdir -p "$T/ceil/.git" "$T/ceil/nogit/tools"
+  rm -rf "$T/ceil"; mkdir -p "$T/ceil/.git" "$T/ceil/nogit/tools" "$T/ceil/specs"
+  cp "$FX/repo/specs/product.md" "$T/ceil/specs/"  # a walk that ignored the ceiling would find a root WITH a document
   cp "$TOOL" "$ROOT/tools/readiness-check.py" "$T/ceil/nogit/tools/"
   set +e; env -u HARNESS_DIR GIT_CEILING_DIRECTORIES="$T/ceil" python3 "$T/ceil/nogit/tools/drift-report.py" >"$T/out" 2>"$T/err"; rc=$?; set -e
-  chk_exit2 R5_no_git_ancestor_no_root '--root'
+  chk_exit2 R5_no_git_ancestor_no_root 'holds .git; pass --root'  # the usage text also holds '--root', so anchor the message
 }
 R5_zero_docs() { fresh r5zero; rm -r "$R"/specs/*; run_tool --root "$R"; chk_exit2 R5_zero_docs 'no living documents'; }
 R5_doc_invalid_utf8() {
@@ -489,7 +514,12 @@ R5_help_exit0() {
   done
   pass R5_help_exit0
 }
-R5_help_as_value_is_not_help() { run_tool --root --help; chk_exit2 R5_help_as_value_is_not_help '--root is not a directory: --help'; }
+R5_help_as_value_is_not_help() {
+  run_tool --root --help; chk_exit2 "R5_help_as_value_is_not_help (--root)" '--root is not a directory: --help'
+  fresh r5hv
+  run_tool --root "$R" --inventory --help; chk_exit2 "R5_help_as_value_is_not_help (--inventory)" '--inventory is not a directory'
+  run_tool --root "$R" --date --help; chk_exit2 "R5_help_as_value_is_not_help (--date)" '--date is not a YYYY-MM-DD date: --help'
+}
 R5_internal_error_no_traceback() {
   [ "$(id -u)" -ne 0 ] || { pass "R5_internal_error_no_traceback (skipped: root ignores directory modes)"; return 0; }
   fresh r5int; chmod 000 "$R/specs/adr"
@@ -513,7 +543,7 @@ R5_never_exit_1() {
 tree_unchanged() {
   find "$R" -type f | LC_ALL=C sort > "$T/paths.before"
   find "$R" -type f -exec cksum {} + | LC_ALL=C sort -k3 > "$T/sum.before"
-  set +e; env -u HARNESS_DIR python3 "$1" --root "$R" --inventory tools --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  set +e; env -u HARNESS_DIR -u PYTHONDONTWRITEBYTECODE python3 "$1" --root "$R" --inventory tools --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
   [ "$rc" -eq 0 ] || fail "R6: the run exited $rc ($(both))"
   find "$R" -type f | LC_ALL=C sort > "$T/paths.after"
   find "$R" -type f -exec cksum {} + | LC_ALL=C sort -k3 > "$T/sum.after"
@@ -541,7 +571,7 @@ PYEOF
   tree_unchanged "$TOOL" || fail "R6_tree_unchanged_but_report: the run changed, added or removed a file other than the report"
   grep -q 'doc-names-missing-symbol' "$R/progress/drift/2026-01-02.md" && grep -q '^- code-unnamed' "$R/progress/drift/2026-01-02.md" && grep -q '^- doc-names-missing ' "$R/progress/drift/2026-01-02.md" \
     || fail "R6_tree_unchanged_but_report: setup: the run did not exercise every finding code"
-  pass R6_tree_unchanged_but_report
+  pass R6_tree_unchanged_but_report; R6_no_bytecode_written
 R7_no_own_definitions; R7_no_local_binding; R7_sibling_missing_exit2
 R9_workflow_section; R9_readme_sentence
 R10_version_changelog_ledger
@@ -704,11 +734,12 @@ R1_harness_dir_env() {
 
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
 R1_installed_layout; R1_dogfood_archive_copy
-R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only
+R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only; R4_report_mode
 R2_path_missing; R2_symbol_missing; R2_unresolved_path_colon_name_single_finding
 R2_fenced_decoy_invisible; R2_every_line_kind_scanned; R2_ignored_shapes
 R2_duplicate_on_one_line_collapsed; R2_order_by_document_then_line
-R2_crlf_and_bom_keep_findings; R2_non_utf8_target_not_searched; R2_exit0_with_findings
+R2_crlf_and_bom_keep_findings; R2_non_utf8_target_not_searched; R2_directory_target_not_searched
+R2_exit0_with_findings
 R3_inventory_unnamed; R3_hidden_and_subdir_skipped; R3_named_via_remap; R3_dir_ref_names_nothing
 R3_inventory_repeat; R3_inventory_not_requested; R3_inventory_missing_dir_exit2
 R3_inventory_counts_and_precedence; R1_harness_dir_env
