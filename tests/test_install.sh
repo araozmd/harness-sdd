@@ -650,6 +650,21 @@ test_readiness_check_installed_contract() {
   done
 }
 
+test_paraphrase_back_installed_contract() {
+  [ "$(grep -cxF '## Paraphrase-back comprehension (E37-F02)' "$T/.harness/agents/doc-critic.md" || true)" -eq 1 ] ||
+    fail "E37-F02: installed doc-critic lacks exactly one paraphrase-back section"
+  grep -qF 'could-not-restate' "$T/.harness/agents/doc-critic.md" ||
+    fail "E37-F02: installed doc-critic does not name could-not-restate"
+  grep -qF 'Paraphrase first, one re-audit, then record (E37-F02)' "$T/.harness/agents/architect.md" ||
+    fail "E37-F02: installed architect lacks the paraphrase-first checkpoint paragraph"
+  grep -qxF '## Accepted trade-offs (E37-F02)' "$T/.harness/agents/reviewer.md" ||
+    fail "E37-F02: installed reviewer lacks the Accepted trade-offs section"
+  grep -qxF '## Accepted trade-offs' "$T/.harness/specs/_templates/feature.spec.md" ||
+    fail "E37-F02: installed feature spec template lacks ## Accepted trade-offs"
+  grep -qF 'could-not-restate' "$T/.harness/docs/WORKFLOW.md" ||
+    fail "E37-F02: installed WORKFLOW does not describe could-not-restate"
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -814,6 +829,7 @@ test_dependency_diagnostics_installed_contract
 test_tasks_pair_check_installed_contract
 test_plan_cite_check_installed_contract
 test_readiness_check_installed_contract
+test_paraphrase_back_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
 test_e99_throughput_helpers_installed_contract

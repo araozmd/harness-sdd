@@ -332,6 +332,15 @@ must exit 0, the doc-critic reports its lines as advisory findings, the Reviewer
 exit 1 (check 9; a plan written before the tool merged is flagged, not rejected), and
 `init.sh` sweeps every in-flight feature warn-only at session start (section 2e).
 
+At the `feature-spec` checkpoint the critic's note opens with a `## Paraphrase` (E37-F02): what
+the feature proposes and how the existing system works, restated from the four spec files
+alone — the inbox brief and the chat are withheld on purpose, because the Builder never sees
+them either — followed by a per-file `### Could not restate` list. Each `could-not-restate`
+item is blocking for the Architect's hand-off: fix it, or after at most one re-audit record it
+in the `.spec.md` under `## Accepted trade-offs`. The critic itself stays advisory — no new
+status, no new gate — and the Reviewer reads `## Accepted trade-offs` and treats a recorded
+trade-off as a decision, not a defect.
+
 ## Drift check on epic rollup
 
 Rolling-wave planning has a failure mode: a plan sketched early goes **stale** as you learn.

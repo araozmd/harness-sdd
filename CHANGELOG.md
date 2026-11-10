@@ -4,6 +4,27 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.107.0] — 2026-11-09
+
+### Added — Doc-critic paraphrase-back comprehension mode (E37-F02)
+- `agents/doc-critic.md` gains `## Paraphrase-back comprehension (E37-F02)`: at
+  `target-type=feature-spec` the note opens with a `## Paraphrase` written from the four spec
+  files alone (the inbox brief and the chat are withheld — the Builder never sees them either)
+  in three parts — what this proposes, how the existing system works per this document, and a
+  per-file *could not restate* list. Each item is a blocking finding (`could-not-restate
+  <file> <unit> — <gap>`): the Architect fixes it or records it, bounded by one re-audit; the
+  critic stays advisory (no new status, no new gate).
+- `agents/architect.md`: the doc-critic checkpoint is paraphrase first, apply, at most one
+  re-audit, then leftovers recorded in the `.spec.md` under `## Accepted trade-offs`.
+- `agents/reviewer.md` reads `## Accepted trade-offs`; a recorded trade-off is a decision, not
+  a defect — and waives only the comprehension gap it names.
+- `specs/_templates/feature.spec.md` gains the optional `## Accepted trade-offs` section;
+  `docs/WORKFLOW.md` a paragraph at the doc-critic checkpoints; `README.md` a sentence;
+  `docs/RATIONALE.md` ledger row `C12 — Doc-critic paraphrase-back comprehension` with its
+  ablation threshold.
+- `tests/test_doc_critic.sh` gains fence-aware anchors for the new text;
+  `tests/test_install.sh` asserts the installed role text.
+
 ## [0.106.0] — 2026-11-09
 
 ### Added — implementation-readiness lint and Reviewer gate (E37-F01)

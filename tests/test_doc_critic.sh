@@ -13,6 +13,11 @@ ARCHITECT="$SRC/agents/architect.md"
 WORKFLOW="$SRC/docs/WORKFLOW.md"
 SCHEMA="$SRC/store/tasks.schema.json"
 STATE="$SRC/state/tasks.json"
+REVIEWER="$SRC/agents/reviewer.md"
+TEMPLATE="$SRC/specs/_templates/feature.spec.md"
+README="$SRC/README.md"
+RATIONALE="$SRC/docs/RATIONALE.md"
+FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }
@@ -192,6 +197,322 @@ test_portability() {
   pass "portability: doc-critic role is CLI-agnostic"
 }
 
+# ── E37-F02 helpers ───────────────────────────────────────────────────────────
+# slice <file> <heading-prefix>: the fence-aware text of a "## " section, heading to the next
+# "## " heading (inclusive of the heading line). Fenced "## " lines never end or start a slice.
+slice() {
+  awk "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && /^## / { keep = (index($0, h) == 1); if (keep) print; next }
+    keep
+  ' h="$2" "$1"
+}
+# folded: newlines to spaces, runs of spaces squeezed — anchors span wrapped lines.
+folded() { tr '\n' ' ' | tr -s ' '; }
+# words: the number of whitespace-separated words on stdin (wc -w). Used as an exact count over
+# a sliced span (heading line, fenced lines and markup included): any NET change in the number
+# of words in the span reds it, whatever the punctuation around the change — a bold,
+# parenthesised or unterminated sentence, a clause, or a merge of two sentences that frees room
+# for another, as long as the words added and removed do not balance. It does NOT see any edit
+# that keeps the number of words: a word swapped for another, a reorder, or an added sentence
+# paid for by deleting as many unpinned words elsewhere in the span. The whole-sentence anchors
+# catch such an edit only inside the spans they pin, and the token counts only when it adds or
+# removes a counted token. What wc -w calls whitespace depends on the locale (macOS wc splits a
+# non-breaking space under UTF-8, not under LC_ALL=C); none of the five counted spans holds one.
+words() { wc -w | tr -d ' '; }
+# lineno <file> <exact heading line>: first line number of an exact line, empty when absent.
+lineno() { grep -nxF -- "$2" "$1" | head -n 1 | cut -d: -f1; }
+
+# ── E37-F02:R1 — paraphrase-back section exists, is positioned, four-files-only ─
+test_paraphrase_section() {
+  _h='## Paraphrase-back comprehension (E37-F02)'
+  [ "$(grep -cxF -- "$_h" "$ROLE" || true)" -eq 1 ] \
+    || fail "E37-F02:R1: doc-critic must carry exactly one '$_h' heading"
+  _rs="$(lineno "$ROLE" '## Review scope and calibration (what to flag)')"
+  _ps="$(lineno "$ROLE" "$_h")"
+  _pc="$(lineno "$ROLE" '## Plan-row citations and stage-aware NFRs (E36-F04)')"
+  [ -n "$_rs" ] && [ -n "$_ps" ] && [ -n "$_pc" ] && [ "$_rs" -lt "$_ps" ] && [ "$_ps" -lt "$_pc" ] \
+    || fail "E37-F02:R1: the section must sit after Review scope and before the E36-F04 section"
+  _sec="$(slice "$ROLE" "$_h" | folded)"
+  _need() {
+    case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R1: $2" ;; esac
+  }
+  _need 'At `target-type=feature-spec`, before you evaluate the five dimensions, prove you understood the spec: your note opens with a `## Paraphrase` section written from the four spec files alone' \
+    "opening sentence missing"
+  _need 'Do not open the inbox brief under `progress/inbox/`, the epic'"'"'s `epic.md`, the architecture or any other file while you write it, and read no chat history: the Builder receives only these four files, in a clean context, and the paraphrase measures what they carry on their own.' \
+    "four-files-only sentence missing"
+  _need 'Quoting the spec'"'"'s sentences back is not a paraphrase.' "quoting-is-not-paraphrase sentence missing"
+  _need 'what you know from elsewhere does not count, and a gap you can fill only from outside the document is a gap in the document' \
+    "outside-knowledge sentence missing"
+  _need 'Write `none` for a file whose every unit you could restate.' "none rule missing"
+  _need 'The lints and every other check of this checkpoint run after the paraphrase is written.' \
+    "paraphrase-before-lints sentence missing"
+  # three parts, in order (offsets in the folded slice)
+  _o1="$(printf '%s' "$_sec" | awk '{print index($0, "`### What this proposes`")}')"
+  _o2="$(printf '%s' "$_sec" | awk '{print index($0, "`### How the existing system works, per this document`")}')"
+  _o3="$(printf '%s' "$_sec" | awk '{print index($0, "`### Could not restate`")}')"
+  [ "$_o1" -gt 0 ] && [ "$_o1" -lt "$_o2" ] && [ "$_o2" -lt "$_o3" ] \
+    || fail "E37-F02:R1: the three parts must appear in order: proposes, existing system, could not restate"
+  # negative: nothing lets the critic read the brief or chat
+  if printf '%s' "$_sec" | grep -qiE '(may|can|should|free to)[^.]{0,60}(read|open|consult)[^.]{0,40}(inbox brief|progress/inbox|chat)'; then
+    fail "E37-F02:R1: a sentence lets the critic read the inbox brief or chat for the paraphrase"
+  fi
+  # closed-world, two nets. (1) Token counts: every inbox/chat mention lies inside the single
+  # pinned four-files-only sentence (2 x inbox, 1 x chat) — catches an edit that adds or removes
+  # one of those words, including a same-length substitution that swaps one in. (2) The word
+  # count below: catches any net change in the section's word count, whatever its punctuation
+  # ("the intake brief", "the conversation", a bold or unterminated sentence). Neither sees a
+  # word-count-neutral edit (a swap, a reorder, or an added sentence offset by a deletion
+  # elsewhere in the section) that avoids the tokens; the anchors above see that only over the
+  # span each one pins.
+  [ "$(printf '%s' "$_sec" | grep -oi 'inbox' | wc -l | tr -d ' ')" -eq 2 ] \
+    || fail "E37-F02:R1: an inbox mention lies outside the pinned four-files-only sentence"
+  [ "$(printf '%s' "$_sec" | grep -oi 'chat' | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "E37-F02:R1: a chat mention lies outside the pinned four-files-only sentence"
+  # one list per file, each item naming the unit and what is missing
+  _need '`### Could not restate` — one list per file (`.spec.md`, `.plan.md`, `.tasks.md`, `.tests.md`); each item names the unit you could not restate' \
+    "one-list-per-file sentence missing"
+  _need 'and one line on what is missing or contradictory.' "item-shape tail missing"
+  # closed-world by word count: the section (heading line included) holds exactly 474 words; a
+  # later feature editing a NEIGHBOURING section cannot move this (the slice ends at the next
+  # "## " heading outside a fence).
+  [ "$(printf '%s' "$_sec" | words)" -eq 474 ] \
+    || fail "E37-F02:R1: the paraphrase section must hold exactly its 474 words (a word was added or removed; a same-length substitution is not seen here)"
+  grep -qiF 'Claude Code' "$ROLE" && fail "E37-F02:R1: role contains CLI-specific wording"
+  pass "E37-F02:R1: paraphrase-back section present, positioned, four-files-only"
+}
+
+# ── E37-F02:R2 — could-not-restate is a blocking finding, bounded by one re-audit ─
+test_could_not_restate_blocking() {
+  _sec="$(slice "$ROLE" '## Paraphrase-back comprehension (E37-F02)' | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R2: $2" ;; esac; }
+  _need 'Each `### Could not restate` item is a **blocking finding** with the stable id `could-not-restate`, repeated in your findings as `could-not-restate <file> <unit> — <what is missing>`.' \
+    "blocking-finding sentence with id and shape missing"
+  _need 'Blocking means the Architect must fix the unit or record it under `## Accepted trade-offs` in the `.spec.md` before hand-off, bounded by one re-audit' \
+    "fix-or-record sentence missing"
+  _need 'you still never block the Architect, there is no new status and no new human gate, and every finding outside this list stays advisory as before' \
+    "never-block / no-new-status sentence missing"
+  _need 'write the paraphrase again from the revised files and list only what you still cannot restate' \
+    "re-audit sentence missing"
+  _need 'A unit counts only when its own meaning is missing from the four files, not when it cites a file, test, lesson or check you cannot open: a cross-reference whose purpose the unit states is restated.' \
+    "calibration sentence missing"
+  _need 'A unit you can restate but think wrong is an ordinary finding under the five dimensions, not a `could-not-restate`.' \
+    "restate-but-wrong sentence missing"
+  _need 'This section applies at `target-type=feature-spec` only; the `plan-output` and `epic-decomposition` checkpoints are unchanged.' \
+    "feature-spec-only sentence missing"
+  _out="$(slice "$ROLE" '## Output summary' | folded)"
+  case "$_out" in
+    *'At `target-type=feature-spec` the note opens with the `## Paraphrase` section (E37-F02) before the list below.'*) : ;;
+    *) fail "E37-F02:R2: ## Output summary must say the feature-spec note opens with the ## Paraphrase section" ;;
+  esac
+  case "$_out" in
+    *'progress/<run>/doc-critic-<checkpoint>.md'*) : ;;
+    *) fail "E37-F02:R2: ## Output summary lost the progress note path" ;;
+  esac
+  grep -qiE 'advisory[- ]only' "$ROLE" || fail "E37-F02:R2: advisory-only anchor lost"
+  grep -qF 'never block' "$ROLE" || fail "E37-F02:R2: never-block anchor lost"
+  grep -qiF 'best-effort' "$ROLE" || fail "E37-F02:R2: best-effort anchor lost"
+  pass "E37-F02:R2: could-not-restate is blocking-for-hand-off, advisory critic, one re-audit"
+}
+
+# ── E37-F02:R3 — Architect: paraphrase first, ONE re-audit, then record ───────
+test_architect_paraphrase_step() {
+  _sec="$(slice "$ARCHITECT" '## Doc-critic checkpoint before' | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R3: $2" ;; esac; }
+  _need 'spawn the **Doc-critic** (`agents/doc-critic.md`) as a sub-agent with `target-type=feature-spec`' \
+    "existing spawn sentence lost"
+  _need '**Paraphrase first, one re-audit, then record (E37-F02).**' "bold lead-in missing"
+  _need 'pass it nothing else: not the inbox brief, not this conversation' "nothing-else rule missing"
+  _need 'Read the paraphrase before the findings:' "read-the-paraphrase-before-the-findings clause missing or reordered"
+  _need 'where the cold reader restated something other than what you meant, the document, not the reader, is wrong' \
+    "document-not-reader sentence missing"
+  _need 'Each `could-not-restate` finding is blocking for your hand-off: fix the unit it names, then spawn the critic once more on the revised files — at most **one** re-audit per feature.' \
+    "one-re-audit sentence missing"
+  _need 'Every `could-not-restate` still listed after the re-audit — including one your fixes introduced — or that you choose not to fix, is recorded in the `.spec.md` under `## Accepted trade-offs` as `- <unit> — <what the cold reader could not restate> — accepted because <why>` before you hand off' \
+    "record-leftovers sentence missing"
+  _need 'a leftover that is neither fixed nor recorded is not a finished checkpoint' "unfinished-checkpoint rule missing"
+  _need 'The Reviewer reads that section and treats a recorded trade-off as a decision, not a defect' \
+    "Reviewer sentence missing"
+  _need 'When the first pass lists no `could-not-restate`, there is no re-audit' "no-re-audit-when-none sentence missing"
+  _need 'When the critic errors or times out there is no list to act on: proceed best-effort and record the skip as the paragraph above says.' \
+    "best-effort sentence missing"
+  if printf '%s' "$_sec" | grep -qiE '(two|three|several|further|unlimited|as many|second|another|again|repeat)[^.]{0,12}re-audit'; then
+    fail "E37-F02:R3: the checkpoint permits more than one re-audit"
+  fi
+  # closed-world, three nets. (1) Token counts: the four pinned sentences carry every
+  # re-audit mention and the single "spawn the critic" — catches an edit that adds or removes
+  # those words, including a same-length substitution that swaps one in. (2) The word count
+  # below: catches any net change in the section's word count, whatever its punctuation ("run
+  # the critic again", a bold or parenthesised sentence, a merge that frees room for another).
+  # Neither sees a word-count-neutral edit (a swap, a reorder, or an added sentence offset by a
+  # deletion elsewhere in the section) that avoids the tokens; the anchors above see that only
+  # over the span each one pins. (3) The vocabulary regex above is a third, narrower net (its
+  # word list only).
+  [ "$(printf '%s' "$_sec" | grep -oi 're-audit' | wc -l | tr -d ' ')" -eq 4 ] \
+    || fail "E37-F02:R3: a re-audit mention lies outside the four pinned sentences (the bound is one)"
+  [ "$(printf '%s' "$_sec" | grep -oi 'spawn the critic' | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "E37-F02:R3: the checkpoint spawns the critic more than the one pinned time"
+  # The word count spans the whole R12 section (heading line, the pre-existing first paragraph
+  # and the E37-F02 paragraph), so a NEW paragraph inside the section moves it too; editing the
+  # R12 paragraph is a same-section edit and updates this number. Neighbouring sections cannot.
+  [ "$(printf '%s' "$_sec" | words)" -eq 296 ] \
+    || fail "E37-F02:R3: the checkpoint section must hold exactly its 296 words (a word was added or removed — it may permit a further re-audit or pass the critic more; a same-length substitution is not seen here)"
+  pass "E37-F02:R3: architect checkpoint is paraphrase first, one re-audit, then record"
+}
+
+# ── E37-F02:R4 — Reviewer reads ## Accepted trade-offs; a recorded one is not a defect ─
+test_reviewer_reads_trade_offs() {
+  _h='## Accepted trade-offs (E37-F02)'
+  [ "$(grep -cxF -- "$_h" "$REVIEWER" || true)" -eq 1 ] \
+    || fail "E37-F02:R4: reviewer must carry exactly one '$_h' heading"
+  _wy="$(lineno "$REVIEWER" '## What you check')"
+  _at="$(lineno "$REVIEWER" "$_h")"
+  _ac="$(lineno "$REVIEWER" '## ADR-citation check (architecture-aligned specs)')"
+  [ -n "$_wy" ] && [ -n "$_at" ] && [ -n "$_ac" ] && [ "$_wy" -lt "$_at" ] && [ "$_at" -lt "$_ac" ] \
+    || fail "E37-F02:R4: the section must sit after '## What you check' and before '## ADR-citation check'"
+  _sec="$(slice "$REVIEWER" "$_h" | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R4: $2" ;; esac; }
+  _need 'When the `.spec.md` under review carries a `## Accepted trade-offs` section' "trigger clause missing"
+  _need 'read it before you judge the spec'"'"'s prose' "read-before-judging clause missing"
+  _need 'A recorded trade-off is a decision recorded by the Architect and visible at the human gate, not a defect: do not reject or flag the named unit for the comprehension gap it records, and do not ask the Builder to resolve it.' \
+    "decision-not-defect sentence missing"
+  _need 'The record waives only that, and every other check is unchanged — the unit'"'"'s `R-id` still needs a passing test (check 2), the three spec lints still decide on their exit codes (checks 7, 8 and 9), an over-claiming sentence is still a defect (3c), and a contradiction with a collaborator file is still check 5'"'"'s reject.' \
+    "waives-only-that sentence missing"
+  _need 'An entry that names no unit or gives no reason is itself a flag ("record the unit and the why"), not a reject.' \
+    "malformed-entry sentence missing"
+  _need 'A spec without the section has no trade-offs to read; nothing here fires.' "absent-section sentence missing"
+  # closed-world by word count: exactly 187 words, heading line included (an added "flag it
+  # anyway", terminated or not, reds unless as many words are deleted elsewhere in the section;
+  # a same-length substitution does not)
+  [ "$(printf '%s' "$_sec" | words)" -eq 187 ] \
+    || fail "E37-F02:R4: the Accepted trade-offs section must hold exactly its 187 words (a word was added or removed)"
+  # item 9 of '## What you check' is unchanged and names no trade-off
+  _i9="$(awk "$FENCE_AWK"'
+    fence_delim($0) { if (keep) print; next }
+    !fence && keep && (/^## / || /^[0-9]+\. /) { keep = 0 }
+    !fence && /^9\. / { keep = 1 }
+    keep
+  ' "$REVIEWER" | folded)"
+  case "$_i9" in *'Checks 2, 7 and 8 are unchanged.'*) : ;; *) fail "E37-F02:R4: item 9 lost its closing sentence" ;; esac
+  if printf '%s' "$_i9" | grep -qiF 'trade-off'; then
+    fail "E37-F02:R4: item 9 must name no trade-off (the rule is its own section)"
+  fi
+  pass "E37-F02:R4: reviewer section present, positioned, waives only the comprehension gap"
+}
+
+# ── E37-F02:R5 — feature spec template carries the optional ## Accepted trade-offs ─
+test_template_trade_offs_section() {
+  _h='## Accepted trade-offs'
+  [ "$(grep -cxF -- "$_h" "$TEMPLATE" || true)" -eq 1 ] \
+    || fail "E37-F02:R5: template must carry exactly one '$_h' heading"
+  _os="$(lineno "$TEMPLATE" '## Out of scope')"
+  _tt="$(lineno "$TEMPLATE" "$_h")"
+  _oq="$(lineno "$TEMPLATE" '## Open questions')"
+  [ -n "$_os" ] && [ -n "$_tt" ] && [ -n "$_oq" ] && [ "$_os" -lt "$_tt" ] && [ "$_tt" -lt "$_oq" ] \
+    || fail "E37-F02:R5: the section must sit between '## Out of scope' and '## Open questions'"
+  _sl="$(slice "$TEMPLATE" "$_h")"
+  _sec="$(printf '%s\n' "$_sl" | folded)"
+  _note="$(printf '%s\n' "$_sl" | sed 's/^> //' | folded)"
+  case "$_note" in
+    *"What the Doc-critic's cold reader could not restate from the four files after the Architect's one re-audit, recorded here so the decision is durable and the Reviewer treats it as a decision, not a defect."*) : ;;
+    *) fail "E37-F02:R5: the note sentence (one re-audit, decision not a defect) is missing or altered" ;;
+  esac
+  [ "$(printf '%s' "$_note" | grep -oi 're-audit' | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "E37-F02:R5: the template note mentions re-audit outside its pinned sentence"
+  case "$_sec" in *'Optional (E37-F02).'*) : ;; *) fail "E37-F02:R5: optional marker missing" ;; esac
+  case "$_sec" in *'Omit the section when there is nothing to record.'*) : ;; *) fail "E37-F02:R5: omit sentence missing" ;; esac
+  # closed-world by word count over the "> "-stripped section, heading and placeholder line
+  # included: exactly 69 words (an added note line, terminated or not, reds unless as many
+  # words are deleted elsewhere in the section; a same-length substitution does not)
+  [ "$(printf '%s' "$_note" | words)" -eq 69 ] \
+    || fail "E37-F02:R5: the template section must hold exactly its 69 words (a word was added or removed)"
+  printf '%s\n' "$_sl" | grep -qxF -- '- <unit: R-id, plan row, T<n> or section> — <what the cold reader could not restate> — accepted because <why>' \
+    || fail "E37-F02:R5: placeholder entry missing"
+  _bm="$(lineno "$TEMPLATE" '## Business rules')"
+  _aa="$(lineno "$TEMPLATE" '## Architecture alignment')"
+  _ac="$(lineno "$TEMPLATE" '## Acceptance criteria (EARS)')"
+  [ -n "$_bm" ] && [ -n "$_aa" ] && [ -n "$_ac" ] && [ "$_bm" -lt "$_aa" ] && [ "$_aa" -lt "$_ac" ] \
+    || fail "E37-F02:R5: '## Architecture alignment' must stay between Business rules and Acceptance criteria"
+  python3 "$SRC/tools/tasks-pair-check.py" "$SRC/specs/_templates/feature.tasks.md" --spec "$TEMPLATE" >/dev/null \
+    || fail "E37-F02:R5: the templates no longer lint clean under tasks-pair-check"
+  pass "E37-F02:R5: template carries the optional Accepted trade-offs section"
+}
+
+# ── E37-F02:R6 — WORKFLOW paragraph and README sentence ────────────────────────
+test_workflow_paraphrase_paragraph() {
+  _sec="$(slice "$WORKFLOW" '## Doc-critic checkpoints' | folded)"
+  _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R6: WORKFLOW $2" ;; esac; }
+  _need 'At the `feature-spec` checkpoint the critic'"'"'s note opens with a `## Paraphrase` (E37-F02)' "paragraph opener missing"
+  _need 'restated from the four spec files alone — the inbox brief and the chat are withheld on purpose, because the Builder never sees them either — followed by a per-file `### Could not restate` list.' \
+    "four-files-only / withheld-on-purpose clause missing"
+  _need 'Each `could-not-restate` item is blocking for the Architect'"'"'s hand-off: fix it, or after at most one re-audit record it in the `.spec.md` under `## Accepted trade-offs`.' \
+    "fix-or-record sentence missing"
+  _need 'The critic itself stays advisory — no new status, no new gate — and the Reviewer reads `## Accepted trade-offs` and treats a recorded trade-off as a decision, not a defect.' \
+    "advisory / Reviewer sentence missing"
+  _need 'the Architect runs `tools/readiness-check.py <feature-dir>` before hand-off and it must exit 0' \
+    "the E37-F01 paragraph was lost"
+  _l1="$(grep -nF -- '(E37-F01): the Architect runs `tools/readiness-check.py' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+  _l2="$(grep -nF -- "At the \`feature-spec\` checkpoint the critic's note opens with" "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+  [ -n "$_l1" ] && [ -n "$_l2" ] && [ "$_l1" -lt "$_l2" ] \
+    || fail "E37-F02:R6: the paraphrase paragraph must come after the E37-F01 paragraph"
+  # closed-world by word count, scoped to the E37-F02 PARAGRAPH only (opener line to the next
+  # blank line): the section is shared with E37-F01 and later features, so a section-wide count
+  # would trip on their edits. Anything in the section outside the span from the E37-F02 opener
+  # line to the next blank line is not counted — a new paragraph (P6), a line placed just before
+  # the opener (Q6), a sentence added to the E37-F01 paragraph (Q6b) — and a word-count-neutral
+  # edit inside the paragraph is not seen (accepted limits).
+  _par="$(slice "$WORKFLOW" '## Doc-critic checkpoints' | awk -v s="At the \`feature-spec\` checkpoint the critic's note opens with" '
+    index($0, s) == 1 { k = 1 }
+    k && /^[[:space:]]*$/ { exit }
+    k
+  ' | folded)"
+  [ "$(printf '%s' "$_par" | words)" -eq 115 ] \
+    || fail "E37-F02:R6: WORKFLOW E37-F02 paragraph must hold exactly its 115 words (a word was added or removed)"
+  pass "E37-F02:R6: WORKFLOW carries the paraphrase paragraph, E37-F01 paragraph kept"
+}
+
+test_readme_paraphrase_sentence() {
+  _sec="$(slice "$README" '## How it works' | folded)"
+  case "$_sec" in
+    *'Before the Builder sees a spec, the Doc-critic also paraphrases it back from the four files alone — what it proposes and how the existing system works, per the document — and anything the cold reader could not restate is fixed or recorded in the spec as an accepted trade-off (E37-F02).'*) : ;;
+    *) fail "E37-F02:R6: README ## How it works lacks the paraphrase sentence" ;;
+  esac
+  case "$_sec" in
+    *'the Reviewer rejects on exit 1.'*) : ;;
+    *) fail "E37-F02:R6: README lost the three-lints sentence" ;;
+  esac
+  _r1="$(grep -nF -- 'the Reviewer rejects on exit 1.' "$README" | head -n 1 | cut -d: -f1)"
+  _r2="$(grep -nF -- 'Before the Builder sees a spec' "$README" | head -n 1 | cut -d: -f1)"
+  [ -n "$_r1" ] && [ -n "$_r2" ] && [ "$_r1" -lt "$_r2" ] \
+    || fail "E37-F02:R6: the paraphrase sentence must come after the three-lints paragraph"
+  pass "E37-F02:R6: README carries the paraphrase sentence"
+}
+
+# ── E37-F02:R8 — ledger row C12, VERSION/CHANGELOG pairing ─────────────────────
+test_ledger_row_c12() {
+  _row="$(grep -E '^\| C12 — Doc-critic paraphrase-back comprehension \| Capability compensation \|' "$RATIONALE" | head -n 1 || true)"
+  [ -n "$_row" ] || fail "E37-F02:R8: docs/RATIONALE.md lacks the C12 capability-compensation row"
+  printf '%s' "$_row" | grep -qE 'Ablation when a model generation ships[^|]*controlled runs[^|]*Keep only while its absence reproduces a spec defect reaching review' \
+    || fail "E37-F02:R8: the C12 evidence cell lacks the ablation threshold and retention rule"
+  _c11="$(grep -n '^| C11 ' "$RATIONALE" | head -n 1 | cut -d: -f1)"
+  _c12="$(grep -n '^| C12 ' "$RATIONALE" | head -n 1 | cut -d: -f1)"
+  [ -n "$_c11" ] && [ -n "$_c12" ] && [ "$_c12" -eq $((_c11 + 1)) ] \
+    || fail "E37-F02:R8: the C12 row must sit directly after C11"
+  _v="$(cat "$SRC/VERSION")"
+  _top="$(grep -m 1 '^## \[' "$SRC/CHANGELOG.md" || true)"
+  case "$_top" in
+    "## [$_v]"*) : ;;
+    *) fail "E37-F02:R8: newest CHANGELOG heading '$_top' does not match VERSION $_v" ;;
+  esac
+  awk '
+    /^## \[/ { if (hit_f && hit_p) found = 1; hit_f = 0; hit_p = 0; next }
+    /E37-F02/ { hit_f = 1 }
+    /Paraphrase/ { hit_p = 1 }
+    END { if (hit_f && hit_p) found = 1; exit(found ? 0 : 1) }
+  ' "$SRC/CHANGELOG.md" || fail "E37-F02:R8: no CHANGELOG section names both E37-F02 and Paraphrase"
+  pass "E37-F02:R8: C12 ledger row and CHANGELOG/VERSION pairing"
+}
+
 # ── run all tests ─────────────────────────────────────────────────────────────
 test_doc_critic_role_exists
 test_target_type_argument
@@ -210,5 +531,13 @@ test_workflow_docs
 test_no_schema_change
 test_no_new_gate
 test_portability
+test_paraphrase_section
+test_could_not_restate_blocking
+test_architect_paraphrase_step
+test_reviewer_reads_trade_offs
+test_template_trade_offs_section
+test_workflow_paraphrase_paragraph
+test_readme_paraphrase_sentence
+test_ledger_row_c12
 
 echo "All doc-critic contract tests passed."
