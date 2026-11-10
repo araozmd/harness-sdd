@@ -826,6 +826,14 @@ R1_harness_dir_env() {
   grep -qxF -- "- harness: $T/r1env/h" "$(report)" || fail "R1_harness_dir_env: the harness header is not \$HARNESS_DIR"
   grep -qxF '  - specs/architecture.md (absent)' "$(report)" || fail "R1_harness_dir_env: documents were not read from \$HARNESS_DIR/specs"
   [ ! -e "$R/progress/drift" ] || fail "R1_harness_dir_env: a report was written under the root"
+  # precedence: $HARNESS_DIR wins over an installed config at the root. .harness/specs is populated
+  # so the wrong order would succeed silently, not exit 2. Pins env-over-installed-config only.
+  mkdir "$R/.harness"; : > "$R/.harness/harness.config.yaml"; cp -R "$R/specs" "$R/.harness/specs"
+  set +e; env HARNESS_DIR="$T/r1env/h" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  expect_ok "R1_harness_dir_env (installed config)"
+  [ "$(cat "$T/out")" = "$T/r1env/h/progress/drift/2026-01-02.md" ] \
+    || fail "R1_harness_dir_env: an installed config at the root displaced \$HARNESS_DIR ($(both))"
+  [ ! -e "$R/.harness/progress/drift" ] || fail "R1_harness_dir_env: a report was written under <root>/.harness"
   pass R1_harness_dir_env
 }
 
