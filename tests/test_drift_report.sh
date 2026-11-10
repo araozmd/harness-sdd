@@ -141,6 +141,14 @@ R1_installed_layout() {
   grep -qxF -- "- harness: $R/.harness" "$(report)" || fail "R1_installed_layout: the harness header is not <root>/.harness"
   [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] \
     || fail "R1_installed_layout: the summary is not No drift detected ($(tail -n 3 "$(report)" | tr '\n' '|'))"
+  # precedence: the product's own root specs/ does not displace the installed layout
+  mkdir -p "$R/specs"; printf '# own\n\nSee `tools/decoy-missing.py`.\n' > "$R/specs/product.md"
+  run_tool --root "$R"; expect_ok "R1_installed_layout (root specs/)"
+  grep -qxF -- "- harness: $R/.harness" "$(report)" || fail "R1_installed_layout: a root specs/ displaced the installed layout ($(both))"
+  [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] \
+    || fail "R1_installed_layout: with a root specs/ the summary is not the .harness documents'"
+  ! grep -qF 'decoy-missing.py' "$(report)" || fail "R1_installed_layout: the root specs/ decoy was read as a harness document"
+  rm -r "$R/specs"
   # control: the ROOT, not .harness/, is the resolution root for src/app.py
   rm "$R/src/app.py"
   run_tool --root "$R"; expect_ok "R1_installed_layout control"
@@ -148,11 +156,11 @@ R1_installed_layout() {
     || fail "R1_installed_layout: removing src/app.py did not yield exactly one doc-names-missing for it"
   pass R1_installed_layout
 }
-# A .harness/ directory without harness.config.yaml (a cache, a half-removed install) is not an
-# installed layout: the harness directory stays the root, so documents are read from <root>/specs.
+# Without harness.config.yaml the harness directory stays the root, whatever .harness/ holds.
 R1_stray_harness_dir_is_not_installed() {
   fresh r1stray
-  mkdir -p "$R/.harness/cache"
+  mkdir -p "$R/.harness/cache" "$R/.harness/specs"
+  printf '# stale\n\nSee `tools/old-missing.py`.\n' > "$R/.harness/specs/product.md"
   run_tool --root "$R" --date 2026-01-02; expect_ok R1_stray_harness_dir_is_not_installed
   [ "$(cat "$T/out")" = "$R/progress/drift/2026-01-02.md" ] \
     || fail "R1_stray_harness_dir_is_not_installed: a .harness/ without the config file moved the report off <root>/progress/drift ($(both))"
@@ -160,6 +168,7 @@ R1_stray_harness_dir_is_not_installed() {
     || fail "R1_stray_harness_dir_is_not_installed: the harness header is not the root"
   [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] \
     || fail "R1_stray_harness_dir_is_not_installed: the summary is not No drift detected over the root's four documents ($(tail -n 3 "$(report)" | tr '\n' '|'))"
+  ! grep -qF 'old-missing.py' "$(report)" || fail "R1_stray_harness_dir_is_not_installed: the stale .harness/specs was read as the harness documents"
   pass R1_stray_harness_dir_is_not_installed
 }
 R1_dogfood_archive_copy() {
@@ -843,4 +852,9 @@ row R5_help_exit0; row R5_help_as_value_is_not_help; row R5_internal_error_no_tr
 row R5_never_exit_1; row R6_tree_unchanged_but_report; row R6_no_bytecode_written;
 row R7_no_own_definitions; row R7_no_local_binding; row R7_sibling_missing_exit2;
 row R9_workflow_section; row R9_readme_sentence; row R10_version_changelog_ledger;
+# Dispatch completeness: sees a defined-but-undispatched R*() row; does not see a row deleted
+# together with its definition.
+for f in $(sed -n 's/^\(R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_drift_report.sh"); do
+  grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
+done
 echo "test_drift_report.sh: all rows passed"
