@@ -148,6 +148,20 @@ R1_installed_layout() {
     || fail "R1_installed_layout: removing src/app.py did not yield exactly one doc-names-missing for it"
   pass R1_installed_layout
 }
+# A .harness/ directory without harness.config.yaml (a cache, a half-removed install) is not an
+# installed layout: the harness directory stays the root, so documents are read from <root>/specs.
+R1_stray_harness_dir_is_not_installed() {
+  fresh r1stray
+  mkdir -p "$R/.harness/cache"
+  run_tool --root "$R" --date 2026-01-02; expect_ok R1_stray_harness_dir_is_not_installed
+  [ "$(cat "$T/out")" = "$R/progress/drift/2026-01-02.md" ] \
+    || fail "R1_stray_harness_dir_is_not_installed: a .harness/ without the config file moved the report off <root>/progress/drift ($(both))"
+  grep -qxF -- "- harness: $R" "$(report)" \
+    || fail "R1_stray_harness_dir_is_not_installed: the harness header is not the root"
+  [ "$(last_line "$(report)")" = 'drift-report: No drift detected (4 document(s) read)' ] \
+    || fail "R1_stray_harness_dir_is_not_installed: the summary is not No drift detected over the root's four documents ($(tail -n 3 "$(report)" | tr '\n' '|'))"
+  pass R1_stray_harness_dir_is_not_installed
+}
 R1_dogfood_archive_copy() {
   rm -rf "$T/dog"; mkdir -p "$T/dog"
   git -C "$ROOT" archive HEAD | tar -x -C "$T/dog"
@@ -196,6 +210,9 @@ R4_date_override() {
   case "$(report)" in */2026-01-02.md) ;; *) fail "R4_date_override: --date 2026-01-02 did not name the file 2026-01-02.md ($(both))";; esac
   run_tool --root "$R" --date=2026-01-03; expect_ok R4_date_override
   case "$(report)" in */2026-01-03.md) ;; *) fail "R4_date_override: --date=2026-01-03 did not name the file 2026-01-03.md ($(both))";; esac
+  # a real leap day is accepted: the real-date check is not a rejection of every 29 February
+  run_tool --root "$R" --date 2028-02-29; expect_ok "R4_date_override (leap day)"
+  case "$(report)" in */2028-02-29.md) ;; *) fail "R4_date_override: --date 2028-02-29 did not name the file 2028-02-29.md ($(both))";; esac
   pass R4_date_override
 }
 R4_same_day_overwrite() {
@@ -495,7 +512,13 @@ R5_date_malformed() {
   run_tool --root "$R" --date 2026-W01-1; chk_exit2 "R5_date_malformed (ISO week)" '--date is not a YYYY-MM-DD date: 2026-W01-1'
   [ ! -e "$R/progress/drift" ] || fail "R5_date_malformed: a report was written for a malformed date"
 }
-R5_date_impossible() { fresh r5di; run_tool --root "$R" --date 2026-02-30; chk_exit2 R5_date_impossible '--date is not a YYYY-MM-DD date: 2026-02-30'; }
+R5_date_impossible() {
+  fresh r5di
+  run_tool --root "$R" --date 2026-02-30; chk_exit2 R5_date_impossible '--date is not a YYYY-MM-DD date: 2026-02-30'
+  # 29 February exists in 2028 (R4_date_override) but not in 2026: the check depends on the year
+  run_tool --root "$R" --date 2026-02-29; chk_exit2 "R5_date_impossible (non-leap 29 Feb)" '--date is not a YYYY-MM-DD date: 2026-02-29'
+  [ ! -e "$R/progress/drift" ] || fail "R5_date_impossible: a report was written for an impossible date"
+}
 R5_progress_is_a_file() {
   fresh r5prog; rm -r "$R/progress"; : > "$R/progress"
   run_tool --root "$R"; chk_exit2 R5_progress_is_a_file 'cannot write the report'
@@ -798,7 +821,8 @@ R1_harness_dir_env() {
 }
 
 row R1_clean_positive; row R1_architecture_absent; row R1_product_space_adr;
-row R1_root_discovered_from_git; row R1_installed_layout; row R1_dogfood_archive_copy;
+row R1_root_discovered_from_git; row R1_installed_layout; row R1_stray_harness_dir_is_not_installed;
+row R1_dogfood_archive_copy;
 row R4_shape; row R4_date_override; row R4_same_day_overwrite; row R4_stdout_is_path_only;
 row R4_report_mode; row R2_path_missing; row R2_symbol_missing;
 row R2_unresolved_path_colon_name_single_finding; row R2_fenced_decoy_invisible;
