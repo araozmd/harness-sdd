@@ -246,6 +246,16 @@ test_paraphrase_section() {
   if printf '%s' "$_sec" | grep -qiE '(may|can|should|free to)[^.]{0,60}(read|open|consult)[^.]{0,40}(inbox brief|progress/inbox|chat)'; then
     fail "E37-F02:R1: a sentence lets the critic read the inbox brief or chat for the paraphrase"
   fi
+  # closed-world: every inbox/chat mention lies inside the single pinned four-files-only
+  # sentence (2 x inbox, 1 x chat); an additive sentence of ANY wording adds a mention.
+  [ "$(printf '%s' "$_sec" | grep -oi 'inbox' | wc -l | tr -d ' ')" -eq 2 ] \
+    || fail "E37-F02:R1: an inbox mention lies outside the pinned four-files-only sentence"
+  [ "$(printf '%s' "$_sec" | grep -oi 'chat' | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "E37-F02:R1: a chat mention lies outside the pinned four-files-only sentence"
+  # one list per file, each item naming the unit and what is missing
+  _need '`### Could not restate` — one list per file (`.spec.md`, `.plan.md`, `.tasks.md`, `.tests.md`); each item names the unit you could not restate' \
+    "one-list-per-file sentence missing"
+  _need 'and one line on what is missing or contradictory.' "item-shape tail missing"
   grep -qiF 'Claude Code' "$ROLE" && fail "E37-F02:R1: role contains CLI-specific wording"
   pass "E37-F02:R1: paraphrase-back section present, positioned, four-files-only"
 }
@@ -303,9 +313,15 @@ test_architect_paraphrase_step() {
   _need 'When the first pass lists no `could-not-restate`, there is no re-audit' "no-re-audit-when-none sentence missing"
   _need 'When the critic errors or times out there is no list to act on: proceed best-effort and record the skip as the paragraph above says.' \
     "best-effort sentence missing"
-  if printf '%s' "$_sec" | grep -qiE '(two|three|several|further|unlimited|as many)[^.]{0,12}re-audit'; then
+  if printf '%s' "$_sec" | grep -qiE '(two|three|several|further|unlimited|as many|second|another|again|repeat)[^.]{0,12}re-audit'; then
     fail "E37-F02:R3: the checkpoint permits more than one re-audit"
   fi
+  # closed-world: the four pinned sentences carry every re-audit mention and the single
+  # re-spawn; ANY additive sentence (second, another, repeat until empty, ...) adds one.
+  [ "$(printf '%s' "$_sec" | grep -oi 're-audit' | wc -l | tr -d ' ')" -eq 4 ] \
+    || fail "E37-F02:R3: a re-audit mention lies outside the four pinned sentences (the bound is one)"
+  [ "$(printf '%s' "$_sec" | grep -oi 'spawn the critic' | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "E37-F02:R3: the checkpoint spawns the critic more than the one pinned time"
   pass "E37-F02:R3: architect checkpoint is paraphrase first, one re-audit, then record"
 }
 
@@ -356,6 +372,13 @@ test_template_trade_offs_section() {
     || fail "E37-F02:R5: the section must sit between '## Out of scope' and '## Open questions'"
   _sl="$(slice "$TEMPLATE" "$_h")"
   _sec="$(printf '%s\n' "$_sl" | folded)"
+  _note="$(printf '%s\n' "$_sl" | sed 's/^> //' | folded)"
+  case "$_note" in
+    *"What the Doc-critic's cold reader could not restate from the four files after the Architect's one re-audit, recorded here so the decision is durable and the Reviewer treats it as a decision, not a defect."*) : ;;
+    *) fail "E37-F02:R5: the note sentence (one re-audit, decision not a defect) is missing or altered" ;;
+  esac
+  [ "$(printf '%s' "$_note" | grep -oi 're-audit' | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "E37-F02:R5: the template note mentions re-audit outside its pinned sentence"
   case "$_sec" in *'Optional (E37-F02).'*) : ;; *) fail "E37-F02:R5: optional marker missing" ;; esac
   case "$_sec" in *'Omit the section when there is nothing to record.'*) : ;; *) fail "E37-F02:R5: omit sentence missing" ;; esac
   printf '%s\n' "$_sl" | grep -qxF -- '- <unit: R-id, plan row, T<n> or section> — <what the cold reader could not restate> — accepted because <why>' \
@@ -375,7 +398,7 @@ test_workflow_paraphrase_paragraph() {
   _sec="$(slice "$WORKFLOW" '## Doc-critic checkpoints' | folded)"
   _need() { case "$_sec" in *"$1"*) : ;; *) fail "E37-F02:R6: WORKFLOW $2" ;; esac; }
   _need 'At the `feature-spec` checkpoint the critic'"'"'s note opens with a `## Paraphrase` (E37-F02)' "paragraph opener missing"
-  _need 'restated from the four spec files alone — the inbox brief and the chat are withheld on purpose, because the Builder never sees them either' \
+  _need 'restated from the four spec files alone — the inbox brief and the chat are withheld on purpose, because the Builder never sees them either — followed by a per-file `### Could not restate` list.' \
     "four-files-only / withheld-on-purpose clause missing"
   _need 'Each `could-not-restate` item is blocking for the Architect'"'"'s hand-off: fix it, or after at most one re-audit record it in the `.spec.md` under `## Accepted trade-offs`.' \
     "fix-or-record sentence missing"
@@ -383,6 +406,10 @@ test_workflow_paraphrase_paragraph() {
     "advisory / Reviewer sentence missing"
   _need 'the Architect runs `tools/readiness-check.py <feature-dir>` before hand-off and it must exit 0' \
     "the E37-F01 paragraph was lost"
+  _l1="$(grep -nF -- '(E37-F01): the Architect runs `tools/readiness-check.py' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+  _l2="$(grep -nF -- "At the \`feature-spec\` checkpoint the critic's note opens with" "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+  [ -n "$_l1" ] && [ -n "$_l2" ] && [ "$_l1" -lt "$_l2" ] \
+    || fail "E37-F02:R6: the paraphrase paragraph must come after the E37-F01 paragraph"
   pass "E37-F02:R6: WORKFLOW carries the paraphrase paragraph, E37-F01 paragraph kept"
 }
 
@@ -396,6 +423,10 @@ test_readme_paraphrase_sentence() {
     *'the Reviewer rejects on exit 1.'*) : ;;
     *) fail "E37-F02:R6: README lost the three-lints sentence" ;;
   esac
+  _r1="$(grep -nF -- 'the Reviewer rejects on exit 1.' "$README" | head -n 1 | cut -d: -f1)"
+  _r2="$(grep -nF -- 'Before the Builder sees a spec' "$README" | head -n 1 | cut -d: -f1)"
+  [ -n "$_r1" ] && [ -n "$_r2" ] && [ "$_r1" -lt "$_r2" ] \
+    || fail "E37-F02:R6: the paraphrase sentence must come after the three-lints paragraph"
   pass "E37-F02:R6: README carries the paraphrase sentence"
 }
 
@@ -405,6 +436,10 @@ test_ledger_row_c12() {
   [ -n "$_row" ] || fail "E37-F02:R8: docs/RATIONALE.md lacks the C12 capability-compensation row"
   printf '%s' "$_row" | grep -qE 'Ablation when a model generation ships[^|]*controlled runs[^|]*Keep only while its absence reproduces a spec defect reaching review' \
     || fail "E37-F02:R8: the C12 evidence cell lacks the ablation threshold and retention rule"
+  _c11="$(grep -n '^| C11 ' "$RATIONALE" | head -n 1 | cut -d: -f1)"
+  _c12="$(grep -n '^| C12 ' "$RATIONALE" | head -n 1 | cut -d: -f1)"
+  [ -n "$_c11" ] && [ -n "$_c12" ] && [ "$_c12" -eq $((_c11 + 1)) ] \
+    || fail "E37-F02:R8: the C12 row must sit directly after C11"
   _v="$(cat "$SRC/VERSION")"
   _top="$(grep -m 1 '^## \[' "$SRC/CHANGELOG.md" || true)"
   case "$_top" in
