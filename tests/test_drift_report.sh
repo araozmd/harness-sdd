@@ -347,6 +347,83 @@ R2_exit0_with_findings() {
   pass R2_exit0_with_findings
 }
 
+# chk_exit2 <row> <stderr-fixed-string> — each row's argv is the minimal one ONLY that branch
+# rejects; the string names the branch so a second producer cannot pass it.
+chk_exit2() {
+  [ "$rc" -eq 2 ] || fail "$1: expected rc 2, got $rc ($(both))"
+  head -n 1 "$T/err" | grep -q '^drift-report: error: ' || fail "$1: stderr's first line is not 'drift-report: error: ...' ($(both))"
+  grep -q 'usage:' "$T/err" || fail "$1: no usage on stderr ($(both))"
+  [ ! -s "$T/out" ] || fail "$1: stdout is not empty on an error ($(both))"
+  grep -qF -- "$2" "$T/err" || fail "$1: the error does not name '$2' ($(both))"
+  pass "$1"
+}
+
+# ── R3: the opt-in inverse direction — files no living document names ─────────────────────
+CHOICE_CODE='update doc (name it in the decision that owns it) or update code (remove it)'
+INV='Code no living document names'
+R3_inventory_unnamed() {
+  fresh r3unn
+  run_tool --root "$R" --date 2026-01-02 --inventory tools; expect_ok R3_inventory_unnamed
+  _r="$(report)"
+  [ "$(section "$_r" "$INV" | grep '^- ')" = "- code-unnamed \`tools/unnamed.py\` — reconcile: $CHOICE_CODE" ] \
+    || fail "R3_inventory_unnamed: the inventory section is not exactly the one unnamed.py item ($(section "$_r" "$INV" | tr '\n' '|'))"
+  grep -qxF -- '- inventory: tools (2 entries)' "$_r" || fail "R3_inventory_unnamed: the header is not '- inventory: tools (2 entries)'"
+  [ "$(last_line "$_r")" = 'drift-report: 0 finding(s) across 4 document(s) read, 1 code entry unnamed' ] \
+    || fail "R3_inventory_unnamed: the summary is wrong ($(last_line "$_r"))"
+  pass R3_inventory_unnamed
+}
+R3_hidden_and_subdir_skipped() {
+  fresh r3hid
+  run_tool --root "$R" --date 2026-01-02 --inventory tools; expect_ok R3_hidden_and_subdir_skipped
+  [ -f "$R/tools/.hidden.py" ] && [ -f "$R/tools/sub/inner.py" ] || fail "R3_hidden_and_subdir_skipped: setup: the fixture lost its hidden file or subdirectory"
+  for _w in hidden sub/inner tools/sub; do
+    [ "$(grep -c -- "$_w" "$(report)" || true)" -eq 0 ] || fail "R3_hidden_and_subdir_skipped: '$_w' was listed"
+  done
+  pass R3_hidden_and_subdir_skipped
+}
+R3_named_via_remap() {
+  installed_layout r3remap
+  run_tool --root "$R" --date 2026-01-02 --inventory tools; expect_ok R3_named_via_remap
+  [ "$(section "$(report)" "$INV" | grep '^- ')" = "- code-unnamed \`tools/unnamed.py\` — reconcile: $CHOICE_CODE" ] \
+    || fail "R3_named_via_remap: the .harness/tools inventory is not exactly the unnamed.py item ($(section "$(report)" "$INV" | tr '\n' '|'))"
+  [ "$(grep -c 'real.py`' "$(report)" || true)" -eq 0 ] || fail "R3_named_via_remap: real.py, named through the .harness/ remap, was listed"
+  pass R3_named_via_remap
+}
+R3_dir_ref_names_nothing() {
+  fresh r3dir
+  grep -qF '`tools/`' "$R/specs/architecture.md" || fail "R3_dir_ref_names_nothing: setup: architecture.md no longer names the directory tools/"
+  run_tool --root "$R" --date 2026-01-02 --inventory tools; expect_ok R3_dir_ref_names_nothing
+  [ "$(section "$(report)" "$INV" | grep -c '^- code-unnamed `tools/unnamed.py`')" -eq 1 ] \
+    || fail "R3_dir_ref_names_nothing: a reference to the directory named a file inside it"
+  pass R3_dir_ref_names_nothing
+}
+R3_inventory_repeat() {
+  fresh r3rep
+  run_tool --root "$R" --date 2026-01-02 --inventory tools --inventory agents; expect_ok R3_inventory_repeat
+  _r="$(report)"
+  section "$_r" "$INV" | grep -qF '`tools/unnamed.py`' || fail "R3_inventory_repeat: tools/unnamed.py is not listed"
+  section "$_r" "$INV" | grep -qF '`agents/unnamed.md`' || fail "R3_inventory_repeat: agents/unnamed.md is not listed (only the last --inventory kept?)"
+  grep -qxF -- '- inventory: tools, agents (4 entries)' "$_r" || fail "R3_inventory_repeat: the header is not '- inventory: tools, agents (4 entries)'"
+  [ "$(last_line "$_r")" = 'drift-report: 0 finding(s) across 4 document(s) read, 2 code entries unnamed' ] || fail "R3_inventory_repeat: the summary is wrong ($(last_line "$_r"))"
+  section "$_r" "$INV" > "$T/sec.a"
+  run_tool --root "$R" --date 2026-01-02 --inventory=agents; expect_ok R3_inventory_repeat
+  grep -qxF -- '- inventory: agents (2 entries)' "$(report)" || fail "R3_inventory_repeat: --inventory=agents is not read like --inventory agents"
+  [ "$(section "$(report)" "$INV" | grep '^- ')" = "- code-unnamed \`agents/unnamed.md\` — reconcile: $CHOICE_CODE" ] || fail "R3_inventory_repeat: --inventory=agents lists the wrong entries"
+  pass R3_inventory_repeat
+}
+R3_inventory_not_requested() {
+  fresh r3none
+  run_tool --root "$R" --date 2026-01-02; expect_ok R3_inventory_not_requested
+  grep -qxF -- '- inventory: not requested (pass --inventory <dir>)' "$(report)" || fail "R3_inventory_not_requested: the header line is wrong"
+  [ "$(grep -c '^## Code no living document names' "$(report)" || true)" -eq 0 ] || fail "R3_inventory_not_requested: the inventory section is present without the flag"
+  pass R3_inventory_not_requested
+}
+R3_inventory_missing_dir_exit2() {
+  fresh r3miss
+  run_tool --root "$R" --inventory nope
+  chk_exit2 R3_inventory_missing_dir_exit2 nope
+}
+
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
 R1_installed_layout; R1_dogfood_archive_copy
 R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only
@@ -354,4 +431,6 @@ R2_path_missing; R2_symbol_missing; R2_unresolved_path_colon_name_single_finding
 R2_fenced_decoy_invisible; R2_every_line_kind_scanned; R2_ignored_shapes
 R2_duplicate_on_one_line_collapsed; R2_order_by_document_then_line
 R2_crlf_and_bom_keep_findings; R2_non_utf8_target_not_searched; R2_exit0_with_findings
+R3_inventory_unnamed; R3_hidden_and_subdir_skipped; R3_named_via_remap; R3_dir_ref_names_nothing
+R3_inventory_repeat; R3_inventory_not_requested; R3_inventory_missing_dir_exit2
 echo "test_drift_report.sh: all rows passed"

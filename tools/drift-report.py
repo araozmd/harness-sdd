@@ -124,16 +124,18 @@ ADVISORY = ("Advisory: this report changes nothing. For each finding a human dec
 NOT_CHECKED = ('Replaced patterns — a document that describes a mechanism the code now implements '
                'differently — are not detected; "No drift detected" means every named path and '
                'symbol resolves and nothing in the requested inventory is unnamed.')
+CHOICE_CODE = "update doc (name it in the decision that owns it) or update code (remove it)"
 CHOICE_SYMBOL = "update doc (name the symbol as it is today) or update code (restore it)"
 CHOICE_PATH = ("update doc (rewrite the path as it is today, or give it a placeholder prefix if "
                "it is not in this repository, or supersede the decision) or update code (restore it)")
 
 
 def scan_document(rc, root, abs_path):
-    """[(code, line, display)] for one document, in line order: every unfenced line, every
-    span the resolver classifies as a path candidate it does not ignore; one finding per
-    (line, code, token)."""
+    """([(code, line, display)], {realpath}) for one document: the findings in line order —
+    every unfenced line, every span the resolver classifies as a path candidate it does not
+    ignore, one per (line, code, token) — and the real paths of the files it names."""
     findings = []
+    named = set()
     doc_dir = os.path.dirname(abs_path)
 
     def emit(code, n, display):
@@ -149,12 +151,35 @@ def scan_document(rc, root, abs_path):
             if target is None:
                 if "/" in p:  # a `/`-less candidate found nowhere is prose, never a finding
                     emit("doc-names-missing", n, display)
-            elif name is not None and os.path.isfile(target) and not rc.symbol_present(target, name):
-                emit("doc-names-missing-symbol", n, display)
-    return findings
+            elif os.path.isfile(target):  # a directory reference names no file inside it
+                named.add(os.path.realpath(target))
+                if name is not None and not rc.symbol_present(target, name):
+                    emit("doc-names-missing-symbol", n, display)
+    return findings, named
 
 
-def render(date, root, harness, docs, results):
+def inventory_entries(root, dirs):
+    """[(dir as given, [file names])] — the regular, non-hidden files directly under each
+    directory.  Every value is validated before any lookup (the system edge)."""
+    for d in dirs:
+        if not d.strip("/") or os.path.isabs(d) or ".." in d.split("/"):
+            raise InputError("--inventory must be a path relative to the root: %s" % d)
+    out = []
+    for d in dirs:
+        for base in (root, os.path.join(root, ".harness")):
+            where = os.path.join(base, d)
+            if os.path.isdir(where):
+                break
+        else:
+            raise InputError("--inventory is not a directory under %s or its .harness/: %s"
+                             % (root, d))
+        names = sorted(f for f in os.listdir(where)
+                       if not f.startswith(".") and os.path.isfile(os.path.join(where, f)))
+        out.append((d.rstrip("/"), where, names))
+    return out
+
+
+def render(date, root, harness, docs, results, inventory=None, unnamed=()):
     lines = ["# Living-doc drift report — %s" % date, "", ADVISORY, "",
              "- root: %s" % root, "- harness: %s" % harness, "- documents:"]
     present = 0
@@ -164,7 +189,12 @@ def render(date, root, harness, docs, results):
         present += 1 if p else 0
     if not any(rel.endswith("/adr") or "/adr/" in rel for rel, _p in docs):
         lines.append("  - ADRs: none found")
-    lines.append("- inventory: not requested (pass --inventory <dir>)")
+    if inventory is None:
+        lines.append("- inventory: not requested (pass --inventory <dir>)")
+    else:
+        count = sum(len(names) for _d, _w, names in inventory)
+        lines.append("- inventory: %s (%s)" % (", ".join(d for d, _w, _n in inventory),
+                                              "1 entry" if count == 1 else "%d entries" % count))
     for rel, p in docs:
         lines += ["", "## %s" % rel, ""]
         if p is None:
@@ -177,10 +207,17 @@ def render(date, root, harness, docs, results):
             total += len(results[rel])
         else:
             lines.append("No drift detected.")
+    if inventory is not None:
+        lines += ["", "## Code no living document names", ""]
+        if unnamed:
+            lines.extend("- code-unnamed `%s` — reconcile: %s" % (e, CHOICE_CODE) for e in unnamed)
+        else:
+            lines.append("No drift detected.")
     lines += ["", "## Not checked by this tool", "", NOT_CHECKED, "", "## Summary", ""]
-    if total:
-        lines.append("drift-report: %d finding(s) across %d document(s) read, 0 code entries unnamed"
-                     % (total, present))
+    k = len(unnamed)
+    if total + k:
+        lines.append("drift-report: %d finding(s) across %d document(s) read, %s unnamed" % (
+            total, present, "1 code entry" if k == 1 else "%d code entries" % k))
     else:
         lines.append("drift-report: No drift detected (%d document(s) read)" % present)
     return "\n".join(lines) + "\n"
@@ -211,7 +248,26 @@ def run(rc, args):
     if rc.wants_help(args):
         print(USAGE)
         return 0
-    opts, pos = rc.parse_args(args, {"--root": "a directory", "--date": "a YYYY-MM-DD date"})
+    inv = []  # the resolver's parse_args keeps the last value of a flag; --inventory repeats
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--inventory":
+            if i + 1 >= len(args):
+                raise InputError("--inventory needs a directory")
+            inv.append(args[i + 1])
+            i += 2
+        elif a.startswith("--inventory="):
+            inv.append(a.partition("=")[2])
+            i += 1
+        elif a in ("--root", "--date") and i + 1 < len(args):
+            rest.extend(args[i:i + 2])  # the word after a value flag is its value
+            i += 2
+        else:
+            rest.append(a)
+            i += 1
+    opts, pos = rc.parse_args(rest, {"--root": "a directory", "--date": "a YYYY-MM-DD date"})
     if pos:
         raise InputError("unexpected argument: %s" % pos[0])
     date = parse_date(opts["--date"]) if "--date" in opts else datetime.date.today().isoformat()
@@ -226,8 +282,15 @@ def run(rc, args):
     if not any(p for _rel, p in docs):
         raise InputError("no living documents under %s" % os.path.join(harness, "specs"))
     path = os.path.abspath(os.path.join(harness, "progress", "drift", date + ".md"))
-    results = {rel: scan_document(rc, root, p) for rel, p in docs if p}
-    write_report(path, render(date, root, harness, docs, results))
+    scanned = {rel: scan_document(rc, root, p) for rel, p in docs if p}
+    results = {rel: f for rel, (f, _named) in scanned.items()}
+    inventory = unnamed = None
+    if inv:
+        inventory = inventory_entries(root, inv)
+        named = set().union(*(nm for _f, nm in scanned.values()))
+        unnamed = ["%s/%s" % (d, f) for d, where, names in inventory for f in names
+                   if os.path.realpath(os.path.join(where, f)) not in named]
+    write_report(path, render(date, root, harness, docs, results, inventory, unnamed or ()))
     print(path)
     return 0
 
