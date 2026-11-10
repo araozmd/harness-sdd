@@ -665,6 +665,30 @@ test_paraphrase_back_installed_contract() {
     fail "E37-F02: installed WORKFLOW does not describe could-not-restate"
 }
 
+test_drift_report_installed_contract() {
+  [ -x "$T/.harness/tools/drift-report.py" ] ||
+    fail "E37-F03: installed drift-report.py missing or not executable"
+  # The SOURCE mode is the one a commit can drop (lesson 2026-09-16).
+  [ -x "$SRC/tools/drift-report.py" ] ||
+    fail "E37-F03: source tools/drift-report.py is not executable"
+  cmp -s "$SRC/tools/drift-report.py" "$T/.harness/tools/drift-report.py" ||
+    fail "E37-F03: installed drift-report.py differs from source"
+  grep -qF 'chmod +x "$H/tools/drift-report.py"' "$SRC/harness-install.sh" ||
+    fail "E37-F03: installer lacks explicit drift-report executable wiring"
+  grep -qF 'tools/drift-report.py' "$T/.harness/docs/WORKFLOW.md" ||
+    fail "E37-F03: installed docs/WORKFLOW.md does not name tools/drift-report.py"
+  command -v git >/dev/null 2>&1 || return 0
+  _g="$T/.drift-gitignore-probe"
+  rm -rf "$_g"; mkdir -p "$_g"
+  git -C "$_g" init -q >/dev/null 2>&1 || { rm -rf "$_g"; return 0; }
+  mkdir -p "$_g/.harness/progress/drift"
+  cp "$T/.harness/.gitignore" "$_g/.harness/.gitignore"
+  : > "$_g/.harness/progress/drift/2026-01-01.md"
+  git -C "$_g" check-ignore -q .harness/progress/drift/2026-01-01.md ||
+    fail "E37-F03: a drift report under .harness/progress/drift/ is NOT ignored by the seeded .harness/.gitignore"
+  rm -rf "$_g"
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -830,6 +854,7 @@ test_tasks_pair_check_installed_contract
 test_plan_cite_check_installed_contract
 test_readiness_check_installed_contract
 test_paraphrase_back_installed_contract
+test_drift_report_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
 test_e99_throughput_helpers_installed_contract
