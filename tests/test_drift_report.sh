@@ -504,6 +504,44 @@ R5_never_exit_1() {
   pass R5_never_exit_1
 }
 
+# ── R6: the tree is unchanged but for the one report ──────────────────────────────────────
+# tree_unchanged <tool> — run <tool> on the current $R (every finding code) and return 0 iff
+# every file other than the report is byte-identical (cksum manifest, state/tasks.json
+# included) and the report is the ONLY new path.
+tree_unchanged() {
+  find "$R" -type f | LC_ALL=C sort > "$T/paths.before"
+  find "$R" -type f -exec cksum {} + | LC_ALL=C sort -k3 > "$T/sum.before"
+  set +e; env -u HARNESS_DIR python3 "$1" --root "$R" --inventory tools --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 0 ] || fail "R6: the run exited $rc ($(both))"
+  find "$R" -type f | LC_ALL=C sort > "$T/paths.after"
+  find "$R" -type f -exec cksum {} + | LC_ALL=C sort -k3 > "$T/sum.after"
+  [ "$(comm -13 "$T/paths.before" "$T/paths.after")" = "$R/progress/drift/2026-01-02.md" ] || return 1
+  [ -z "$(comm -23 "$T/paths.before" "$T/paths.after")" ] || return 1
+  grep -v '/progress/drift/' "$T/sum.after" | cmp -s - "$T/sum.before" || return 1
+  return 0
+}
+R6_tree_unchanged_but_report() {
+  fresh r6ctl; plant_bad
+  # control: a copy of the tool that appends one byte to product.md must be SEEN by the manifest
+  rm -rf "$T/r6tool"; mkdir -p "$T/r6tool/tools"
+  cp "$ROOT/tools/readiness-check.py" "$T/r6tool/tools/"
+  python3 - "$TOOL" "$T/r6tool/tools/drift-report.py" <<'PYEOF'
+import sys
+s = open(sys.argv[1]).read()
+needle = "    print(path)\n    return 0\n"
+assert s.count(needle) == 1, "control patch did not apply"
+s = s.replace(needle, "    open(os.path.join(root, 'specs/product.md'), 'a').write('x')\n" + needle)
+open(sys.argv[2], "w").write(s)
+PYEOF
+  if tree_unchanged "$T/r6tool/tools/drift-report.py"; then fail "R6_tree_unchanged_but_report CONTROL: the manifest did not see a one-byte edit to a living document"; fi
+  fresh r6real; plant_bad
+  [ -s "$R/state/tasks.json" ] || fail "R6_tree_unchanged_but_report: setup: the fixture board witness is missing"
+  tree_unchanged "$TOOL" || fail "R6_tree_unchanged_but_report: the run changed, added or removed a file other than the report"
+  grep -q 'doc-names-missing-symbol' "$R/progress/drift/2026-01-02.md" && grep -q '^- code-unnamed' "$R/progress/drift/2026-01-02.md" && grep -q '^- doc-names-missing ' "$R/progress/drift/2026-01-02.md" \
+    || fail "R6_tree_unchanged_but_report: setup: the run did not exercise every finding code"
+  pass R6_tree_unchanged_but_report
+}
+
 R1_clean_positive; R1_architecture_absent; R1_product_space_adr; R1_root_discovered_from_git
 R1_installed_layout; R1_dogfood_archive_copy
 R4_shape; R4_date_override; R4_same_day_overwrite; R4_stdout_is_path_only
@@ -518,4 +556,5 @@ R5_date_no_value; R5_root_not_a_dir; R5_inventory_not_relative; R5_no_git_ancest
 R5_zero_docs; R5_doc_invalid_utf8; R5_date_malformed; R5_date_impossible; R5_progress_is_a_file
 R5_sibling_missing; R5_no_report_on_error; R5_stdout_empty_on_error; R5_help_exit0
 R5_help_as_value_is_not_help; R5_internal_error_no_traceback; R5_never_exit_1
+R6_tree_unchanged_but_report
 echo "test_drift_report.sh: all rows passed"
