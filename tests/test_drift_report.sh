@@ -122,7 +122,7 @@ R1_root_discovered_from_git() {
   set +e; env -u HARNESS_DIR python3 "$R/tools/drift-report.py" >"$T/out" 2>"$T/err"; rc=$?; set -e
   expect_ok "R1_root_discovered_from_git (.git file)"
   case "$(cat "$T/out")" in "$R/progress/drift/"*) ;; *) fail "R1_root_discovered_from_git: a .git FILE is not a root marker ($(both))";; esac
-  # the root axis is orthogonal: without --root (every role invocation) $HARNESS_DIR still decides (F4)
+  # the root axis is orthogonal: without --root (every role invocation) $HARNESS_DIR still decides (F4r6)
   rm -rf "$R/progress/drift"; mkdir "$T/r1git/h"; cp -R "$R/specs" "$T/r1git/h/specs"
   set +e; env HARNESS_DIR="$T/r1git/h" python3 "$R/tools/drift-report.py" >"$T/out" 2>"$T/err"; rc=$?; set -e
   expect_ok "R1_root_discovered_from_git (HARNESS_DIR)"
@@ -857,7 +857,7 @@ R1_harness_dir_table() {
   grep -qF -- "no living documents under $T/r1t/gone/specs" "$T/err" || fail "R1_harness_dir_table: a missing \$HARNESS_DIR did not name its specs/ ($(both))"
   [ ! -e "$R/.harness/progress/drift" ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR wrote under <root>/.harness"
   # set-a-file: a $HARNESS_DIR naming a file names no directory, so it is still the harness
-  # directory -- exit 2, never its dirname, never a fallback (F3, F3b)
+  # directory -- exit 2, never its dirname, never a fallback (F3r6, F3br6)
   set +e; env HARNESS_DIR="$R/.harness/harness.config.yaml" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
   [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a \$HARNESS_DIR naming a file was not the harness directory, rc $rc ($(both))"
   grep -qF -- "no living documents under $R/.harness/harness.config.yaml/specs" "$T/err" || fail "R1_harness_dir_table: a \$HARNESS_DIR naming a file did not name <value>/specs ($(both))"
