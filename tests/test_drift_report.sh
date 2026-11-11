@@ -898,6 +898,23 @@ R1_harness_dir_table() {
   set +e; env HARNESS_DIR="$T/r1t/gone" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
   [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR fell back to the root, rc $rc ($(both))"
   [ ! -e "$R/progress/drift" ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR wrote under <root>"
+  # the config-absent twins of set-a-file, set-existing-without-specs and set-relative: no
+  # installed config changes none of them (F3nc, F3bnc, Tx2, S7nc)
+  set +e; env HARNESS_DIR="$R/README.md" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a \$HARNESS_DIR naming a file, no config, was not the harness directory, rc $rc ($(both))"
+  grep -qF -- "no living documents under $R/README.md/specs" "$T/err" || fail "R1_harness_dir_table: a \$HARNESS_DIR naming a file, no config, did not name <value>/specs ($(both))"
+  set +e; env HARNESS_DIR="$T/r1t/empty" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a \$HARNESS_DIR without specs/, no config, fell back to the root, rc $rc ($(both))"
+  [ ! -e "$R/progress/drift" ] || fail "R1_harness_dir_table: a \$HARNESS_DIR naming no harness, no config, wrote under <root>"
+  set +e; (cd "$T/r1t" && env HARNESS_DIR=h python3 "$TOOL" --root "$R" --date 2026-01-02) >"$T/out" 2>"$T/err"; rc=$?; set -e
+  expect_ok "R1_harness_dir_table (relative, no config)"
+  [ "$(cat "$T/out")" = "$(cd "$T/r1t" && pwd -P)/h/progress/drift/2026-01-02.md" ] \
+    || fail "R1_harness_dir_table: a relative \$HARNESS_DIR, no config, was not taken against the cwd ($(both))"
+  # set-empty, no config: ignored, so the root decides, never the cwd (Ti2, Ti3)
+  set +e; (cd "$T/r1t/h" && env HARNESS_DIR= python3 "$TOOL" --root "$R" --date 2026-01-02) >"$T/out" 2>"$T/err"; rc=$?; set -e
+  expect_ok "R1_harness_dir_table (empty, no config)"
+  [ "$(cat "$T/out")" = "$R/progress/drift/2026-01-02.md" ] \
+    || fail "R1_harness_dir_table: an empty \$HARNESS_DIR, no config, was not ignored ($(both))"
   pass R1_harness_dir_table
 }
 
