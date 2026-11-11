@@ -837,6 +837,46 @@ R1_harness_dir_env() {
   pass R1_harness_dir_env
 }
 
+# ── R1: the harness-directory decision table's remaining $HARNESS_DIR cells ─────────────────
+# Every arm runs on an installed-layout copy (<root>/.harness/harness.config.yaml present and
+# <root>/.harness/specs populated), so a fallback to <root>/.harness would succeed silently
+# rather than exit 2. Each arm pins its own cell only; the table's disclosed cells are not here.
+R1_harness_dir_table() {
+  fresh r1t
+  mkdir "$R/.harness"; : > "$R/.harness/harness.config.yaml"; cp -R "$R/specs" "$R/.harness/specs"
+  # set-missing: a set $HARNESS_DIR naming no directory is still the harness directory (S6)
+  set +e; env HARNESS_DIR="$T/r1t/gone" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR fell back to another harness directory, rc $rc ($(both))"
+  [ ! -s "$T/out" ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR printed a path ($(both))"
+  grep -qF -- "no living documents under $T/r1t/gone/specs" "$T/err" || fail "R1_harness_dir_table: a missing \$HARNESS_DIR did not name its specs/ ($(both))"
+  [ ! -e "$R/.harness/progress/drift" ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR wrote under <root>/.harness"
+  # set-existing-without-specs: an existing $HARNESS_DIR without specs/ is still the harness directory (S6b)
+  mkdir "$T/r1t/empty"
+  set +e; env HARNESS_DIR="$T/r1t/empty" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a \$HARNESS_DIR without specs/ fell back to another harness directory, rc $rc ($(both))"
+  grep -qF -- "no living documents under $T/r1t/empty/specs" "$T/err" || fail "R1_harness_dir_table: a \$HARNESS_DIR without specs/ did not name its specs/ ($(both))"
+  [ ! -e "$R/.harness/progress/drift" ] || fail "R1_harness_dir_table: a \$HARNESS_DIR without specs/ wrote under <root>/.harness"
+  # a harness copy outside the root: the cwd of the next two arms, so selecting the cwd would
+  # also succeed silently; a decoy <root>/h/specs does the same for a value joined to the root
+  mkdir -p "$T/r1t/h/specs" "$R/h/specs"
+  cp "$R/specs/product.md" "$R/specs/glossary.md" "$T/r1t/h/specs/"
+  cp "$R/specs/product.md" "$R/specs/glossary.md" "$R/h/specs/"
+  # set-empty: an empty value is ignored, so the installed layout decides, never the cwd (Q2)
+  set +e; (cd "$T/r1t/h" && env HARNESS_DIR= python3 "$TOOL" --root "$R" --date 2026-01-02) >"$T/out" 2>"$T/err"; rc=$?; set -e
+  expect_ok "R1_harness_dir_table (empty)"
+  [ "$(cat "$T/out")" = "$R/.harness/progress/drift/2026-01-02.md" ] \
+    || fail "R1_harness_dir_table: an empty \$HARNESS_DIR was not ignored ($(both))"
+  grep -qxF -- "- harness: $R/.harness" "$(report)" || fail "R1_harness_dir_table: an empty \$HARNESS_DIR changed the harness header"
+  [ ! -e "$T/r1t/h/progress/drift" ] || fail "R1_harness_dir_table: an empty \$HARNESS_DIR wrote under the cwd"
+  # set-relative: a relative value is taken against the cwd, never against the root (S7).
+  # The cwd is compared physically (pwd -P): $T may sit under macOS's /var symlink.
+  set +e; (cd "$T/r1t" && env HARNESS_DIR=h python3 "$TOOL" --root "$R" --date 2026-01-02) >"$T/out" 2>"$T/err"; rc=$?; set -e
+  expect_ok "R1_harness_dir_table (relative)"
+  [ "$(cat "$T/out")" = "$(cd "$T/r1t" && pwd -P)/h/progress/drift/2026-01-02.md" ] \
+    || fail "R1_harness_dir_table: a relative \$HARNESS_DIR was not taken against the cwd ($(both))"
+  pass R1_harness_dir_table
+}
+
 row R1_clean_positive; row R1_architecture_absent; row R1_product_space_adr;
 row R1_root_discovered_from_git; row R1_installed_layout; row R1_stray_harness_dir_is_not_installed;
 row R1_dogfood_archive_copy;
@@ -850,7 +890,8 @@ row R2_crlf_and_bom_keep_findings; row R2_non_utf8_target_not_searched;
 row R2_directory_target_not_searched; row R2_exit0_with_findings; row R3_inventory_unnamed;
 row R3_hidden_and_subdir_skipped; row R3_named_via_remap; row R3_dir_ref_names_nothing;
 row R3_inventory_repeat; row R3_inventory_not_requested; row R3_inventory_missing_dir_exit2;
-row R3_inventory_counts_and_precedence; row R1_harness_dir_env; row R5_unknown_flag;
+row R3_inventory_counts_and_precedence; row R1_harness_dir_env; row R1_harness_dir_table;
+row R5_unknown_flag;
 row R5_fix_flag_rejected; row R5_positional; row R5_root_no_value; row R5_inventory_no_value;
 row R5_date_no_value; row R5_root_not_a_dir; row R5_inventory_not_relative;
 row R5_no_git_ancestor_no_root; row R5_zero_docs; row R5_doc_invalid_utf8;
