@@ -122,6 +122,12 @@ R1_root_discovered_from_git() {
   set +e; env -u HARNESS_DIR python3 "$R/tools/drift-report.py" >"$T/out" 2>"$T/err"; rc=$?; set -e
   expect_ok "R1_root_discovered_from_git (.git file)"
   case "$(cat "$T/out")" in "$R/progress/drift/"*) ;; *) fail "R1_root_discovered_from_git: a .git FILE is not a root marker ($(both))";; esac
+  # the root axis is orthogonal: without --root (every role invocation) $HARNESS_DIR still decides (F4)
+  rm -rf "$R/progress/drift"; mkdir "$T/r1git/h"; cp -R "$R/specs" "$T/r1git/h/specs"
+  set +e; env HARNESS_DIR="$T/r1git/h" python3 "$R/tools/drift-report.py" >"$T/out" 2>"$T/err"; rc=$?; set -e
+  expect_ok "R1_root_discovered_from_git (HARNESS_DIR)"
+  case "$(cat "$T/out")" in "$T/r1git/h/progress/drift/"*) ;; *) fail "R1_root_discovered_from_git: \$HARNESS_DIR was ignored without --root ($(both))";; esac
+  [ ! -e "$R/progress/drift" ] || fail "R1_root_discovered_from_git: \$HARNESS_DIR set, a report was written under the discovered root"
   pass R1_root_discovered_from_git
 }
 # installed_layout <row> — the fixture moved under .harness/ with a config file and a src/ file.
@@ -850,6 +856,12 @@ R1_harness_dir_table() {
   [ ! -s "$T/out" ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR printed a path ($(both))"
   grep -qF -- "no living documents under $T/r1t/gone/specs" "$T/err" || fail "R1_harness_dir_table: a missing \$HARNESS_DIR did not name its specs/ ($(both))"
   [ ! -e "$R/.harness/progress/drift" ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR wrote under <root>/.harness"
+  # set-a-file: a $HARNESS_DIR naming a file names no directory, so it is still the harness
+  # directory -- exit 2, never its dirname, never a fallback (F3, F3b)
+  set +e; env HARNESS_DIR="$R/.harness/harness.config.yaml" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a \$HARNESS_DIR naming a file was not the harness directory, rc $rc ($(both))"
+  grep -qF -- "no living documents under $R/.harness/harness.config.yaml/specs" "$T/err" || fail "R1_harness_dir_table: a \$HARNESS_DIR naming a file did not name <value>/specs ($(both))"
+  [ ! -e "$R/.harness/progress/drift" ] || fail "R1_harness_dir_table: a \$HARNESS_DIR naming a file wrote under <root>/.harness"
   # set-existing-without-specs: an existing $HARNESS_DIR without specs/ is still the harness directory (S6b)
   mkdir "$T/r1t/empty"
   set +e; env HARNESS_DIR="$T/r1t/empty" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
@@ -874,6 +886,18 @@ R1_harness_dir_table() {
   expect_ok "R1_harness_dir_table (relative)"
   [ "$(cat "$T/out")" = "$(cd "$T/r1t" && pwd -P)/h/progress/drift/2026-01-02.md" ] \
     || fail "R1_harness_dir_table: a relative \$HARNESS_DIR was not taken against the cwd ($(both))"
+  # unset, installed config, <root>/.harness/specs missing: <root>/.harness is still the harness
+  # directory -- exit 2; the populated <root>/specs is never a fallback (Td)
+  rm -rf "$R/.harness/specs" "$R/.harness/progress"
+  run_tool --root "$R" --date 2026-01-02
+  [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: an installed layout without .harness/specs fell back to the root, rc $rc ($(both))"
+  grep -qF -- "no living documents under $R/.harness/specs" "$T/err" || fail "R1_harness_dir_table: an installed layout without .harness/specs did not name it ($(both))"
+  [ ! -e "$R/progress/drift" ] || fail "R1_harness_dir_table: an installed layout without .harness/specs wrote under <root>"
+  # set-missing, no installed config: still exit 2, the populated <root>/specs is never a fallback (Th2)
+  rm "$R/.harness/harness.config.yaml"
+  set +e; env HARNESS_DIR="$T/r1t/gone" python3 "$TOOL" --root "$R" --date 2026-01-02 >"$T/out" 2>"$T/err"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR fell back to the root, rc $rc ($(both))"
+  [ ! -e "$R/progress/drift" ] || fail "R1_harness_dir_table: a missing \$HARNESS_DIR wrote under <root>"
   pass R1_harness_dir_table
 }
 
