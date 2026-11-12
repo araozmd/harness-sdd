@@ -2,7 +2,7 @@
 id: E38-F01
 title: init.sh update check + consented upgrade with custom-config preservation preview
 epic: E38-harness-self-update
-status: in-progress      # pending → spec-ready → in-progress → in-review → done
+status: in-review        # pending → spec-ready → in-progress → in-review → done
 sdd: true
 autonomous: true
 complexity: complex      # basis stated in Context: 12/12 of change_size.max_requirements, and a

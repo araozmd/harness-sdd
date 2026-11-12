@@ -2324,7 +2324,7 @@
         {
           "id": "E38-F01",
           "title": "init.sh update check + consented upgrade with custom-config preservation preview (single-repo and umbrella cascade)",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
