@@ -2328,7 +2328,13 @@
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E38-harness-self-update/F01-update-check-and-consented-upgrade/"
+          "spec_path": "specs/epics/E38-harness-self-update/F01-update-check-and-consented-upgrade/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (328)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E38-F01 done --evidence <merge-ref>`",
+            "pr": "328"
+          }
         }
       ]
     }
