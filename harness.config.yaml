@@ -361,6 +361,18 @@ change_size:
   # Never add a bare `[` or `should`: every ordinary sh edit would become a finding.
   assert_patterns: []      # e.g. - "(^|[^A-Za-z0-9_])verify[(]"
 
+# Harness self-update check (E38-F01) — `init.sh` asks the harness remote for its highest
+# vX.Y.Z tag and prints ONE notice line when it is newer than .harness/.harness-version; at an
+# interactive terminal only, it then offers to install it (preview, backups, then the new
+# tag's own harness-install.sh, then a check that this file's values and the prose in
+# CLAUDE.md / AGENTS.md survived). Never blocks the gate: bounded to 3 s, cached 24 h, silent
+# offline. `check: false` switches it off for good (per run: HARNESS_SKIP_UPDATE_CHECK=1).
+# `remote` is the git URL to read tags from; empty ⇒ https://github.com/araozmd/harness-sdd.git.
+# A fork sets its own here. Skipped in an umbrella child — the coordinator's upgrade cascades.
+update:
+  check: true
+  remote: ""
+
 # Deterministic Builder escalation (E17-F03), armed by the installer (E17-F05).
 # After this many Reviewer rejections, subsequent builds spawn `builder-heavy` instead of
 # `builder`. The counter is the EXISTING build<->review round (agents/orchestrator.md), so

@@ -503,6 +503,32 @@ change_size:
 EOF
   fi
 
+  # --- update block (E38-F01 init.sh update check) ---
+  # Top-level, append-only at EOF, keyed off the TOP-LEVEL `update:` header only (the same
+  # shape as mirror: / fix_lane: / execution:): header absent => append the block, header
+  # present => do NOTHING, so a present-but-partial block never gains a second mapping.
+  # Keep this heredoc BYTE-IDENTICAL to the `update:` block of the source harness.config.yaml
+  # (a FRESH install copies the config and never migrates, an UPGRADE only migrates, and the
+  # two must converge on the same text). The check is ON by default, so an absent block is
+  # behaviourally the same as the values below; the block is appended so the opt-out and the
+  # fork `remote` key are discoverable in the file the human actually edits.
+  if ! grep -Eq '^update:[[:space:]]*(#.*)?$' "$_cfg"; then
+    cat >> "$_cfg" <<'EOF'
+
+# Harness self-update check (E38-F01) — `init.sh` asks the harness remote for its highest
+# vX.Y.Z tag and prints ONE notice line when it is newer than .harness/.harness-version; at an
+# interactive terminal only, it then offers to install it (preview, backups, then the new
+# tag's own harness-install.sh, then a check that this file's values and the prose in
+# CLAUDE.md / AGENTS.md survived). Never blocks the gate: bounded to 3 s, cached 24 h, silent
+# offline. `check: false` switches it off for good (per run: HARNESS_SKIP_UPDATE_CHECK=1).
+# `remote` is the git URL to read tags from; empty ⇒ https://github.com/araozmd/harness-sdd.git.
+# A fork sets its own here. Skipped in an umbrella child — the coordinator's upgrade cascades.
+update:
+  check: true
+  remote: ""
+EOF
+  fi
+
   # --- escalation block (E17-F03 deterministic Builder escalation) ---
   # Top-level, append-only at EOF. Keep this text BYTE-IDENTICAL to the tail of the source
   # harness.config.yaml: a FRESH install copies the config and never migrates, an UPGRADE
