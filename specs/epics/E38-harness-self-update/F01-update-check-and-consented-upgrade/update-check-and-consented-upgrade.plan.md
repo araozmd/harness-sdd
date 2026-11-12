@@ -120,7 +120,10 @@ from both sides. `.harness-version` is written by the installer as bare `X.Y.Z`.
 the background, poll `kill -0` at 1 s (or finer) steps up to the timeout, `kill` on expiry,
 treat a killed or non-zero run as failure. Set `GIT_TERMINAL_PROMPT=0` so a private or typo'd
 remote can never block on a credential prompt — that is the one way an "interactive" tool
-could hang the gate.
+could hang the gate. For ssh remotes, set `GIT_SSH_COMMAND` to the ssh command git itself would
+pick (`$GIT_SSH_COMMAND`, else `core.sshCommand`, else the quoted `$GIT_SSH` program path, else
+`ssh`) with `-o BatchMode=yes` appended — never a bare `ssh`, which would override the user's
+custom command or key (tests.md C3b precedence table).
 
 **Cache semantics.** Read the record first; if `checked` is within TTL, use `latest`
 (possibly empty ⇒ silent) and `declined`. Otherwise attempt, then rewrite `checked` and

@@ -71,7 +71,7 @@
 | R7 | `y` + `y` ⇒ tag fetched under `progress/update-check/repo`, installed stamp = `$NEXT`, `agents/scout.md` carries the marker, `.harness/.agents` byte-identical, `execution.builder.backend` / `pr_loop.enabled` values unchanged, report names `v$CUR → v$NEXT`, the backup dir, "commit" and "re-run"; gate rc 3; broken remote at fetch time ⇒ rc 5 with message | `tests/test_update_check.sh::R7_consented_upgrade_runs_installer` (C14, C14b) | behavioral | ⬜ |
 | R8 | single target with a hand-edited `test_command` and an extra comment line ⇒ `✅ preserved root harness.config.yaml` and both lines still present in order; coordinator ⇒ one `✅` per child incl. `api`'s override; forced violation (a shim installer that rewrites a value) ⇒ `❌ changed`, snapshot path printed, rc 4 | `tests/test_update_check.sh::R8_config_preserved_proof` (C15, C15b, C19) | behavioral | ⬜ |
 | R9 | `CLAUDE.md` with prose above and below the block, `AGENTS.md` without a block ⇒ `✅ preserved root CLAUDE.md` / `AGENTS.md`, bytes outside the block identical; forced violation ⇒ `❌ changed`, rc 4 | `tests/test_update_check.sh::R9_entrypoints_preserved_proof` (C16, C16b) | behavioral | ⬜ |
-| R10 | coordinator ⇒ installer invoked with `--umbrella <umbrella-dir>` (the manifest file's parent; argv read from `$E38_ARGV_LOG`); `api` and `web` stamps = `$NEXT`; `web`'s prose tier still stubs (sentinel line 1); installer exit 3 reported as success, gate rc 3 | `tests/test_update_check.sh::R10_coordinator_cascades` (C19, C19b) | behavioral | ⬜ |
+| R10 | coordinator ⇒ installer invoked with `--umbrella <umbrella-dir>` (the manifest file's parent; argv read from `$E38_ARGV_LOG`); `api` and `web` stamps = `$NEXT`; `web`'s prose tier still stubs (sentinel line 1); installer exit 3 reported as success, gate rc 3 | `tests/test_update_check.sh::R10_coordinator_cascades` (C19, C19b, C19c) | behavioral | ⬜ |
 | R11 | edited `agents/reviewer.md` + added `<target>/.harness/agents/extra.md` ⇒ preview lists both (counts for the edit, `local addition` label for the add), names the remote and `v$NEXT`, before any write; `n` at preview ⇒ rc 2, every file under the target byte-identical (`git status --porcelain` empty after a pre-prompt commit), no backup dir; clean body ⇒ `(no local edits to harness-owned files)` and still asks; baseline tag absent (remote without `v$CUR`) ⇒ stated fallback line | `tests/test_update_check.sh::R11_preview_then_consent` (C17, C17b, C17c, C17d) | behavioral | ⬜ |
 | R12 | after a consented upgrade: `upgrade-backup/$CUR/agents/reviewer.md` and `…/agents/extra.md` are `cmp`-identical to the pre-upgrade originals, `…/preservation/root/{harness.config.yaml,CLAUDE.md,AGENTS.md}` present and identical; `git check-ignore` accepts the dir; a second upgrade from the same old version does not overwrite the first dir | `tests/test_update_check.sh::R12_backups_precede_replacement` (C18, C18b) | behavioral | ⬜ |
 | R7, R2 | installer wiring: `tools/harness-update.sh` in `_sse_expected`; installed `<target>/.harness/tools/harness-update.sh` exists, `-x`, `cmp`-identical; shipped config has `update.check: true` / `update.remote: ""`; a stripped config gains the `update:` block on upgrade with every prior line intact | `tests/test_install.sh::test_source_scripts_are_executable` (extended) and `tests/test_install.sh::update_tool_and_config_wired` (new) | contract | ⬜ |
@@ -93,8 +93,8 @@ set; `coord` = manifest present. `cache` values: `-` absent, `F+` fresh with `la
 | C6 | inst | none | F+ | **unreachable** (`file:///nonexistent`) | n | – | 0 | yes | no | 0 | the notice came from the record (remote is `file:///nonexistent`) |
 | C6b | inst | none | F+ (stale by `TTL=0`) | same (reachable, only `v$CUR`) | n | – | 1 | no | no | 0 | record rewritten with `latest=$CUR` |
 | C7 | inst | none | - | fail (`file:///nonexistent`) | h | `y\n` | 1 | no | no | 0 | record written with empty `latest`; no stdin consumed |
-| C8 | inst | none | - | hang (shim, `TIMEOUT=2`) | n | – | 1 (killed) | no | no | 0 | `GATE_SECS` ≤ 2 + baseline gate time + 3 s margin; no orphan `sleep` after exit |
-| C3b | inst | ssh remote | – | fake `ssh` on PATH (no network) | n | – | – | no | no | 0 | the fake ssh's argv carries `BatchMode=yes` |
+| C8 | inst | none | - | hang (shim, `TIMEOUT=3`) | n | – | 1 (killed) | no | no | 0 | upper bound `GATE_SECS` ≤ baseline gate time + 3 s + 1 s margin; lower bound (control: the shim really hung) `GATE_SECS` ≥ max(3, baseline + 1); no orphan `sleep` after exit; the abandoned attempt cached as a failure |
+| C3b | inst | ssh remote | – | fake ssh programs on PATH (no network), `TTL=0` each run; global config a per-cell file, system config off | n | – | – | no | no | 0 | the ssh program GIT would pick is the one invoked, with `-o BatchMode=yes` appended and the user's own arguments kept — see the C3b precedence table below |
 | C8b | inst | none | after C7 | fail | n | – | 0 | no | no | 0 | failure cached: second run within TTL makes no call |
 | C9 | inst | none | - | same | n | – | 1 | no | no | 0 | – |
 | C9b | inst | none | - | older | n | – | 1 | no | no | 0 | – |
@@ -125,7 +125,26 @@ set; `coord` = manifest present. `cache` values: `-` absent, `F+` fresh with `la
 | C16 | inst, `CLAUDE.md` = prose + block + prose, `AGENTS.md` = prose only | – | `y\n` | 3 | `✅ preserved root CLAUDE.md` / `AGENTS.md`; bytes outside the block identical |
 | C16b | inst, remote `newer-badinstaller-claude` | – | `y\n` | **4** | `❌ changed root CLAUDE.md`, rc 4 |
 | C19 | `mk_coordinator`, remote `newer-argvlog`, `E38_ARGV_LOG=$T/argv` | – | `y\n` | 3 | `$T/argv` holds `--umbrella <umbrella-dir>` where `<umbrella-dir>` is the manifest file's parent; `api`/`web` stamps = `$NEXT`; `✅ preserved api harness.config.yaml` with `pytest -q` and `builder: standard` intact; `✅ preserved web …`; `web` prose tier still stubs |
+| C19c | C19 fixture + a third child keyed `root` with its own `test_command` override | – | `y\n` | 3 | `✅ preserved repo-root harness.config.yaml`; `preservation/root/harness.config.yaml` = the coordinator's pre-upgrade config, `preservation/repo-root/harness.config.yaml` = the child's (the label `root` is the target's; a child keyed `root` never shares its snapshot dir) |
 | C19b | C19 output | – | – | 3 | the installer's own `❌ … NOT COMMITTED` audit line is present **and** the tool's report says the upgrade succeeded and must be committed (exit 3 interpreted as success) |
+
+**C3b precedence table** (`GIT_SSH_COMMAND` > `core.sshCommand` > `GIT_SSH` > `ssh`, git's own
+order; the check appends `-o BatchMode=yes` to the winner and nothing else). Bits are
+`<GIT_SSH_COMMAND="env-ssh -i /k/env_key"><core.sshCommand = custom-ssh -i /k/fork_key><GIT_SSH="$T/fake ssh prog/gs">`
+(`GIT_SSH` is a program path in a directory with a space — it must be quoted, not word-split).
+Each fake writes its own name, so the winner in the log has one producer; every logged
+invocation must be the winner, carry `BatchMode=yes`, and (shell-string winners) the `-i` key.
+
+| bits | invoked | `-i` key kept |
+|---|---|---|
+| 000 | `ssh` | – |
+| 001 | `gs` | – |
+| 010 | `custom-ssh` | `/k/fork_key` |
+| 011 | `custom-ssh` | `/k/fork_key` |
+| 100 | `env-ssh` | `/k/env_key` |
+| 101 | `env-ssh` | `/k/env_key` |
+| 110 | `env-ssh` | `/k/env_key` |
+| 111 | `env-ssh` | `/k/env_key` |
 
 ## Behavioral / end-to-end checks
 - Reviewer runs `tools/run-tests.sh tests/test_update_check.sh` under the runner (one run

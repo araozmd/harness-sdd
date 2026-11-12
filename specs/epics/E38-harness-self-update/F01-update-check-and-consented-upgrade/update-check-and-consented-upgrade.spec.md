@@ -4,7 +4,7 @@ title: init.sh update check + consented upgrade with custom-config preservation 
 epic: E38-harness-self-update
 status: in-progress      # pending → spec-ready → in-progress → in-review → done
 sdd: true
-autonomous: true 
+autonomous: true
 complexity: complex      # basis stated in Context: 12/12 of change_size.max_requirements, and a
                          # defect class the harness has already paid for (a program that rewrites
                          # the files it is executing from; E24 recorded the half-landed variant)
@@ -81,7 +81,8 @@ silently). Both are stated signals, not a feeling.
   in-scope `harness.config.yaml` (coordinator and every manifest child that has one,
   including a child's explicit overrides) is still present in order afterwards — appended
   keys allowed, nothing altered or removed; and every byte of `CLAUDE.md` / `AGENTS.md`
-  outside the `<!-- harness:begin -->…<!-- harness:end -->` block is identical afterwards.
+  outside the `<!-- harness:begin -->…<!-- harness:end -->` block is identical afterwards,
+  trailing blank lines excepted (R9: the installer separates an appended block with one).
 - **"Locally edited"** = a regular file (never `__pycache__/`, `*.pyc` or `.DS_Store`) under one of the body paths the **fetched tag's
   installer will copy** — the entries of `HARNESS_BODY_PROSE` and `HARNESS_BODY_LOCAL` read
   from that `harness-install.sh` (today `AGENTS.md agents docs specs/_templates` and

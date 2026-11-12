@@ -11,7 +11,8 @@ All notable changes to the harness body are recorded here. Versions follow
   line `🔔 harness vX.Y.Z available (installed vA.B.C)` when it is newer than
   `.harness/.harness-version`. Bounded (`HARNESS_UPDATE_TIMEOUT`, default 3 s), cached 24 h
   (`HARNESS_UPDATE_TTL`) including failures, silent offline, and never changes the gate's exit
-  code. Opt out with `update.check: false` or `HARNESS_SKIP_UPDATE_CHECK=1`; forks set
+  code. It never prompts for a credential: ssh remotes run with `-o BatchMode=yes` appended to
+  the ssh command git itself would use (`GIT_SSH_COMMAND`, `core.sshCommand`, `GIT_SSH`). Opt out with `update.check: false` or `HARNESS_SKIP_UPDATE_CHECK=1`; forks set
   `update.remote` (or `HARNESS_UPDATE_REMOTE`). Skipped in the source repo, in umbrella children
   and without `git`.
 - At an interactive terminal only (stdin and stdout are terminals) it offers `Install now? [y/N]`;

@@ -907,7 +907,7 @@ remembered per version: the notice keeps printing, the question does not, until 
 version appears.
 
 The check can never hurt the gate: the remote read is abandoned after
-`HARNESS_UPDATE_TIMEOUT` seconds (default 3), asks for no credential (https prompts and ssh passphrase/host-key prompts are disabled), and any failure —
+`HARNESS_UPDATE_TIMEOUT` seconds (default 3), asks for no credential (https prompts and ssh passphrase/host-key prompts are disabled; your own `core.sshCommand` / `GIT_SSH` is still used), and any failure —
 offline, a bad URL, a slow remote — prints nothing. The verdict, failures included, is cached
 in `.harness/progress/update-check/` for `HARNESS_UPDATE_TTL` seconds (default 86400), so the
 remote is contacted at most once a day. That directory is already ignored by version control

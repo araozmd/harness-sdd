@@ -344,19 +344,49 @@ R3_failure_silent_bounded_cached() {
   [ "$(bell_n)" = 0 ] || fail "R3 C8: printed a notice though the remote never answered"
   [ "$(ls_calls)" = 1 ] || fail "R3 C8: expected one (hung) contact, got $(ls_calls)"
   [ "$GATE_SECS" -le $((_base + 3 + 1)) ] || fail "R3 C8: the gate took ${GATE_SECS}s, bound is baseline ${_base}s + 3s + 1s margin (a 2x overrun of the timeout must fail)"
-  [ "$GATE_SECS" -ge 3 ] || fail "R3 C8 control: the gate ended in ${GATE_SECS}s, before the 3s timeout — the shim did not hang"
+  # control: at least the 3s timeout, and at least baseline + 1s — the absolute floor alone is
+  # vacuous whenever the baseline gate itself takes >= 3s under load (the deadline waits >= 2s)
+  _floor=3; [ $((_base + 1)) -gt "$_floor" ] && _floor=$((_base + 1))
+  [ "$GATE_SECS" -ge "$_floor" ] || fail "R3 C8 control: the gate ended in ${GATE_SECS}s, below max(3s timeout, baseline ${_base}s + 1s) — the shim did not hang"
   ps -ax -o command 2>/dev/null | grep -q '[s]leep 37' && fail "R3 C8: an orphan 'sleep 37' outlived the gate"
   [ -n "$(rec "$T/r3-hang" checked)" ] && [ -z "$(rec "$T/r3-hang" latest)" ] || fail "R3 C8: the abandoned attempt was not cached as a failure"
-  # C3b — an ssh remote is asked with BatchMode=yes (no host-key / passphrase prompt on /dev/tty)
-  mkdir -p "$T/fake-ssh"
-  printf '#!/bin/sh\necho "$*" >> "%s/ssh-argv"\nexit 255\n' "$T" > "$T/fake-ssh/ssh"
-  chmod +x "$T/fake-ssh/ssh"
-  : > "$T/ssh-argv"
+  # C3b — an ssh remote is asked with BatchMode=yes (no host-key / passphrase prompt on /dev/tty),
+  # appended to the ssh command GIT ITSELF would pick — never a bare `ssh` that overrides the
+  # user's own. The whole precedence table ($GIT_SSH_COMMAND > core.sshCommand > $GIT_SSH > ssh)
+  # is pinned cell by cell: each fake program writes its OWN name, so a winner's name in the log
+  # has exactly one producer. GIT_SSH lives in a directory with a space (it is a program path,
+  # not a shell string — it must be quoted). Global config is a per-cell file; system config off.
+  mkdir -p "$T/fake-ssh" "$T/fake ssh prog"
+  for _fn in ssh env-ssh custom-ssh; do
+    printf '#!/bin/sh\necho "%s $*" >> "%s/ssh-argv"\nexit 255\n' "$_fn" "$T" > "$T/fake-ssh/$_fn"
+    chmod +x "$T/fake-ssh/$_fn"
+  done
+  printf '#!/bin/sh\necho "gs $*" >> "%s/ssh-argv"\nexit 255\n' "$T" > "$T/fake ssh prog/gs"
+  chmod +x "$T/fake ssh prog/gs"
   mk_target "$T/r3-ssh"
-  GATE_PATH="$T/fake-ssh:$(git_shim log):$REAL_PATH" run_gate "$T/r3-ssh" "" HARNESS_UPDATE_REMOTE=ssh://git@example.invalid/x.git
-  [ -s "$T/ssh-argv" ] || fail "R3 C3b: the fake ssh was never invoked — the cell proves nothing"
-  grep -q 'BatchMode=yes' "$T/ssh-argv" || fail "R3 C3b: ssh was run without BatchMode=yes: $(cat "$T/ssh-argv")"
-  [ "$GATE_RC" = 0 ] && [ "$(bell_n)" = 0 ] || fail "R3 C3b: an ssh failure was not silent: $GATE_OUT"
+  # cell = <GIT_SSH_COMMAND set?><core.sshCommand set?><GIT_SSH set?> → winner, key it must carry
+  for _cell in 000:ssh: 001:gs: 010:custom-ssh:/k/fork_key 011:custom-ssh:/k/fork_key \
+               100:env-ssh:/k/env_key 101:env-ssh:/k/env_key 110:env-ssh:/k/env_key 111:env-ssh:/k/env_key; do
+    _bits="${_cell%%:*}"; _rest="${_cell#*:}"; _win="${_rest%%:*}"; _key="${_rest#*:}"
+    _gc="$T/ssh-gitconfig-$_bits"; : > "$_gc"
+    case "$_bits" in ?1?) printf '[core]\n\tsshCommand = custom-ssh -i /k/fork_key\n' > "$_gc" ;; esac
+    _gsc=""; case "$_bits" in 1??) _gsc="env-ssh -i /k/env_key" ;; esac
+    _gs="";  case "$_bits" in ??1) _gs="$T/fake ssh prog/gs" ;; esac
+    : > "$T/ssh-argv"
+    GATE_PATH="$T/fake-ssh:$(git_shim log):$REAL_PATH" run_gate "$T/r3-ssh" "" \
+      HARNESS_UPDATE_REMOTE=ssh://git@example.invalid/x.git HARNESS_UPDATE_TTL=0 \
+      GIT_CONFIG_GLOBAL="$_gc" GIT_CONFIG_NOSYSTEM=1 GIT_SSH_COMMAND="$_gsc" GIT_SSH="$_gs"
+    [ -s "$T/ssh-argv" ] || fail "R3 C3b[$_bits]: no ssh program was invoked — the cell proves nothing"
+    _wrong="$(grep -v "^$_win " "$T/ssh-argv" || true)"
+    [ -z "$_wrong" ] || fail "R3 C3b[$_bits]: git's own ssh choice is '$_win', but the check ran: $(cat "$T/ssh-argv")"
+    _nobm="$(grep -v 'BatchMode=yes' "$T/ssh-argv" || true)"
+    [ -z "$_nobm" ] || fail "R3 C3b[$_bits]: $_win was run without BatchMode=yes: $(cat "$T/ssh-argv")"
+    if [ -n "$_key" ]; then
+      _nokey="$(grep -v -e "-i $_key" "$T/ssh-argv" || true)"
+      [ -z "$_nokey" ] || fail "R3 C3b[$_bits]: $_win lost the user's '-i $_key': $(cat "$T/ssh-argv")"
+    fi
+    [ "$GATE_RC" = 0 ] && [ "$(bell_n)" = 0 ] || fail "R3 C3b[$_bits]: an ssh failure was not silent: $GATE_OUT"
+  done
   pass "failing and hanging remotes: silent, exit unchanged, bounded, failure cached (R3) [R3_failure_silent_bounded_cached]"
 }
 
@@ -698,7 +728,9 @@ R10_coordinator_cascades() {
   _u="$(remote_url newer-argvlog)"
   _c="$T/coord"
   mkdir -p "$_c"
-  for _ch in api web; do
+  # N5: a third child is keyed `root` — the label the target itself uses — to pin that the two get
+  # distinct preservation snapshots (the child is relabelled `repo-root`)
+  for _ch in api web root; do
     mkdir -p "$_c/$_ch"
     git -C "$_c/$_ch" init -q .
     git -C "$_c/$_ch" config user.email "test@harness.local"
@@ -715,12 +747,25 @@ R10_coordinator_cascades() {
   cat "$T/api.yaml" > "$_c/api/.harness/harness.config.yaml"
   grep -q 'test_command: "pytest -q"' "$_c/api/.harness/harness.config.yaml" && grep -q '^  builder: standard' "$_c/api/.harness/harness.config.yaml" \
     || fail "R10 precondition: the api override did not apply"
-  for _ch in api web; do head -n 1 "$_c/$_ch/.harness/AGENTS.md" | grep -qxF '<!-- harness:umbrella-stub -->' || fail "R10 precondition: $_ch is not thin"; done
-  for _r in "$_c/api" "$_c/web"; do git -C "$_r" add -A && git -C "$_r" commit -q -m "land the harness"; done
+  sed 's|^  test_command: ""|  test_command: "make child-root"|' "$_c/root/.harness/harness.config.yaml" > "$T/rootchild.yaml"
+  cat "$T/rootchild.yaml" > "$_c/root/.harness/harness.config.yaml"
+  grep -q 'test_command: "make child-root"' "$_c/root/.harness/harness.config.yaml" || fail "R10 precondition: the root-child override did not apply"
+  cp "$_c/.harness/harness.config.yaml" "$T/coord.cfg.orig"
+  cp "$_c/root/.harness/harness.config.yaml" "$T/rootchild.cfg.orig"
+  cmp -s "$T/coord.cfg.orig" "$T/rootchild.cfg.orig" && fail "R10 precondition: the coordinator and the root-keyed child configs are identical — N5 would prove nothing"
+  for _ch in api web root; do head -n 1 "$_c/$_ch/.harness/AGENTS.md" | grep -qxF '<!-- harness:umbrella-stub -->' || fail "R10 precondition: $_ch is not thin"; done
+  for _r in "$_c/api" "$_c/web" "$_c/root"; do git -C "$_r" add -A && git -C "$_r" commit -q -m "land the harness"; done
   [ "$(stamp "$_c")" = "$CUR" ] && [ "$(stamp "$_c/api")" = "$CUR" ] || fail "R10 precondition: stamps are not $CUR"
   _udir="$(cd "$_c" && pwd)"
   : > "$T/argv"
   run_gate "$_c" "y\ny\n" HARNESS_UPDATE_REMOTE="$_u" HARNESS_UPDATE_ASSUME_TTY=1 E38_ARGV_LOG="$T/argv"
+  # C19c (N5) — the child keyed `root` is proved and snapshotted as `repo-root`, apart from the target.
+  # Checked BEFORE the rc: a shared snapshot dir makes the coordinator's proof fail (rc 4), and the
+  # first failure must name the collision, not the exit code.
+  printf '%s\n' "$GATE_OUT" | grep -qxF "✅ preserved repo-root harness.config.yaml" || fail "R10 C19c: no repo-root config proof for the child keyed 'root': $GATE_OUT"
+  _pv="$_c/.harness/progress/upgrade-backup/$CUR/preservation"
+  cmp -s "$T/coord.cfg.orig" "$_pv/root/harness.config.yaml" || fail "R10 C19c: preservation/root/ does not hold the COORDINATOR's config (a child keyed 'root' shared its snapshot dir)"
+  cmp -s "$T/rootchild.cfg.orig" "$_pv/repo-root/harness.config.yaml" || fail "R10 C19c: preservation/repo-root/ does not hold the root-keyed child's config"
   [ "$GATE_RC" = 3 ] || fail "R10 C19: want rc 3, got $GATE_RC: $GATE_OUT"
   grep -qxF -- "--umbrella $_udir" "$T/argv" || fail "R10 C19: the installer was not invoked as '--umbrella $_udir' (argv: $(cat "$T/argv"))"
   [ "$(stamp "$_c")" = "$NEXT" ] && [ "$(stamp "$_c/api")" = "$NEXT" ] && [ "$(stamp "$_c/web")" = "$NEXT" ] \

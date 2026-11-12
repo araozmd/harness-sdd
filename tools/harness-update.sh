@@ -102,15 +102,33 @@ hu_kill_tree() {
   return 0
 }
 
+# hu_ssh_command — the ssh command git itself would run here, in git's own precedence:
+# $GIT_SSH_COMMAND, else `core.sshCommand` (repo + global config of the current directory —
+# the same context the ls-remote below reads), else $GIT_SSH, else `ssh`. GIT_SSH_COMMAND and
+# core.sshCommand are shell strings and are used verbatim; GIT_SSH is a PROGRAM PATH (no
+# arguments), so it is single-quoted before it becomes part of a shell string.
+hu_ssh_command() {
+  if [ -n "${GIT_SSH_COMMAND:-}" ]; then printf '%s' "$GIT_SSH_COMMAND"; return 0; fi
+  _sc="$(git config --get core.sshCommand 2>/dev/null || true)"
+  if [ -n "$_sc" ]; then printf '%s' "$_sc"; return 0; fi
+  if [ -n "${GIT_SSH:-}" ]; then
+    printf "'%s'" "$(printf '%s' "$GIT_SSH" | sed "s/'/'\\\\''/g")"
+    return 0
+  fi
+  printf 'ssh'
+}
+
 # hu_ls_remote <remote> <outfile> — `git ls-remote --tags`, abandoned after the bound.
 # GIT_TERMINAL_PROMPT=0 (https) and ssh BatchMode (ssh) are what make "interactive tool" and
 # "cannot hang the gate" compatible: a private or mistyped remote fails instead of asking.
 hu_ls_remote() {
   _lt="$(hu_num_or "${HARNESS_UPDATE_TIMEOUT:-}" 3)"
+  # BatchMode: ssh remotes would otherwise ask for a host-key / passphrase on /dev/tty, which
+  # GIT_TERMINAL_PROMPT does not cover. Appended to the user's OWN ssh command (custom key,
+  # wrapper) — never a bare `ssh` that would override core.sshCommand / GIT_SSH.
+  _lssh="$(hu_ssh_command) -o BatchMode=yes"
   {
-    # BatchMode: ssh remotes would otherwise ask for a host-key / passphrase on /dev/tty,
-    # which GIT_TERMINAL_PROMPT does not cover.
-    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$_lssh" \
       git ls-remote --tags -- "$1" > "$2" 2>/dev/null &
     _lpid=$!
     # A wall-clock deadline, not a count of sleep ticks: a tick costs more than it names.
