@@ -2299,19 +2299,20 @@
         {
           "id": "E37-F03",
           "title": "Advisory drift report: living docs (product, architecture, ADRs) versus current code",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "640c1d69e92c600256f96b28f9b1f161c666c491",
+            "ref": "640c1d69e92c600256f96b28f9b1f161c666c491",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E37-F02"
           ],
-          "spec_path": "specs/epics/E37-goldfish-spec-review/F03-living-doc-drift/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (324)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E37-F03 done --evidence <merge-ref>`",
-            "pr": "324"
-          }
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F03-living-doc-drift/"
         }
       ]
     }
