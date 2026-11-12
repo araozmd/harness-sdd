@@ -1,7 +1,7 @@
 ---
 id: E37
 title: "Goldfish spec review: fail-closed readiness lint, paraphrase-back comprehension, living-doc drift"
-status: pending
+status: done
 owner: araozmd
 ---
 
