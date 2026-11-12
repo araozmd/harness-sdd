@@ -344,7 +344,7 @@ R3_failure_silent_bounded_cached() {
   [ "$(bell_n)" = 0 ] || fail "R3 C8: printed a notice though the remote never answered"
   [ "$(ls_calls)" = 1 ] || fail "R3 C8: expected one (hung) contact, got $(ls_calls)"
   [ "$GATE_SECS" -le $((_base + 3 + 1)) ] || fail "R3 C8: the gate took ${GATE_SECS}s, bound is baseline ${_base}s + 3s + 1s margin (a 2x overrun of the timeout must fail)"
-  [ "$GATE_SECS" -ge $((_base + 2)) ] || fail "R3 C8 control: the gate was not delayed (${GATE_SECS}s vs ${_base}s) — the shim did not hang"
+  [ "$GATE_SECS" -ge 3 ] || fail "R3 C8 control: the gate ended in ${GATE_SECS}s, before the 3s timeout — the shim did not hang"
   ps -ax -o command 2>/dev/null | grep -q '[s]leep 37' && fail "R3 C8: an orphan 'sleep 37' outlived the gate"
   [ -n "$(rec "$T/r3-hang" checked)" ] && [ -z "$(rec "$T/r3-hang" latest)" ] || fail "R3 C8: the abandoned attempt was not cached as a failure"
   # C3b — an ssh remote is asked with BatchMode=yes (no host-key / passphrase prompt on /dev/tty)
