@@ -100,6 +100,8 @@ claude                    # CLAUDE.md → AGENTS.md auto-loads
 # defect?   /sdd-report          # report a harness defect (top-level session role)
 ```
 
+`init.sh` also tells you when a newer harness ships and, at a terminal, offers to install it (preview, backups, and a check that your config values and `CLAUDE.md`/`AGENTS.md` prose survive) — see [`docs/INSTALL.md`](./docs/INSTALL.md#staying-current--the-update-check-e38-f01).
+
 If `./init.sh` prints a `TaskStore dependency-cycle` warning, follow the closed
 feature/slice path to repair `depends_on`; the check is **warn-only** and does not
 make a structurally valid board fail. If `/sdd-next` selects nothing, its
