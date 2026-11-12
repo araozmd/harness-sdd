@@ -706,9 +706,12 @@ ANCHORS
     ! grep -qiE -- "$_re" "$T/wf.folded" || fail "R9_workflow_section: the section matches the gate pattern /$_re/ — the report must stay advisory"
   done
   # closed world: any NET change in the folded word count reds (a word-count-neutral edit is
-  # seen only by the sentence anchors above — a stated limit, not a guarantee)
-  [ "$(wc -w < "$T/wf.folded" | tr -d ' ')" -eq 292 ] \
-    || fail "R9_workflow_section: the section holds $(wc -w < "$T/wf.folded" | tr -d ' ') words, not the pasted 292"
+  # seen only by the sentence anchors above — a stated limit, not a guarantee). The count is
+  # whitespace-field based (awk NF), locale-independent: GNU `wc -w` under LC_ALL=C skips
+  # standalone em dashes (non-printable bytes), BSD wc and UTF-8 locales count them.
+  _wc="$(awk '{ n += NF } END { print n + 0 }' "$T/wf.folded")"
+  [ "$_wc" -eq 292 ] \
+    || fail "R9_workflow_section: the section holds $_wc words, not the pasted 292"
   pass R9_workflow_section
 }
 R9_readme_sentence() {
