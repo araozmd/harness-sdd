@@ -2299,13 +2299,19 @@
         {
           "id": "E37-F03",
           "title": "Advisory drift report: living docs (product, architecture, ADRs) versus current code",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E37-F02"
           ],
-          "spec_path": "specs/epics/E37-goldfish-spec-review/F03-living-doc-drift/"
+          "spec_path": "specs/epics/E37-goldfish-spec-review/F03-living-doc-drift/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (324)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E37-F03 done --evidence <merge-ref>`",
+            "pr": "324"
+          }
         }
       ]
     }

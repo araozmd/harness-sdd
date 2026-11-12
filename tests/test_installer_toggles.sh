@@ -678,10 +678,11 @@ test_docs_document_backend_prompt() {
   for _s in '--builder-backend' 'HARNESS_BUILDER_BACKEND' 'in-session' 'delegate'; do
     grep -qF -e "$_s" "$INST" || fail "R13: harness-install.sh's own text does not mention '$_s'"
   done
-  # tests/test_drift_check.sh greps the installer case-insensitively for this word and
-  # fails the WHOLE chain. Re-asserted here so this suite catches it first.
-  grep -qi 'drift' "$INST" \
-    && fail "R13: harness-install.sh contains the forbidden word (tests/test_drift_check.sh will fail the chain) — say 'diverge'"
+  # tests/test_drift_check.sh greps the installer case-insensitively for this word, exempting only
+  # lines that name tools/drift-report.py (E37-F03's tool), and fails the WHOLE chain.
+  # Re-asserted here, with the same exemption, so this suite catches it first.
+  grep -v 'tools/drift-report\.py' "$INST" | grep -qi 'drift' \
+    && fail "R13: harness-install.sh contains the forbidden word outside tools/drift-report.py's own line (tests/test_drift_check.sh will fail the chain) — say 'diverge'"
   return 0
 }
 

@@ -72,6 +72,12 @@ alone — what it proposes and how the existing system works, per the document �
 the cold reader could not restate is fixed or recorded in the spec as an accepted trade-off
 (E37-F02).
 
+On demand — suggested once per release — `tools/drift-report.py` compares the living documents
+(`specs/product.md`, `specs/architecture.md`, the ADRs) with the tree and writes an advisory
+`progress/drift/<date>.md` naming each backticked repo-rooted path or path:name symbol it
+recognises that the code lacks, and every file in a requested inventory that no document names,
+each with the reconciliation choice (doc or code) left to a human (E37-F03).
+
 ## Quick start in this source checkout (Claude Code)
 
 To use the harness in your own project, follow

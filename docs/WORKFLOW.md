@@ -366,6 +366,31 @@ architecture-alignment, and `/sdd-fix` lanes above.
 - **No-op, never silent.** With no remaining planning-tier epics, or no architecture to
   re-validate against, the check emits a clear "nothing to re-validate" note and changes nothing.
 
+## Living-doc drift report (E37-F03)
+
+The living documents — `specs/product.md`, `specs/architecture.md` and every ADR under
+`specs/adr/` or a product space `specs/<product>/adr/` — describe the system every role reads
+about, and nothing above checks that the code still matches them. `python3
+tools/drift-report.py` (installed: `python3 .harness/tools/drift-report.py`) compares them with
+the tree: it extracts every backticked repo-rooted path and `path:name` symbol the documents
+name, resolves each with the implementation-readiness lint's own resolver, and writes
+`progress/drift/<YYYY-MM-DD>.md` — one section per document listing each `doc-names-missing`
+and `doc-names-missing-symbol` finding with the reconciliation choice (update the doc, or
+update the code) left to a human, and, when `--inventory <dir>` is passed, each `code-unnamed`
+file directly under that directory that no living document names. It is advisory: no gate, no
+board write, no edit to any document or code; it exits 0 whenever the report was written and 2
+only when it could not run, and it prints the report path. Run it on demand — suggested once
+per release, before the `VERSION` bump — and read the report; a run on the same day overwrites
+that day's report. It is distinct from the epic-rollup drift check above (the Scout
+re-validating planned epics), from `init.sh`'s installed-body drift guard and from
+`tools/test-drift-check.sh`'s weakened-assertion check. Replaced patterns — a document that
+describes a mechanism the code now implements differently — are not detected, and neither is a
+token outside the shapes the tool extracts: a backticked path whose first directory does not
+exist at the root (a typo such as tols/x.py), a bare file name found nowhere, or any token the
+implementation-readiness grammar ignores (placeholders, globs, URLs, absolute paths). "No drift
+detected" means every backticked repo-rooted path and path:name symbol the tool recognised
+resolves, and nothing in the requested inventory is unnamed.
+
 ## Epic lifecycle
 
 Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.

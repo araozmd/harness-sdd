@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""drift-report — advisory report: living documents versus the current tree.
+
+E37-F03.  Usage:
+
+    drift-report.py [--root <dir>] [--inventory <dir>]... [--date <YYYY-MM-DD>]
+
+The living documents (specs/product.md, specs/architecture.md, every ADR under specs/adr/ and
+under a product space specs/<ns>/adr/) are scanned for every backticked repo-rooted path and
+`path:name` symbol they name; each one the tree no longer has is a finding.  The report is
+written to <harness>/progress/drift/<YYYY-MM-DD>.md (a same-day run overwrites it) and its
+absolute path is the only line printed on stdout.
+
+Exit: 0 whenever the report was written — findings are information, never a failure — and 2
+when the tool could not run (usage or input error, or an unexpected exception: stderr
+`drift-report: error: ...` plus the usage, nothing on stdout, no report).  The tool has no
+failing verdict and never signals one.  `-h`/`--help` print the usage and exit 0 only as an
+option token.  Stdlib only.  It writes one file (the report) and reads the tree; it never
+edits a document, the code or the board.
+
+Finding codes (one line each; the reconciliation choice — update the doc, or update the code —
+is left to a human):
+
+  doc-names-missing         a `/`-bearing path a document names that does not resolve
+  doc-names-missing-symbol  a `path:name` whose file resolves but lacks the whole word
+  code-unnamed              (opt-in `--inventory <dir>`) a regular file directly under <dir>
+                            that no living document names
+
+Reuse: the reference grammar is docs/SPEC-FORMAT.md "Implementation readiness"; the resolver
+is IMPORTED from tools/readiness-check.py (loaded by file path from this tool's own
+directory, never copied), so this file defines none of its functions.  A tool directory
+without that sibling makes the run exit 2.  Unlike the readiness lint, every unfenced line of
+a document is scanned (an ADR's decisions live in paragraphs), not only list items and rows.
+
+Known limits: precision over recall, inherited from the resolver (a path whose first segment
+is not a known root is ignored; a path relative to another root is reported — reconcile it
+with a placeholder prefix).  Replaced patterns — a document describing a mechanism the code
+now implements differently — are a judgment read and are NOT detected; the report says so.
+The inventory is opt-in.
+"""
+import datetime
+import importlib.util
+import os
+import re
+import sys
+import tempfile
+
+PFX = "drift-report: "
+USAGE = "usage: drift-report.py [--root <dir>] [--inventory <dir>]... [--date <YYYY-MM-DD>]"
+VALUE_FLAGS = ("--root", "--inventory", "--date")
+SIBLING = "readiness-check.py"
+
+
+class InputError(Exception):
+    pass
+
+
+def _load_resolver():
+    """Load tools/readiness-check.py from this tool's own directory by file path (the name is
+    hyphenated, so it is not importable by name) and return the module."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, SIBLING)
+    if not os.path.isfile(path):
+        raise InputError("cannot load %s: no such file — the drift report reuses the "
+                         "implementation-readiness lint's resolver" % path)
+    spec = importlib.util.spec_from_file_location("readiness_check", path)
+    module = importlib.util.module_from_spec(spec)
+    keep = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True  # never leave a __pycache__ beside the resolver
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise InputError("cannot load %s: %s" % (path, exc))
+    finally:
+        sys.dont_write_bytecode = keep
+    return module
+
+
+def harness_dir(root):
+    env = os.environ.get("HARNESS_DIR")
+    if env:
+        return os.path.abspath(env)
+    if os.path.isfile(os.path.join(root, ".harness", "harness.config.yaml")):
+        return os.path.join(root, ".harness")
+    return root
+
+
+def living_documents(harness):
+    """[(rel, abs-path or None)] in report order; None marks an absent product/architecture."""
+    out = []
+    for rel in ("specs/product.md", "specs/architecture.md"):
+        p = os.path.join(harness, rel)
+        out.append((rel, p if os.path.isfile(p) else None))
+
+    def adrs(prefix):
+        d = os.path.join(harness, prefix)
+        if not os.path.isdir(d):
+            return []
+        names = sorted(f for f in os.listdir(d)
+                       if re.fullmatch(r"[0-9]{4}-.*\.md", f) and os.path.isfile(os.path.join(d, f)))
+        return [(prefix + "/" + f, os.path.join(d, f)) for f in names]
+
+    out.extend(adrs("specs/adr"))
+    specs = os.path.join(harness, "specs")
+    if os.path.isdir(specs):
+        for ns in sorted(os.listdir(specs)):
+            if ns not in ("adr", "epics", "_templates") and os.path.isdir(os.path.join(specs, ns)):
+                out.extend(adrs("specs/" + ns + "/adr"))
+    return out
+
+
+def parse_date(value):
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        raise InputError("--date is not a YYYY-MM-DD date: %s" % value)
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        raise InputError("--date is not a YYYY-MM-DD date: %s" % value)
+    return value
+
+
+ADVISORY = ("Advisory: this report changes nothing. For each finding a human decides: update the "
+            "doc, or update the code.")
+NOT_CHECKED = ('Replaced patterns — a document that describes a mechanism the code now implements '
+               'differently — are not detected, and neither is a token outside the shapes the tool '
+               'extracts: a backticked path whose first directory does not exist at the root (a typo '
+               'such as tols/x.py), a bare file name found nowhere, or any token the '
+               'implementation-readiness grammar ignores (placeholders, globs, URLs, absolute paths). '
+               '"No drift detected" means every backticked repo-rooted path and path:name symbol the '
+               'tool recognised resolves, and nothing in the requested inventory is unnamed.')
+CHOICE_CODE = "update doc (name it in the decision that owns it) or update code (remove it)"
+CHOICE_SYMBOL = "update doc (name the symbol as it is today) or update code (restore it)"
+CHOICE_PATH = ("update doc (rewrite the path as it is today, or give it a placeholder prefix if "
+               "it is not in this repository, or supersede the decision) or update code (restore it)")
+
+
+def scan_document(rc, root, abs_path):
+    """([(code, line, display)], {realpath}) for one document: the findings in line order —
+    every unfenced line, every span the resolver classifies as a path candidate it does not
+    ignore, one per (line, code, token) — and the real paths of the files it names."""
+    findings = []
+    named = set()
+    doc_dir = os.path.dirname(abs_path)
+
+    def emit(code, n, display):
+        if (code, n, display) not in findings:
+            findings.append((code, n, display))
+
+    for n, text in rc.iter_unfenced(rc._read(abs_path), numbered=True):
+        for sp in rc.spans(text):
+            display, p, name = rc.classify(sp)
+            if p is None or rc.ignored(p, root, []):
+                continue
+            target = rc.resolve(p, root, doc_dir, [])
+            if target is None:
+                if "/" in p:  # a `/`-less candidate found nowhere is prose, never a finding
+                    emit("doc-names-missing", n, display)
+            elif os.path.isfile(target):  # a directory reference names no file inside it
+                named.add(os.path.realpath(target))
+                if name is not None and not rc.symbol_present(target, name):
+                    emit("doc-names-missing-symbol", n, display)
+    return findings, named
+
+
+def inventory_entries(root, dirs):
+    """[(dir as given, [file names])] — the regular, non-hidden files directly under each
+    directory.  Every value is validated before any lookup (the system edge)."""
+    for d in dirs:
+        if not d.strip("/") or os.path.isabs(d) or ".." in d.split("/"):
+            raise InputError("--inventory must be a path relative to the root: %s" % d)
+    out = []
+    for d in dirs:
+        for base in (root, os.path.join(root, ".harness")):
+            where = os.path.join(base, d)
+            if os.path.isdir(where):
+                break
+        else:
+            raise InputError("--inventory is not a directory under %s or its .harness/: %s"
+                             % (root, d))
+        names = sorted(f for f in os.listdir(where)
+                       if not f.startswith(".") and os.path.isfile(os.path.join(where, f)))
+        out.append((d.rstrip("/"), where, names))
+    return out
+
+
+def render(date, root, harness, docs, results, inventory=None, unnamed=()):
+    lines = ["# Living-doc drift report — %s" % date, "", ADVISORY, "",
+             "- root: %s" % root, "- harness: %s" % harness, "- documents:"]
+    present = 0
+    total = 0
+    for rel, p in docs:
+        lines.append("  - %s (%s)" % (rel, "read" if p else "absent"))
+        present += 1 if p else 0
+    if not any(rel.endswith("/adr") or "/adr/" in rel for rel, _p in docs):
+        lines.append("  - ADRs: none found")
+    if inventory is None:
+        lines.append("- inventory: not requested (pass --inventory <dir>)")
+    else:
+        count = sum(len(names) for _d, _w, names in inventory)
+        lines.append("- inventory: %s (%s)" % (", ".join(d for d, _w, _n in inventory),
+                                              "1 entry" if count == 1 else "%d entries" % count))
+    for rel, p in docs:
+        lines += ["", "## %s" % rel, ""]
+        if p is None:
+            lines.append("Absent — not a finding.")
+        elif results[rel]:
+            for code, n, display in results[rel]:
+                lines.append("- %s %s:%d `%s` — reconcile: %s" % (
+                    code, rel, n, display,
+                    CHOICE_PATH if code == "doc-names-missing" else CHOICE_SYMBOL))
+            total += len(results[rel])
+        else:
+            lines.append("No drift detected.")
+    if inventory is not None:
+        lines += ["", "## Code no living document names", ""]
+        if unnamed:
+            lines.extend("- code-unnamed `%s` — reconcile: %s" % (e, CHOICE_CODE) for e in unnamed)
+        else:
+            lines.append("No drift detected.")
+    lines += ["", "## Not checked by this tool", "", NOT_CHECKED, "", "## Summary", ""]
+    k = len(unnamed)
+    if total + k:
+        lines.append("drift-report: %d finding(s) across %d document(s) read, %s unnamed" % (
+            total, present, "1 code entry" if k == 1 else "%d code entries" % k))
+    else:
+        lines.append("drift-report: No drift detected (%d document(s) read)" % present)
+    return "\n".join(lines) + "\n"
+
+
+def write_report(path, text):
+    d = os.path.dirname(path)
+    tmp = None
+    try:
+        os.makedirs(d, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=".drift-", suffix=".tmp")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+        um = os.umask(0)
+        os.umask(um)
+        os.chmod(tmp, 0o666 & ~um)
+        os.replace(tmp, path)
+        tmp = None
+    except OSError as exc:
+        raise InputError("cannot write the report %s: %s" % (path, exc))
+    finally:
+        if tmp is not None and os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def run(rc, args):
+    rc.VALUE_FLAGS = VALUE_FLAGS  # the resolver's wants_help() reads this module constant
+    if rc.wants_help(args):
+        print(USAGE)
+        return 0
+    inv = []  # the resolver's parse_args keeps the last value of a flag; --inventory repeats
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--inventory":
+            if i + 1 >= len(args):
+                raise InputError("--inventory needs a directory")
+            inv.append(args[i + 1])
+            i += 2
+        elif a.startswith("--inventory="):
+            inv.append(a.partition("=")[2])
+            i += 1
+        elif a in ("--root", "--date") and i + 1 < len(args):
+            rest.extend(args[i:i + 2])  # the word after a value flag is its value
+            i += 2
+        else:
+            rest.append(a)
+            i += 1
+    opts, pos = rc.parse_args(rest, {"--root": "a directory", "--date": "a YYYY-MM-DD date"})
+    if pos:
+        raise InputError("unexpected argument: %s" % pos[0])
+    date = parse_date(opts["--date"]) if "--date" in opts else datetime.date.today().isoformat()
+    root = opts.get("--root")
+    if root is None:
+        root = rc.find_root(os.path.abspath(__file__))
+    elif not os.path.isdir(root):
+        raise InputError("--root is not a directory: %s" % root)
+    root = os.path.abspath(root)
+    harness = harness_dir(root)
+    docs = living_documents(harness)
+    if not any(p for _rel, p in docs):
+        raise InputError("no living documents under %s" % os.path.join(harness, "specs"))
+    path = os.path.abspath(os.path.join(harness, "progress", "drift", date + ".md"))
+    scanned = {rel: scan_document(rc, root, p) for rel, p in docs if p}
+    results = {rel: f for rel, (f, _named) in scanned.items()}
+    inventory = unnamed = None
+    if inv:
+        inventory = inventory_entries(root, inv)
+        named = set().union(*(nm for _f, nm in scanned.values()))
+        unnamed = ["%s/%s" % (d, f) for d, where, names in inventory for f in names
+                   if os.path.realpath(os.path.join(where, f)) not in named]
+    write_report(path, render(date, root, harness, docs, results, inventory, unnamed or ()))
+    print(path)
+    return 0
+
+
+def main(argv):
+    args = argv[1:]
+    errs = (InputError,)
+    try:
+        rc = _load_resolver()
+        errs = (InputError, rc.InputError)
+        return run(rc, args)
+    except errs as exc:
+        sys.stderr.write("%serror: %s\n%s\n" % (PFX, exc, USAGE))
+        return 2
+    except Exception as exc:  # a bug or an environment the tool did not foresee: did not run
+        sys.stderr.write("%serror: internal: %s: %s\n%s\n" % (PFX, type(exc).__name__, exc, USAGE))
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
