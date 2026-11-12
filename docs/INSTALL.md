@@ -907,7 +907,7 @@ remembered per version: the notice keeps printing, the question does not, until 
 version appears.
 
 The check can never hurt the gate: the remote read is abandoned after
-`HARNESS_UPDATE_TIMEOUT` seconds (default 3), never asks for a credential, and any failure —
+`HARNESS_UPDATE_TIMEOUT` seconds (default 3), asks for no credential (https prompts and ssh passphrase/host-key prompts are disabled), and any failure —
 offline, a bad URL, a slow remote — prints nothing. The verdict, failures included, is cached
 in `.harness/progress/update-check/` for `HARNESS_UPDATE_TTL` seconds (default 86400), so the
 remote is contacted at most once a day. That directory is already ignored by version control
@@ -923,7 +923,7 @@ remote is contacted at most once a day. That directory is already ignored by ver
 **Answering `y`** fetches that tag into `.harness/progress/update-check/repo/` and shows a
 preview **before anything is written**: the remote and tag, and one line for every harness-owned
 file you have changed (`M agents/reviewer.md (+2 -0)`) or added (`A agents/extra.md local
-addition`) — the files the new body will replace, compared against the version you have
+addition`; `__pycache__/`, `*.pyc` and `.DS_Store` are never listed) — the files the new body will replace, compared against the version you have
 installed (or, if that tag is gone from the remote, against the incoming one, and it says so).
 Then `Proceed with the upgrade? [y/N]`; anything but `y` exits `2` having written nothing.
 
@@ -937,8 +937,8 @@ then **proves** two things instead of promising them:
   keys may be appended): `✅ preserved root harness.config.yaml`, or
   `❌ changed …` with the path of the snapshot under `…/upgrade-backup/<old-version>/preservation/`;
 - everything in `CLAUDE.md` / `AGENTS.md` outside the `<!-- harness:begin -->`…`<!-- harness:end -->`
-  block is unchanged (the separating blank line the installer adds before a freshly appended
-  block is not counted as your prose).
+  block is unchanged (trailing blank lines are ignored on both sides: the installer adds a separating blank
+  line before a block it appends, and that must not read as a change to your prose).
 
 In a **coordinator** the installer is run as `--umbrella <umbrella-dir>`, so every child is
 upgraded exactly as a manual cascade would (thin stays thin), and the proofs cover each child's

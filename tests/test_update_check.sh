@@ -322,6 +322,11 @@ R3_failure_silent_bounded_cached() {
   [ -n "$(rec "$T/r3-fail" checked)" ] && [ -z "$(rec "$T/r3-fail" latest)" ] \
     || fail "R3 C7: record should carry checked=<time> and an empty latest"
   [ "$(stamp "$T/r3-fail")" = "$CUR" ] || fail "R3 C7: stamp changed"
+  # C7 "no stdin consumed": whatever the gate did not read is still there afterwards
+  mk_target "$T/r3-stdin"
+  _left="$(cd "$T/r3-stdin" && printf 'y\nREST\n' | { env PATH="$(git_shim log):$REAL_PATH" HARNESS_SKIP_UPDATE_CHECK= HARNESS_UPDATE_REMOTE=file:///nonexistent \
+      HARNESS_UPDATE_ASSUME_TTY=1 ./.harness/init.sh >/dev/null 2>&1 || true; cat; })"
+  [ "$_left" = "$(printf 'y\nREST')" ] || fail "R3 C7: the gate consumed stdin (left: '$_left')"
   # C8b — failure cached: a second run inside the TTL makes no call
   run_gate "$T/r3-fail" "" HARNESS_UPDATE_REMOTE=file:///nonexistent
   [ "$(ls_calls)" = 0 ] || fail "R3 C8b: the failure was not cached — the remote was contacted again"
@@ -334,14 +339,24 @@ R3_failure_silent_bounded_cached() {
   mk_target "$T/r3-hang"
   run_gate "$T/r3-hang" "" HARNESS_SKIP_UPDATE_CHECK=1
   _base="$GATE_SECS"
-  SHIM_MODE=hang run_gate "$T/r3-hang" "" HARNESS_UPDATE_REMOTE="$(remote_url newer)" HARNESS_UPDATE_TIMEOUT=2
+  SHIM_MODE=hang run_gate "$T/r3-hang" "" HARNESS_UPDATE_REMOTE="$(remote_url newer)" HARNESS_UPDATE_TIMEOUT=3
   [ "$GATE_RC" = 0 ] || fail "R3 C8: a hanging remote changed the exit code: $GATE_OUT"
   [ "$(bell_n)" = 0 ] || fail "R3 C8: printed a notice though the remote never answered"
   [ "$(ls_calls)" = 1 ] || fail "R3 C8: expected one (hung) contact, got $(ls_calls)"
-  [ "$GATE_SECS" -le $((_base + 2 + 3)) ] || fail "R3 C8: the gate took ${GATE_SECS}s, bound is baseline ${_base}s + 2s + 3s margin"
-  [ "$GATE_SECS" -ge $((_base + 1)) ] || fail "R3 C8 control: the gate was not delayed (${GATE_SECS}s vs ${_base}s) — the shim did not hang"
+  [ "$GATE_SECS" -le $((_base + 3 + 1)) ] || fail "R3 C8: the gate took ${GATE_SECS}s, bound is baseline ${_base}s + 3s + 1s margin (a 2x overrun of the timeout must fail)"
+  [ "$GATE_SECS" -ge $((_base + 2)) ] || fail "R3 C8 control: the gate was not delayed (${GATE_SECS}s vs ${_base}s) — the shim did not hang"
   ps -ax -o command 2>/dev/null | grep -q '[s]leep 37' && fail "R3 C8: an orphan 'sleep 37' outlived the gate"
   [ -n "$(rec "$T/r3-hang" checked)" ] && [ -z "$(rec "$T/r3-hang" latest)" ] || fail "R3 C8: the abandoned attempt was not cached as a failure"
+  # C3b — an ssh remote is asked with BatchMode=yes (no host-key / passphrase prompt on /dev/tty)
+  mkdir -p "$T/fake-ssh"
+  printf '#!/bin/sh\necho "$*" >> "%s/ssh-argv"\nexit 255\n' "$T" > "$T/fake-ssh/ssh"
+  chmod +x "$T/fake-ssh/ssh"
+  : > "$T/ssh-argv"
+  mk_target "$T/r3-ssh"
+  GATE_PATH="$T/fake-ssh:$(git_shim log):$REAL_PATH" run_gate "$T/r3-ssh" "" HARNESS_UPDATE_REMOTE=ssh://git@example.invalid/x.git
+  [ -s "$T/ssh-argv" ] || fail "R3 C3b: the fake ssh was never invoked — the cell proves nothing"
+  grep -q 'BatchMode=yes' "$T/ssh-argv" || fail "R3 C3b: ssh was run without BatchMode=yes: $(cat "$T/ssh-argv")"
+  [ "$GATE_RC" = 0 ] && [ "$(bell_n)" = 0 ] || fail "R3 C3b: an ssh failure was not silent: $GATE_OUT"
   pass "failing and hanging remotes: silent, exit unchanged, bounded, failure cached (R3) [R3_failure_silent_bounded_cached]"
 }
 
@@ -456,6 +471,17 @@ R6_prompt_only_interactive() {
   printf '%s\n' "$GATE_OUT" | grep -qxF "🔔 harness v$NEXT2 available (installed v$CUR)" || fail "R6 C12b: no notice for v$NEXT2: $GATE_OUT"
   has "$GATE_OUT" "Install now? [y/N]" || fail "R6 C12b: a higher version did not prompt again"
   [ "$(rec "$T/r6" declined)" = "v$NEXT2" ] || fail "R6 C12b: declined not updated to v$NEXT2"
+  # C12c — an OFFLINE re-check must not erase the remembered decline
+  mk_target "$T/r6c"
+  run_gate "$T/r6c" "n\n" HARNESS_UPDATE_REMOTE="$_u" HARNESS_UPDATE_ASSUME_TTY=1
+  [ "$(rec "$T/r6c" declined)" = "v$NEXT" ] || fail "R6 C12c precondition: decline not recorded"
+  run_gate "$T/r6c" "y\n" HARNESS_UPDATE_REMOTE=file:///nonexistent HARNESS_UPDATE_ASSUME_TTY=1 HARNESS_UPDATE_TTL=0
+  [ "$(ls_calls)" = 1 ] && [ -z "$(rec "$T/r6c" latest)" ] || fail "R6 C12c: the offline re-check did not run as an offline check"
+  [ "$(rec "$T/r6c" declined)" = "v$NEXT" ] || fail "R6 C12c: an offline check erased declined (now '$(rec "$T/r6c" declined)')"
+  run_gate "$T/r6c" "y\n" HARNESS_UPDATE_REMOTE="$_u" HARNESS_UPDATE_ASSUME_TTY=1 HARNESS_UPDATE_TTL=0
+  [ "$(ls_calls)" = 1 ] || fail "R6 C12c: the third run should re-check once"
+  [ "$(bell_n)" = 1 ] && ! has "$GATE_OUT" "Install now?" || fail "R6 C12c: the declined version prompted again after an offline check: $GATE_OUT"
+  [ "$GATE_RC" = 0 ] && [ "$(stamp "$T/r6c")" = "$CUR" ] || fail "R6 C12c: the typed y was consumed"
   # C13 — not interactive: typed y,y is never read, nothing happens
   mk_target "$T/r6-nt"
   run_gate "$T/r6-nt" "y\ny\n" HARNESS_UPDATE_REMOTE="$_u"

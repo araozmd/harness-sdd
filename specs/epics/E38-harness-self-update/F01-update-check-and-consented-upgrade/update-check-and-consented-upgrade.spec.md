@@ -4,7 +4,7 @@ title: init.sh update check + consented upgrade with custom-config preservation 
 epic: E38-harness-self-update
 status: in-progress      # pending → spec-ready → in-progress → in-review → done
 sdd: true
-autonomous: false
+autonomous: true 
 complexity: complex      # basis stated in Context: 12/12 of change_size.max_requirements, and a
                          # defect class the harness has already paid for (a program that rewrites
                          # the files it is executing from; E24 recorded the half-landed variant)
@@ -82,7 +82,7 @@ silently). Both are stated signals, not a feeling.
   including a child's explicit overrides) is still present in order afterwards — appended
   keys allowed, nothing altered or removed; and every byte of `CLAUDE.md` / `AGENTS.md`
   outside the `<!-- harness:begin -->…<!-- harness:end -->` block is identical afterwards.
-- **"Locally edited"** = a regular file under one of the body paths the **fetched tag's
+- **"Locally edited"** = a regular file (never `__pycache__/`, `*.pyc` or `.DS_Store`) under one of the body paths the **fetched tag's
   installer will copy** — the entries of `HARNESS_BODY_PROSE` and `HARNESS_BODY_LOCAL` read
   from that `harness-install.sh` (today `AGENTS.md agents docs specs/_templates` and
   `init.sh store tools umbrella.manifest.example.yaml umbrella.gitignore.example`; a fixed
@@ -94,7 +94,7 @@ silently). Both are stated signals, not a feeling.
   Children's bodies are not previewed in this feature (see Out of scope).
 - **Backups before replacement.** Every listed file is copied, same relative path, to
   `.harness/progress/upgrade-backup/<old-version>/`; the pre-upgrade snapshots used by the
-  preservation proof go to `…/upgrade-backup/<old-version>/preservation/<repo-label>/`.
+  preservation proof go to `…/upgrade-backup/<old-version>/preservation/<repo-label>/` (a manifest child keyed `root` is labelled `repo-root`, so it never shares the target's directory).
   An existing backup directory is never overwritten.
 - **Self-replacement safety.** The upgrade rewrites `init.sh` and the update tool while they
   are the programs running. `init.sh` therefore `exec`s the tool for the write phase (the
@@ -175,7 +175,8 @@ silently). Both are stated signals, not a feeling.
 - **R9 — Entrypoint prose is proved preserved.** When an upgrade has run, for each existing
   `CLAUDE.md` and `AGENTS.md` at every in-scope repo root, the system shall compare the bytes
   outside the `<!-- harness:begin -->`…`<!-- harness:end -->` block (the whole file when no
-  block exists) before and after, print `✅ preserved <label> <file>` when identical, and on
+  block exists) before and after — with ALL trailing blank lines ignored on both sides, because the installer
+  appends a block to a block-less file after a separating blank line — print `✅ preserved <label> <file>` when identical, and on
   any difference print `❌ changed <label> <file>`, name the snapshot path, and exit `4`.
 - **R10 — Coordinator upgrades cascade.** Where the target's `harness.config.yaml` names an
   existing `umbrella.manifest`, the system shall run the fetched installer as

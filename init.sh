@@ -48,7 +48,8 @@ ok "harness structure intact"
 #     harness-owned tree and every upgrade rewrites it, so a half-applied upgrade shows up
 #     as an uncommitted change to the stamp via the same dirty-tree check that catches the
 #     prompts. There is no second signal available here: init.sh has no access to the
-#     harness SOURCE it was installed from, so it cannot compare installed-vs-latest at all.
+#     harness SOURCE it was installed from, and never consults the remote: whether a NEWER release
+#     exists is a separate question, answered as a notice only by the 2b2 update check below.
 #
 #     FALSE POSITIVES ARE THE DOMINANT RISK. This gate runs before every agent step, so a
 #     misfire halts the whole harness and the guard gets disabled within a week. Every
@@ -341,7 +342,7 @@ fi
 #
 #      THE GATE MUST NEVER BE HURT BY IT. init.sh is what every agent runs non-interactively
 #      before any work, so `check` is bounded in time (HARNESS_UPDATE_TIMEOUT, default 3 s),
-#      cannot prompt for credentials, is cached (24 h, failure included) and returns only 0
+#      asks for no credential (https prompts off, ssh BatchMode), is cached (24 h, failure included) and returns only 0
 #      or 10. Any other outcome — a missing tool, a bug, no network — falls through here with
 #      the gate's exit code untouched (`|| _upd_rc=$?`, never `set -e` territory).
 #

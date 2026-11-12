@@ -94,6 +94,7 @@ set; `coord` = manifest present. `cache` values: `-` absent, `F+` fresh with `la
 | C6b | inst | none | F+ (stale by `TTL=0`) | same (reachable, only `v$CUR`) | n | – | 1 | no | no | 0 | record rewritten with `latest=$CUR` |
 | C7 | inst | none | - | fail (`file:///nonexistent`) | h | `y\n` | 1 | no | no | 0 | record written with empty `latest`; no stdin consumed |
 | C8 | inst | none | - | hang (shim, `TIMEOUT=2`) | n | – | 1 (killed) | no | no | 0 | `GATE_SECS` ≤ 2 + baseline gate time + 3 s margin; no orphan `sleep` after exit |
+| C3b | inst | ssh remote | – | fake `ssh` on PATH (no network) | n | – | – | no | no | 0 | the fake ssh's argv carries `BatchMode=yes` |
 | C8b | inst | none | after C7 | fail | n | – | 0 | no | no | 0 | failure cached: second run within TTL makes no call |
 | C9 | inst | none | - | same | n | – | 1 | no | no | 0 | – |
 | C9b | inst | none | - | older | n | – | 1 | no | no | 0 | – |
@@ -103,6 +104,7 @@ set; `coord` = manifest present. `cache` values: `-` absent, `F+` fresh with `la
 | C11 | inst | none | - | newer | h | `n\n` | 1 | yes | yes | 0 | `declined=$NEXT` recorded; gate printed `environment ready` |
 | C12 | inst | none | D | newer | h | `y\n` | 0 | yes | no | 0 | `y` not consumed: stamp unchanged |
 | C12b | inst | none | D | `newer2` | h | `n\n` | 1 (TTL=0) | yes (`v$NEXT2`) | yes | 0 | higher version prompts again |
+| C12c | inst | none | D, then an offline re-check (`TTL=0`, unreachable), then the same remote again (`TTL=0`) | newer | h | `y\n` | 1 per re-check | yes | no | 0 | an offline check must not erase `declined`: the notice prints, the prompt does not, `y` unconsumed |
 | C13 | inst | none | - | newer | n | `y\ny\n` | 1 | yes | no | 0 | stdin `y` ignored off a TTY: stamp = `$CUR`, no backup dir |
 | C14 | inst | none | - | newer | h | `y\ny\n` | 1 | yes | yes ×2 | **3** | stamp = `$NEXT`; marker in `.harness/agents/scout.md`; `.harness/.agents` identical; report lines; `update-check/repo` is a git checkout at `v$NEXT` |
 | C14b | inst | none | - | newer + `git_shim fail-fetch` | h | `y\ny\n` | 1 | yes | yes | **5** | message names the failure; stamp unchanged |

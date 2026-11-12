@@ -103,23 +103,25 @@ hu_kill_tree() {
 }
 
 # hu_ls_remote <remote> <outfile> — `git ls-remote --tags`, abandoned after the bound.
-# GIT_TERMINAL_PROMPT=0 is what makes "interactive tool" and "cannot hang the gate" compatible:
-# a private or mistyped remote fails instead of asking for a credential.
+# GIT_TERMINAL_PROMPT=0 (https) and ssh BatchMode (ssh) are what make "interactive tool" and
+# "cannot hang the gate" compatible: a private or mistyped remote fails instead of asking.
 hu_ls_remote() {
   _lt="$(hu_num_or "${HARNESS_UPDATE_TIMEOUT:-}" 3)"
-  _lmax=$((_lt * 10))
   {
-    GIT_TERMINAL_PROMPT=0 git ls-remote --tags -- "$1" > "$2" 2>/dev/null &
+    # BatchMode: ssh remotes would otherwise ask for a host-key / passphrase on /dev/tty,
+    # which GIT_TERMINAL_PROMPT does not cover.
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
+      git ls-remote --tags -- "$1" > "$2" 2>/dev/null &
     _lpid=$!
-    _ln=0
+    # A wall-clock deadline, not a count of sleep ticks: a tick costs more than it names.
+    _ldl=$(( $(date +%s) + _lt ))
     while kill -0 "$_lpid" 2>/dev/null; do
-      if [ "$_ln" -ge "$_lmax" ]; then
+      if [ "$(date +%s)" -ge "$_ldl" ]; then
         hu_kill_tree "$_lpid"
         wait "$_lpid" 2>/dev/null
         return 1
       fi
       sleep 0.1 2>/dev/null || sleep 1
-      _ln=$((_ln + 1))
     done
     wait "$_lpid"
     return $?
@@ -160,7 +162,9 @@ hu_resolve_latest() {
   fi
   rm -f "$_rtmp"
   # `declined` only means something for the version it was said about.
-  [ "$HU_DECLINED" = "$HU_LATEST" ] || HU_DECLINED=""
+  # ...and only a SUCCESSFUL check can supersede it: an offline run (empty latest) must not
+  # erase the remembered decline, or the prompt returns the moment the network does.
+  [ -z "$HU_LATEST" ] || [ "$HU_DECLINED" = "$HU_LATEST" ] || HU_DECLINED=""
   hu_rec_write "$_rnow" "$HU_LATEST" "$HU_DECLINED"
   return 0
 }
@@ -235,6 +239,8 @@ hu_scope() {
       sub(/^[[:space:]]+path:[[:space:]]*/, "", p); sub(/[[:space:]]+#.*$/, "", p)
       gsub(/^"|"$|^\047|\047$/, "", p)
       if (p !~ /^\//) p = base "/" p
+      # a child keyed `root` must not share the label (and snapshot directory) of the target itself
+      if (key == "root") key = "repo-root"
       print key "\t" p
       key = ""
     }
