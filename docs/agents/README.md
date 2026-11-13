@@ -43,8 +43,8 @@ enforce the parts that can be checked.
   every file in `docs/agents/`; every relative link under `README.md` and `docs/` resolves.
 - **C7 Shipping** — `docs/` ships to every install, so `docs/agents/` ships with it. `assets/`
   and the repository README do not ship, so no file under `docs/` links or embeds anything
-  under `assets/` by a relative path, and a doc under `docs/` links only files that ship
-  (`docs/`, `agents/`, `AGENTS.md`, `tools/`, `store/`, `specs/_templates/`, `init.sh`).
+  under `assets/` by a relative path. Links from `docs/` to other files outside the installed
+  body are a known limit, not yet enforced, and are handled per slice.
   The one exception is `docs/BRAND.md`, which may embed art by an absolute canonical URL
   (`https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/…` or
   `https://github.com/araozmd/harness-loop/blob/main/assets/…`); those resolve in an

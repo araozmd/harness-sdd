@@ -4,7 +4,7 @@
 
 **Name.** harness-loop
 
-**Tagline.** Autonomous agents, safely: every change specced, gated and reviewed before it merges.
+**Tagline.** Autonomous agents, safely: every change is independently reviewed before it merges.
 
 Installed names do not change: `.harness/`, `harness-install.sh`, `harness.config.yaml` and the `/sdd-*` commands keep their names.
 
@@ -12,9 +12,9 @@ The logo files live in the repository `assets/` directory, which is not installe
 
 ## Positioning
 
-Fast and safe. Autonomous agents move quickly. harness-loop makes that speed safe by putting a spec, a human gate and an independent review in front of every merge.
+Fast and safe. Autonomous agents move quickly. harness-loop makes that speed safe: every change is independently reviewed before it merges, and the default path adds a spec and a human gate.
 
-Claim only what the process does: spec, gate, review. Do not quote speed numbers.
+Claim only what the process does: independent review of every change. Do not quote speed numbers or promise a human gate on every task.
 
 ## Voice
 

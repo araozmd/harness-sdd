@@ -1,14 +1,14 @@
 <h1 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo-wordmark-dark.svg"><img src="assets/logo-wordmark.svg" alt="harness-loop" width="420"></picture></h1>
 
-<p align="center">Autonomous agents, safely: every change specced, gated and reviewed before it merges.</p>
+<p align="center">Autonomous agents, safely: every change is independently reviewed before it merges.</p>
 
 harness-loop is a portable agent harness for spec-driven development. It runs in Claude Code, Codex, OpenCode, Antigravity and pi. Roles keep their state in repository files, so you can change the model or the CLI without losing the project's intent or history. Read [why the harness exists](docs/RATIONALE.md) for the bet in full. The exact contracts live in [docs/agents/README.md](docs/agents/README.md).
 
 ## How it works
 
-<p align="center"><img src="assets/hero.svg" alt="A spec is written and approved at the first gate, built one requirement at a time, then reviewed at the second gate before it merges" width="720"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.svg"><img src="assets/hero.svg" alt="A spec is written and approved at the first gate, built one requirement at a time, then reviewed at the second gate before it merges" width="720"></picture></p>
 
-Every change follows one loop with two gates. An Architect writes the spec, you approve it, a Builder implements it one requirement at a time, and an independent Reviewer verifies it before the PR merges.
+Every change is reviewed by an independent Reviewer before it merges. The default path has two gates: an Architect writes the spec, you approve it, a Builder implements it one requirement at a time, and the Reviewer verifies it. Two exceptions skip your approval: a task marked autonomous, and a `/sdd-fix` fix, which has a short brief instead of a spec and goes straight to the Builder.
 
 ```mermaid
 flowchart LR
@@ -53,7 +53,7 @@ A spec lists its requirements and the tests that prove them. When the project ha
 | Antigravity | `/sdd-*` slash commands from the shared `.agents/skills`. |
 | pi | `/sdd-*` prompt templates and `/skill:sdd-*`. Trust the project first. |
 
-Every CLI can report a harness defect with `/sdd-report`. The human approval gate and the independent Reviewer apply on every CLI.
+Every CLI can report a harness defect: with `/sdd-report`, or `$sdd-report` in Codex. The Reviewer gate applies on every CLI.
 
 ## Documentation
 

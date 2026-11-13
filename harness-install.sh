@@ -10719,7 +10719,7 @@ BUILDER_BACKEND_OVERRIDE="${HARNESS_BUILDER_BACKEND:-}"
 #
 # SEEDED FROM NOTHING — there is deliberately NO environment twin, and in particular this
 # is NOT seeded from HARNESS_PR_LOOP_ENABLED. That variable is E18-F01's PER-RUN gate
-# override, documented in harness.config.yaml, docs/INSTALL.md, README.md and the
+# override, documented in harness.config.yaml, docs/INSTALL.md, docs/agents/README.md and the
 # /sdd-pr-loop body as one of five per-run knobs (HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS,
 # …). Making one member of that family persist while the other four stay per-run is an
 # inconsistency no reader can infer from the name, and it turns

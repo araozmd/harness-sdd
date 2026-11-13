@@ -17,7 +17,8 @@ All notable changes to the harness body are recorded here. Versions follow
 - `README.md` rewritten for humans (≤150 lines); new `docs/CONCEPTS.md` and `docs/README.md`.
 - `tools/doc-cite-check.py` — every doc citation in role prompts, entrypoints, installer and
   tools resolves (path + heading); `tools/docs-move-check.sh` — pre-PR proof that no backticked
-  token vanished from the doc set and every removed contract line was moved.
+  token vanished from the doc set; it also lists every removed backtick-bearing line it could not
+  find moved (informational, exit 0).
 - `tests/test_docs_for_humans.sh` — the human-doc style lint (budgets, filler, archaeology,
   diagrams, navigation, brand sites).
 

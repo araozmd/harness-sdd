@@ -50,15 +50,15 @@ Requirements use the EARS pattern, so each clause maps to one test. Every plan r
 
 ## Gates
 
-A gate is a check that a task must pass before it moves on. The loop has two main gates and several automatic checks.
+A gate is a check that a task must pass before it moves on. The default path has two main gates and several automatic checks. Only the Reviewer gate applies to every change.
 
-- **Gate 1, spec approval.** Nothing is built until a human approves the spec.
-- **Gate 2, independent review.** The Reviewer, a different role in a clean context, must approve before the PR merges. A rejection sends the task back to the Builder.
+- **Gate 1, spec approval.** A human approves the spec before anything is built, unless the task is marked `autonomous`. A quick fix from `/sdd-fix` has no spec: it carries a short brief and goes straight to the Builder.
+- **Gate 2, independent review.** The Reviewer, a different role in a clean context, must approve every change before its PR merges. A rejection sends the task back to the Builder.
 - **Lints.** Three deterministic tools check a spec before the Builder sees it: the red/green pair shape of the tasks, the requirement or ADR citation of every plan row, and whether every file and symbol the plan names exists.
 - **Environment.** `init.sh` must pass before work starts.
 - **PR review.** `/sdd-pr-loop` can add an automated review of the open PR. It is opt-in.
 
-A gate that cannot decide fails closed: no verdict means no merge.
+The Reviewer never approves on a check that did not run.
 
 ## Code over prose
 
