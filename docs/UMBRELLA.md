@@ -421,7 +421,7 @@ set `done` prematurely while a slice or the integration gate is red):
   (`E09-F02` carries `merged: true` on a slice whose own `pr` is a closed, unmerged PR),
   and a single unbound ref would let one slice's merge commit answer for all of them — so
   an unbound value on a sliced feature is refused, as is a missing binding. The reference
-  is **checked** against that repository's default branch; see `docs/WORKFLOW.md` for the
+  is **checked** against that repository's default branch; see `docs/agents/WORKFLOW.md` for the
   decision table, including what happens when the check is impossible.
 - **Failure** — if the integration command exits **non-zero**, keep the feature out of
   `done` and surface the integration failure.

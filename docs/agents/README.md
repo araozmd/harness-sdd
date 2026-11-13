@@ -154,7 +154,7 @@ make a structurally valid board fail. If `/sdd-next` selects nothing, its
 `blocked <id> [<reason-code>]` lines explain the relevant dependency, epic,
 human-gate, or scoped-owner gate and finish with a `no actionable work` summary.
 Diagnostics are read-only and do not change selection policy. See
-[Diagnosing blocked selection](../WORKFLOW.md#diagnosing-blocked-selection).
+[Diagnosing blocked selection](WORKFLOW.md#diagnosing-blocked-selection).
 
 `/sdd-next` uses `tools/next-task.mjs` for deterministic, read-only JSON
 selection. Missing Node or invalid selector output is reported and falls back to

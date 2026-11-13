@@ -1669,6 +1669,46 @@ F03_R7_agent_citations() {
   wf_agent_problems "$T/f37" | grep -qF '.opencode/command/sdd-next.md' || fail "F03 R7: the check misses a stale generated body"
   pass "F03_R7_agent_citations"
 }
+
+# F03_R8 — sibling-doc citations re-point. wf_sibling_problems <root> lets a mirror be scanned.
+wf_sibling_problems() {
+  for _f in docs/RATIONALE.md docs/UMBRELLA.md; do
+    grep -qF 'docs/WORKFLOW.md' "$1/$_f" && echo "$_f still cites docs/WORKFLOW.md"
+  done
+  [ "$(grep -cF '[`docs/agents/WORKFLOW.md`](agents/WORKFLOW.md)' "$1/docs/RATIONALE.md")" -eq 4 ] || echo "docs/RATIONALE.md: the four ledger rows do not carry the counterpart link"
+  grep -F 'cadence note' "$1/docs/RATIONALE.md" | grep -qF 'the `docs/agents/WORKFLOW.md` cadence note' || echo "docs/RATIONALE.md: the cadence-note token is not the counterpart path"
+  grep -qF 'see `docs/agents/WORKFLOW.md` for the' "$1/docs/UMBRELLA.md" || echo "docs/UMBRELLA.md: the landing-record pointer does not name docs/agents/WORKFLOW.md"
+  [ "$(grep -cF 'docs/WORKFLOW.md' "$1/docs/SPEC-FORMAT.md")" -eq 1 ] || echo "docs/SPEC-FORMAT.md does not hold exactly one docs/WORKFLOW.md line"
+  grep -qF 'into the ADR and plan templates, `agents/architect.md` and `docs/agents/WORKFLOW.md`. Four forms:' "$1/docs/SPEC-FORMAT.md" || echo "docs/SPEC-FORMAT.md: the grammar sentence does not name docs/agents/WORKFLOW.md"
+  grep -qF 'See `docs/agents/WORKFLOW.md` → "Which Builder runs".' "$1/docs/agents/INSTALL.md" || echo "docs/agents/INSTALL.md: the arming-verdict pointer does not name docs/agents/WORKFLOW.md"
+  grep -qF '(WORKFLOW.md#diagnosing-blocked-selection)' "$1/docs/agents/README.md" || echo "docs/agents/README.md: the blocked-selection link does not target WORKFLOW.md#diagnosing-blocked-selection"
+  grep -qF '(../WORKFLOW.md#' "$1/docs/agents/README.md" && echo "docs/agents/README.md: a stale ../WORKFLOW.md# anchor remains"
+  for _f in README.md docs/CONCEPTS.md docs/HARNESS.md docs/INSTALL.md docs/README.md; do
+    grep -qF 'WORKFLOW.md](' "$1/$_f" || echo "$_f lost its plain WORKFLOW.md link"
+    grep -qF 'agents/WORKFLOW.md' "$1/$_f" && echo "$_f was re-pointed at the counterpart"
+  done
+  return 0
+}
+F03_R8_sibling_citations() {
+  _bad="$(wf_sibling_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F03 R8: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _w() { rm -rf "$T/f38"; mkdir -p "$T/f38"; cp "$ROOT/README.md" "$T/f38/"; cp -R "$ROOT/docs" "$T/f38/docs"; }
+  _w; sed 's#see `docs/agents/WORKFLOW\.md` for the#see `docs/WORKFLOW.md` for the#' "$T/f38/docs/UMBRELLA.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/UMBRELLA.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/UMBRELLA.md' || fail "F03 R8: the check misses a reverted docs/UMBRELLA.md sentence"
+  _w; sed 's#See `docs/agents/WORKFLOW\.md` → "Which#See `docs/WORKFLOW.md` → "Which#' "$T/f38/docs/agents/INSTALL.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/agents/INSTALL.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/agents/INSTALL.md' || fail "F03 R8: the check misses a reverted docs/agents/INSTALL.md pointer"
+  _w; sed 's#(WORKFLOW\.md\#diagnosing-blocked-selection)#(../WORKFLOW.md\#diagnosing-blocked-selection)#' "$T/f38/docs/agents/README.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/agents/README.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/agents/README.md' || fail "F03 R8: the check misses a reverted docs/agents/README.md anchor"
+  _w; sed 's#\[`docs/agents/WORKFLOW\.md`\](agents/WORKFLOW\.md)#[`docs/WORKFLOW.md`](WORKFLOW.md)#' "$T/f38/docs/RATIONALE.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/RATIONALE.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/RATIONALE.md' || fail "F03 R8: the check misses a reverted docs/RATIONALE.md ledger row"
+  _w; sed 's#the `docs/agents/WORKFLOW\.md` cadence note#the `docs/WORKFLOW.md` cadence note#' "$T/f38/docs/RATIONALE.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/RATIONALE.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'cadence-note' || fail "F03 R8: the check misses a reverted cadence-note token"
+  _w; sed 's#`agents/architect.md` and `docs/agents/WORKFLOW.md`#`agents/architect.md` and `docs/WORKFLOW.md`#' "$T/f38/docs/SPEC-FORMAT.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/SPEC-FORMAT.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/SPEC-FORMAT.md' || fail "F03 R8: the check misses a reverted docs/SPEC-FORMAT.md grammar sentence"
+  _w; sed 's#(WORKFLOW\.md)#(agents/WORKFLOW.md)#' "$T/f38/docs/CONCEPTS.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/CONCEPTS.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/CONCEPTS.md' || fail "F03 R8: the check misses a re-pointed docs/CONCEPTS.md link"
+  pass "F03_R8_sibling_citations"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1704,6 +1744,7 @@ row F03_R3_state_diagram
 row F03_R4_pr_loop_diagram
 row F03_R5_accuracy_sentences; row F03_R5_no_over_claims
 row F03_R7_agent_citations
+row F03_R8_sibling_citations
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
