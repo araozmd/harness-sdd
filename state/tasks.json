@@ -2385,7 +2385,13 @@
           "depends_on": [
             "E39-F01"
           ],
-          "spec_path": "specs/epics/E39-docs-for-humans/F02-install-split/"
+          "spec_path": "specs/epics/E39-docs-for-humans/F02-install-split/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (334)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E39-F02 done --evidence <merge-ref>`",
+            "pr": "334"
+          }
         },
         {
           "id": "E39-F03",
