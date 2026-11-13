@@ -2338,6 +2338,66 @@
           "spec_path": "specs/epics/E38-harness-self-update/F01-update-check-and-consented-upgrade/"
         }
       ]
+    },
+    {
+      "id": "E39",
+      "title": "Documentation for humans: short guides with diagrams and a logo; exact agent contracts moved verbatim to docs/agents/",
+      "status": "pending",
+      "features": [
+        {
+          "id": "E39-F01",
+          "title": "Docs split + README rewrite: docs/agents/ machine layer, Mermaid diagrams, logo, concise human guides (README + all docs/)",
+          "status": "in-progress",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [],
+          "spec_path": "specs/epics/E39-docs-for-humans/F01-docs-split-and-readme/"
+        },
+        {
+          "id": "E39-F02",
+          "title": "INSTALL split: docs/agents/INSTALL.md + human INSTALL (single-repo vs umbrella and upgrade-flow diagrams); re-point suites, installer hints, init.sh",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E39-F01"
+          ],
+          "spec_path": "specs/epics/E39-docs-for-humans/F02-install-split/"
+        },
+        {
+          "id": "E39-F03",
+          "title": "WORKFLOW split: docs/agents/WORKFLOW.md + human WORKFLOW (state-machine and PR-loop diagrams); re-point suites and role-prompt citations",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E39-F01"
+          ],
+          "spec_path": "specs/epics/E39-docs-for-humans/F03-workflow-split/"
+        },
+        {
+          "id": "E39-F04",
+          "title": "UMBRELLA + CONFIG-LAYERING split (coordinator and config-layer diagrams); re-point suites and installer hints",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E39-F01"
+          ],
+          "spec_path": "specs/epics/E39-docs-for-humans/F04-umbrella-config-split/"
+        },
+        {
+          "id": "E39-F05",
+          "title": "SPEC-FORMAT split + HARNESS folded into CONCEPTS + ABLATION trim + BASELINE to docs/history/; re-point suites and citations",
+          "status": "pending",
+          "sdd": true,
+          "autonomous": true,
+          "depends_on": [
+            "E39-F01"
+          ],
+          "spec_path": "specs/epics/E39-docs-for-humans/F05-specformat-concepts/"
+        }
+      ]
     }
   ]
 }
