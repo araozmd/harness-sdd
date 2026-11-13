@@ -1524,7 +1524,7 @@
         {
           "id": "E99-F183",
           "title": "Repoint harness-sdd URL defaults to the renamed araozmd/harness-loop repo (update-check remote, feedback.repo seed) + refresh social preview tagline",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
