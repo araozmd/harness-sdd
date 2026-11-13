@@ -2347,7 +2347,7 @@
         {
           "id": "E39-F01",
           "title": "Docs split + README rewrite: docs/agents/ machine layer, Mermaid diagrams, logo, concise human guides (README + all docs/)",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
