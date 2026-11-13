@@ -137,6 +137,11 @@ else
 fi
 trap 'exit 1' HUP INT TERM                 # a signal exits (into the EXIT cleanup); it never resumes the run
 export HARNESS_RUN_TESTS_NESTED=1          # every suite this run starts is nested
+# Every suite that runs an installed init.sh must stay off the network (E38-F01): the update
+# check reads the harness remote, which would add a 3 s bound per gate run on an offline box and
+# a "newer version" line on an online one. The opt-out is silent by design. The update suite
+# (test_update_check.sh) re-enables the check per call with HARNESS_SKIP_UPDATE_CHECK= (empty).
+export HARNESS_SKIP_UPDATE_CHECK=1
 
 # ── grep-flavour probe (E99-F12) — WARN ONLY, once, before any suite runs ─────────────
 #

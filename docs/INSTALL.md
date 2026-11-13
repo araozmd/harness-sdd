@@ -890,6 +890,67 @@ guard forever.
 
 The guard only ever reports. It never commits, re-installs, or writes anything.
 
+### Staying current — the update check (E38-F01)
+
+`.harness/init.sh` tells you when a newer harness ships. On every gate run in an installed
+target it reads the highest `vX.Y.Z` tag of the harness remote and, if that is newer than
+`.harness/.harness-version`, prints exactly one line:
+
+```
+🔔 harness v0.110.0 available (installed v0.109.0)
+```
+
+That is all it does off a terminal — agents, CI and pipes see the line and nothing else, and
+the gate's exit code never changes. **Only at an interactive terminal** (stdin and stdout are
+both terminals) it follows the notice with `Install now? [y/N]`. Anything but `y` is
+remembered per version: the notice keeps printing, the question does not, until a higher
+version appears.
+
+The check can never hurt the gate: the remote read is abandoned after
+`HARNESS_UPDATE_TIMEOUT` seconds (default 3), asks for no credential (https prompts and ssh passphrase/host-key prompts are disabled; your own `core.sshCommand` / `GIT_SSH` is still used), and any failure —
+offline, a bad URL, a slow remote — prints nothing. The verdict, failures included, is cached
+in `.harness/progress/update-check/` for `HARNESS_UPDATE_TTL` seconds (default 86400), so the
+remote is contacted at most once a day. That directory is already ignored by version control
+(`progress/*/`).
+
+| What | How |
+|---|---|
+| Turn the check off for good | `update.check: false` in `harness.config.yaml` |
+| Turn it off for one run | `HARNESS_SKIP_UPDATE_CHECK=1 ./init.sh` (silent, on purpose: a forgotten opt-out costs a notice, not safety) |
+| Check a fork | `update.remote: <git URL>` in `harness.config.yaml`, or `HARNESS_UPDATE_REMOTE=<git URL>` for one run. Empty means `https://github.com/araozmd/harness-sdd.git` |
+| Never checked | the harness source repo itself (no `.harness-version`), an umbrella child (the coordinator's upgrade cascades), a machine without `git` |
+
+**Answering `y`** fetches that tag into `.harness/progress/update-check/repo/` and shows a
+preview **before anything is written**: the remote and tag, and one line for every harness-owned
+file you have changed (`M agents/reviewer.md (+2 -0)`) or added (`A agents/extra.md local
+addition`; `__pycache__/`, `*.pyc` and `.DS_Store` are never listed) — the files the new body will replace, compared against the version you have
+installed (or, if that tag is gone from the remote, against the incoming one, and it says so).
+Then `Proceed with the upgrade? [y/N]`; anything but `y` exits `2` having written nothing.
+
+On `y` it copies each listed file to `.harness/progress/upgrade-backup/<old-version>/` (an
+existing backup directory is never overwritten), runs **the fetched tag's own
+`harness-install.sh`** — the same non-interactive upgrade path described above, so your recorded
+front-end selection, `execution.builder.backend` and `pr_loop.enabled` stay as they are — and
+then **proves** two things instead of promising them:
+
+- every line that was in each `harness.config.yaml` is still there, in the same order (new
+  keys may be appended): `✅ preserved root harness.config.yaml`, or
+  `❌ changed …` with the path of the snapshot under `…/upgrade-backup/<old-version>/preservation/`;
+- everything in `CLAUDE.md` / `AGENTS.md` outside the `<!-- harness:begin -->`…`<!-- harness:end -->`
+  block is unchanged (trailing blank lines are ignored on both sides: the installer adds a separating blank
+  line before a block it appends, and that must not read as a change to your prose).
+
+In a **coordinator** the installer is run as `--umbrella <umbrella-dir>`, so every child is
+upgraded exactly as a manual cascade would (thin stays thin), and the proofs cover each child's
+config and entrypoints, including explicit overrides. The installer's "installed but not
+committed" exit is the expected outcome here and is reported as success. Children's *body files*
+are not previewed or backed up — the cascade replaces them as it always has.
+
+Exit codes of the upgrade (the gate exits with them): `3` upgraded — **commit it** (the drift
+guard above fails `init.sh` until you do) and re-run `init.sh`; `2` declined at the preview;
+`4` upgraded but a protected file did not survive (originals are in the backup directory);
+`5` fetch or installer failure. The upgrade never commits or stages anything.
+
 ## Umbrella mode (cascade install)
 
 For a cross-repo product (see [`UMBRELLA.md`](./UMBRELLA.md)) one invocation can

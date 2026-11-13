@@ -202,7 +202,7 @@ _SSE_EOF
   # check runs in both directions, editing either side alone also reds: a member removed
   # from the expected list shows up as unexpected-derived, one removed from the derivation
   # shows up as missing. That is what keeps the set from rotting silently.
-  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/host-frontend.sh tools/opencode-model-helper.sh tools/pi-dispatch.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/sweep-scratch.sh tools/test-drift-check.sh tools/wait-for-codex.sh"
+  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/harness-update.sh tools/host-frontend.sh tools/opencode-model-helper.sh tools/pi-dispatch.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/sweep-scratch.sh tools/test-drift-check.sh tools/wait-for-codex.sh"
 
   _sse_unexpected=""
   for _sse_f in $_sse_seen; do
@@ -3394,5 +3394,45 @@ test_host_frontend_installed_contract() {
   pass "the installer ships host-frontend.sh executable and byte-identical (E99-F182 R11) [host_frontend_installed_contract]"
 }
 test_host_frontend_installed_contract
+
+# E38-F01 (R7, R2): the update tool ships to every target as body, executable and byte-identical,
+# the shipped config carries the `update:` block, and an UPGRADE of a config that predates it
+# gains the block without altering or reordering a single existing line (migrate_config).
+test_update_tool_and_config_wired() {
+  _uw="$T/e38-wired"; mkdir -p "$_uw"
+  sh "$SRC/harness-install.sh" --agents=claude "$_uw" >/dev/null 2>&1 || fail "E38-F01: install failed"
+  [ -f "$_uw/.harness/tools/harness-update.sh" ] || fail "E38-F01: .harness/tools/harness-update.sh was not installed"
+  [ -x "$_uw/.harness/tools/harness-update.sh" ] || fail "E38-F01: the installed harness-update.sh is not executable"
+  cmp -s "$SRC/tools/harness-update.sh" "$_uw/.harness/tools/harness-update.sh" \
+    || fail "E38-F01: the installed harness-update.sh differs from the source copy"
+  # section-scoped reads: the value must sit INSIDE the top-level update: block
+  _uw_val() { awk -v k="$2" '/^update:[[:space:]]*(#.*)?$/ { u = 1; next } u && /^[^[:space:]#]/ { u = 0 } u && $0 ~ ("^[[:space:]]+" k ":") { sub("^[[:space:]]+" k ":[[:space:]]*", ""); sub(/[[:space:]]+#.*$/, ""); print; exit }' "$1"; }
+  [ "$(_uw_val "$_uw/.harness/harness.config.yaml" check)" = "true" ] || fail "E38-F01: the shipped config has no update.check: true"
+  [ "$(_uw_val "$_uw/.harness/harness.config.yaml" remote)" = '""' ] || fail "E38-F01: the shipped config has no update.remote: \"\""
+  # the heredoc and the shipped template carry the SAME block (a fresh install copies, an upgrade migrates)
+  _uw_blk() { awk '/^# Harness self-update check \(E38-F01\)/ { c = 1 } c { print } c && /^  remote:/ { exit }' "$1"; }
+  _uw_blk "$SRC/harness.config.yaml" > "$T/e38-blk.tpl"
+  _uw_blk "$SRC/harness-install.sh" > "$T/e38-blk.heredoc"
+  [ -s "$T/e38-blk.tpl" ] && [ -s "$T/e38-blk.heredoc" ] || fail "E38-F01: could not capture the update: block from the template or the installer heredoc"
+  cmp -s "$T/e38-blk.tpl" "$T/e38-blk.heredoc" || fail "E38-F01: harness-install.sh's update: heredoc is not byte-identical to harness.config.yaml's"
+  # an upgraded config that predates the block: stripped, hand-edited, then re-installed
+  _uw_cfg="$_uw/.harness/harness.config.yaml"
+  awk '/^# Harness self-update check \(E38-F01\)/ { skip = 1 } skip && /^  remote:/ { skip = 0; next } !skip' "$_uw_cfg" > "$_uw_cfg.s" && cat "$_uw_cfg.s" > "$_uw_cfg" && rm -f "$_uw_cfg.s"
+  grep -q '^update:' "$_uw_cfg" && fail "E38-F01: setup failed — the update: block was not stripped"
+  sed 's|^  test_command: ""|  test_command: "pytest -q"|' "$_uw_cfg" > "$_uw_cfg.s" && cat "$_uw_cfg.s" > "$_uw_cfg" && rm -f "$_uw_cfg.s"
+  printf '\n# my own note\n' >> "$_uw_cfg"
+  cp "$_uw_cfg" "$T/e38-pre.yaml"
+  sh "$SRC/harness-install.sh" --agents=claude "$_uw" </dev/null >/dev/null 2>&1 || fail "E38-F01: upgrade failed"
+  [ "$(_uw_val "$_uw_cfg" check)" = "true" ] && [ "$(_uw_val "$_uw_cfg" remote)" = '""' ] \
+    || fail "E38-F01: the upgrade did not add the update: block"
+  [ "$(grep -c '^update:' "$_uw_cfg")" = 1 ] || fail "E38-F01: the upgrade left more than one update: header"
+  awk 'NR == FNR { pre[++n] = $0 ""; next } { if (i < n && ($0 "") == pre[i + 1]) i++ } END { exit (i == n) ? 0 : 1 }' "$T/e38-pre.yaml" "$_uw_cfg" \
+    || fail "E38-F01: the upgrade altered, dropped or reordered an existing config line"
+  cp "$_uw_cfg" "$T/e38-post1.yaml"
+  sh "$SRC/harness-install.sh" --agents=claude "$_uw" </dev/null >/dev/null 2>&1 || fail "E38-F01: second upgrade failed"
+  cmp -s "$T/e38-post1.yaml" "$_uw_cfg" || fail "E38-F01: migrating the update: block is not idempotent"
+  pass "the update tool ships executable + identical; the update: block is shipped and migrated append-only (E38-F01 R7, R2) [update_tool_and_config_wired]"
+}
+test_update_tool_and_config_wired
 
 echo "All install tests passed."

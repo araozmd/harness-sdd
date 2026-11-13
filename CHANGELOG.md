@@ -4,6 +4,30 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.109.0] — 2026-11-12
+
+### Added — init.sh update check + consented upgrade (E38-F01)
+- `.harness/init.sh` now checks the harness remote for the highest `vX.Y.Z` tag and prints one
+  line `🔔 harness vX.Y.Z available (installed vA.B.C)` when it is newer than
+  `.harness/.harness-version`. Bounded (`HARNESS_UPDATE_TIMEOUT`, default 3 s), cached 24 h
+  (`HARNESS_UPDATE_TTL`) including failures, silent offline, and never changes the gate's exit
+  code. It never prompts for a credential: ssh remotes run with `-o BatchMode=yes` appended to
+  the ssh command git itself would use (`GIT_SSH_COMMAND`, `core.sshCommand`, `GIT_SSH`). Opt out with `update.check: false` or `HARNESS_SKIP_UPDATE_CHECK=1`; forks set
+  `update.remote` (or `HARNESS_UPDATE_REMOTE`). Skipped in the source repo, in umbrella children
+  and without `git`.
+- At an interactive terminal only (stdin and stdout are terminals) it offers `Install now? [y/N]`;
+  a declined version is remembered. `y` fetches the tag, previews every locally edited or added
+  harness-owned file, asks `Proceed with the upgrade? [y/N]`, backs those files up to
+  `.harness/progress/upgrade-backup/<old-version>/`, runs the fetched tag's own
+  `harness-install.sh` (`--umbrella <dir>` on a coordinator), then proves the
+  `harness.config.yaml` lines and the `CLAUDE.md`/`AGENTS.md` prose outside the harness block
+  survived. Exit `3` upgraded (commit it, re-run), `2` declined, `4` preservation violated, `5`
+  fetch/installer failure. Never commits.
+- New `tools/harness-update.sh` (body, ships to every target); `harness.config.yaml` gains the
+  `update:` block (`check: true`, `remote: ""`), appended to older configs on upgrade.
+  `tools/run-tests.sh` exports `HARNESS_SKIP_UPDATE_CHECK=1` so the suites stay off the network.
+- `docs/INSTALL.md` gains `### Staying current — the update check (E38-F01)`; `README.md` a sentence.
+
 ## [0.108.0] — 2026-11-10
 
 ### Added — advisory living-doc drift report (E37-F03)

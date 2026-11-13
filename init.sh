@@ -48,7 +48,8 @@ ok "harness structure intact"
 #     harness-owned tree and every upgrade rewrites it, so a half-applied upgrade shows up
 #     as an uncommitted change to the stamp via the same dirty-tree check that catches the
 #     prompts. There is no second signal available here: init.sh has no access to the
-#     harness SOURCE it was installed from, so it cannot compare installed-vs-latest at all.
+#     harness SOURCE it was installed from, and never consults the remote: whether a NEWER release
+#     exists is a separate question, answered as a notice only by the 2b2 update check below.
 #
 #     FALSE POSITIVES ARE THE DOMINANT RISK. This gate runs before every agent step, so a
 #     misfire halts the whole harness and the guard gets disabled within a week. Every
@@ -332,6 +333,43 @@ for r, p in missing:
 PY
   fi
   echo "ℹ️  umbrella mode: manifest present ($UMBRELLA_MANIFEST)"
+fi
+
+# 2b2. Update check (E38-F01). A COURTESY NOTICE, not a gate: an installed target is told
+#      when the harness remote carries a newer vX.Y.Z tag, and — only at an interactive
+#      terminal — is offered the upgrade. The logic lives in tools/harness-update.sh; this
+#      hook only decides whether to call it and what to do with its answer.
+#
+#      THE GATE MUST NEVER BE HURT BY IT. init.sh is what every agent runs non-interactively
+#      before any work, so `check` is bounded in time (HARNESS_UPDATE_TIMEOUT, default 3 s),
+#      asks for no credential (https prompts off, ssh BatchMode), is cached (24 h, failure included) and returns only 0
+#      or 10. Any other outcome — a missing tool, a bug, no network — falls through here with
+#      the gate's exit code untouched (`|| _upd_rc=$?`, never `set -e` territory).
+#
+#      THE OPT-OUT IS SILENT, unlike the E24 drift-guard override, deliberately: a forgotten
+#      opt-out costs a notice, not safety, and tools/run-tests.sh exports it so the ~80
+#      suites that run an installed init.sh stay off the network.
+#
+#      WHY `exec`. The upgrade REWRITES this file and the tool while they are the programs
+#      running. `exec` replaces the gate process, so no half-parsed init.sh is left running
+#      over a changing body (the tool is itself functions + one final `main "$@"`).
+#      Skipped where it cannot apply: no stamp (the source repo), an umbrella child
+#      (`umbrella.root` set — the coordinator's cascade upgrades it), no git, no tool.
+if [ -f "$HARNESS_DIR/.harness-version" ] && [ -z "${HARNESS_SKIP_UPDATE_CHECK:-}" ] \
+   && [ -f "$HARNESS_DIR/tools/harness-update.sh" ]; then
+  _upd_manifest=""
+  if [ -n "${UMBRELLA_MANIFEST:-}" ] && [ -f "$UMBRELLA_MANIFEST" ]; then
+    _upd_manifest="$(CDPATH= cd -- "$(dirname -- "$UMBRELLA_MANIFEST")" 2>/dev/null && pwd)/$(basename -- "$UMBRELLA_MANIFEST")" || _upd_manifest=""
+  fi
+  _upd_rc=0
+  HARNESS_DIR="$HARNESS_DIR" HARNESS_UPDATE_CHILD="${UMBRELLA_ROOT:+1}" \
+    HARNESS_UPDATE_UMBRELLA_MANIFEST="$_upd_manifest" HARNESS_UPDATE_UMBRELLA_DIR="${_upd_manifest:+$(dirname -- "$_upd_manifest")}" \
+    sh "$HARNESS_DIR/tools/harness-update.sh" check || _upd_rc=$?
+  if [ "$_upd_rc" = 10 ]; then
+    exec env HARNESS_DIR="$HARNESS_DIR" HARNESS_UPDATE_CHILD="${UMBRELLA_ROOT:+1}" \
+      HARNESS_UPDATE_UMBRELLA_MANIFEST="$_upd_manifest" HARNESS_UPDATE_UMBRELLA_DIR="${_upd_manifest:+$(dirname -- "$_upd_manifest")}" \
+      sh "$HARNESS_DIR/tools/harness-update.sh" upgrade
+  fi
 fi
 
 # 2c. ADR-citation sweep (WARN-ONLY, additive). Feature specs cite the ADRs they
