@@ -1,7 +1,7 @@
 ---
 id: E38
 title: "Harness self-update: detect a newer release, ask before installing, never clobber custom configuration (single-repo + umbrella)"
-status: pending          # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
+status: done             # draft → planned → in-progress → done (pending = legacy alias of planned; rollup of its features)
 owner: araozmd
 ---
 

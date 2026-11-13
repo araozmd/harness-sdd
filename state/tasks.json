@@ -2319,22 +2319,23 @@
     {
       "id": "E38",
       "title": "Harness self-update: detect a newer release, ask before installing, never clobber custom configuration (single-repo + umbrella)",
-      "status": "pending",
+      "status": "done",
       "features": [
         {
           "id": "E38-F01",
           "title": "init.sh update check + consented upgrade with custom-config preservation preview (single-repo and umbrella cascade)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "cce624e1fee6a721deca2275382be235d6671be1",
+            "ref": "cce624e1fee6a721deca2275382be235d6671be1",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E38-harness-self-update/F01-update-check-and-consented-upgrade/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (328)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E38-F01 done --evidence <merge-ref>`",
-            "pr": "328"
-          }
+          "spec_path": "specs/epics/E38-harness-self-update/F01-update-check-and-consented-upgrade/"
         }
       ]
     }
