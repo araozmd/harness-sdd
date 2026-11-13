@@ -32,7 +32,7 @@ DRILLER="agents/driller.md"
 CRITIC="agents/doc-critic.md"
 INCEP="agents/inception.md"
 TEMPLATE="specs/_templates/inbox-brief.md"
-WORKFLOW="docs/WORKFLOW.md"
+WORKFLOW="docs/agents/WORKFLOW.md"
 
 # ── R4: the brief template carries `## Observable behavior` ─────────────────────
 r4_order() { # $1 = a brief file; success iff Success outcome < Observable behavior < Scope
@@ -173,7 +173,7 @@ if csec 'fail the drill'; then fail "R7: critic section must not fail the drill"
 if sed 's/never block//Ig' "$CS" | grep -qiE 'block'; then fail "R7: critic section makes a finding block (only 'never block' is allowed)"; fi
 pass "R7_doc_critic_exemption_and_advisory"
 
-# ── R9: docs/WORKFLOW.md section ──────────────────────────────────────────────────
+# ── R9: docs/agents/WORKFLOW.md section ──────────────────────────────────────────────────
 H9='## Observable slices and the walking skeleton (ADR-0008)'
 grep -qF "$H9" "$WORKFLOW" || fail "R9: $WORKFLOW lacks the heading '$H9'"
 a="$(ln "$WORKFLOW" '## Change-size discipline')"; b="$(ln "$WORKFLOW" '## Observable slices')"

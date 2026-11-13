@@ -44,7 +44,7 @@ test_reviewer_isolation_guidance() {
 test_docs_antigravity_presence() {
   grep -q "Antigravity" "$ROOT/AGENTS.md" || fail "AGENTS.md missing Antigravity support mention"
   grep -q "Antigravity" "$ROOT/README.md" || fail "README.md missing Antigravity support mention"
-  grep -q "Antigravity" "$ROOT/docs/WORKFLOW.md" || fail "docs/WORKFLOW.md missing Antigravity support mention"
+  grep -q "Antigravity" "$ROOT/docs/agents/WORKFLOW.md" || fail "docs/agents/WORKFLOW.md missing Antigravity support mention"
   pass "test_docs_antigravity_presence"
 }
 

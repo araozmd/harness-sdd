@@ -185,10 +185,10 @@ pass "R8 portable_role_file"
 
 # ── R9: WORKFLOW.md documents the lifecycle + legacy alias ───────────────────────
 # R9_workflow_lifecycle
-grep -qF 'draft → planned → in-progress → done' docs/WORKFLOW.md \
-  || fail "R9: docs/WORKFLOW.md missing the lifecycle chain"
-grep -qi 'legacy alias' docs/WORKFLOW.md \
-  || fail "R9: docs/WORKFLOW.md missing the pending legacy-alias note"
+grep -qF 'draft → planned → in-progress → done' docs/agents/WORKFLOW.md \
+  || fail "R9: docs/agents/WORKFLOW.md missing the lifecycle chain"
+grep -qi 'legacy alias' docs/agents/WORKFLOW.md \
+  || fail "R9: docs/agents/WORKFLOW.md missing the pending legacy-alias note"
 pass "R9 workflow_lifecycle"
 
 # ── R10: epic template status comment shows the new lifecycle ────────────────────

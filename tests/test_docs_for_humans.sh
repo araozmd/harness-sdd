@@ -30,7 +30,7 @@ trap 'rm -rf "$T"' EXIT
 trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
 
-HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no docs/INSTALL.md:300:yes"
+HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no docs/INSTALL.md:300:yes docs/WORKFLOW.md:300:yes"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; echo "$1" >> "$T/passed"; }
@@ -1215,16 +1215,16 @@ stale_citations() {
   done
   grep -F 'Per-role model routing' "$1/harness-install.sh" | grep -qF 'docs/agents/INSTALL.md' ||
     echo "harness-install.sh: the § Per-role model routing pointer does not name docs/agents/INSTALL.md"
-  grep -qF 'docs/agents/INSTALL.md' "$1/docs/WORKFLOW.md" || echo "docs/WORKFLOW.md does not name docs/agents/INSTALL.md"
+  grep -qF 'docs/agents/INSTALL.md' "$1/docs/agents/WORKFLOW.md" || echo "docs/agents/WORKFLOW.md does not name docs/agents/INSTALL.md"
   return 0
 }
 F02_R7_no_stale_citations() {
   _bad="$(stale_citations "$ROOT")"
   [ -z "$_bad" ] || fail "F02 R7: $(printf '%s' "$_bad" | tr '\n' ';')"
-  rm -rf "$T/f7"; mkdir -p "$T/f7/docs"; cp "$ROOT/harness-install.sh" "$ROOT/init.sh" "$ROOT/harness.config.yaml" "$T/f7/"; cp "$ROOT/docs/WORKFLOW.md" "$T/f7/docs/"
+  rm -rf "$T/f7"; mkdir -p "$T/f7/docs/agents"; cp "$ROOT/harness-install.sh" "$ROOT/init.sh" "$ROOT/harness.config.yaml" "$T/f7/"; cp "$ROOT/docs/agents/WORKFLOW.md" "$T/f7/docs/agents/"
   sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/init.sh" > "$T/f7/i.new" && mv "$T/f7/i.new" "$T/f7/init.sh"
   stale_citations "$T/f7" | grep -qF 'init.sh still cites' || fail "F02 R7: the check misses a reverted init.sh citation"
-  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/docs/WORKFLOW.md" > "$T/f7/w.new" && mv "$T/f7/w.new" "$T/f7/docs/WORKFLOW.md"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/docs/agents/WORKFLOW.md" > "$T/f7/w.new" && mv "$T/f7/w.new" "$T/f7/docs/agents/WORKFLOW.md"
   stale_citations "$T/f7" | grep -qF 'WORKFLOW.md does not name' || fail "F02 R7: the check misses a reverted WORKFLOW.md title pointer"
   pass "F02_R7_no_stale_citations"
 }
@@ -1400,6 +1400,51 @@ F03_R1_counterpart_retargets() {
   [ -z "$_bad" ] || fail "F03 R1: counterpart link targets do not resolve from docs/agents/: $_bad"
   pass "F03_R1_counterpart_retargets"
 }
+
+# F03_R6 — each of the 31 suites of the coupling table reads the counterpart; the three marker suites
+# and tests/lib/umbrella/thin.sh keep the human path. <root> lets a mutant mirror be scanned.
+WF_SUITES="adr_citation antigravity_front architect_adr change_size dependency_diagnostics doc_critic drift_check drift_report epic_lifecycle escalation feedback_triage inception install landed_evidence observable_slices ownership pi_agents pi_front plan_cite pr_loop readiness_check reviewer sdd_drill sdd_fix sdd_fix_parallel sdd_next_wave sdd_plan stage_nfrs tasks_pairs test_drift_check waves"
+WF_MARKERS="tests/test_umbrella_05_conversion.sh tests/test_umbrella_07_symlink_compare.sh tests/test_umbrella_11_rollback.sh tests/lib/umbrella/thin.sh"
+wf_suite_problems() {
+  for _s in $WF_SUITES; do
+    _f="$1/tests/test_$_s.sh"
+    grep -qF 'docs/agents/WORKFLOW.md' "$_f" || echo "tests/test_$_s.sh does not cite docs/agents/WORKFLOW.md"
+    if [ "$_s" = install ]; then
+      # the one line that names the human doc is the installed-contract loop (R9)
+      _l="$(grep -F 'docs/WORKFLOW.md' "$_f" | grep -v 'for _f in' | grep -vF 'docs/agents/WORKFLOW.md' | grep -c . || true)"
+      [ "$_l" -eq 0 ] || echo "tests/test_install.sh still cites docs/WORKFLOW.md outside the for _f in loop"
+    else
+      sed 's#docs/agents/WORKFLOW\.md##g' "$_f" | grep -qF 'docs/WORKFLOW.md' && echo "tests/test_$_s.sh still cites docs/WORKFLOW.md"
+    fi
+  done
+  for _m in $WF_MARKERS; do
+    grep -qF 'docs/WORKFLOW.md' "$1/$_m" || echo "$_m lost its docs/WORKFLOW.md marker"
+  done
+  return 0
+}
+F03_R6_suites_cite_counterpart() {
+  _bad="$(wf_suite_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F03 R6: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _w() { rm -rf "$T/f36"; mkdir -p "$T/f36/tests/lib/umbrella"; cp "$ROOT"/tests/test_*.sh "$T/f36/tests/"; cp "$ROOT/tests/lib/umbrella/thin.sh" "$T/f36/tests/lib/umbrella/"; }
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#g' "$T/f36/tests/test_waves.sh" > "$T/f36/n" && mv "$T/f36/n" "$T/f36/tests/test_waves.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'tests/test_waves.sh' || fail "F03 R6: the check misses a suite reverted to docs/WORKFLOW.md"
+  _w; sed 's#docs/WORKFLOW\.md#docs/agents/WORKFLOW.md#g' "$T/f36/tests/test_umbrella_11_rollback.sh" > "$T/f36/n" && mv "$T/f36/n" "$T/f36/tests/test_umbrella_11_rollback.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'test_umbrella_11_rollback.sh lost' || fail "F03 R6: the marker control misses a re-pointed marker suite"
+  _w; sed 's#docs/WORKFLOW\.md#docs/agents/WORKFLOW.md#g' "$T/f36/tests/lib/umbrella/thin.sh" > "$T/f36/n" && mv "$T/f36/n" "$T/f36/tests/lib/umbrella/thin.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'thin.sh lost' || fail "F03 R6: the marker control misses a re-pointed thin.sh"
+  _w; printf '# see docs/WORKFLOW.md\n' >> "$T/f36/tests/test_install.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'test_install.sh still cites' || fail "F03 R6: the check misses a stray docs/WORKFLOW.md in test_install.sh"
+  pass "F03_R6_suites_cite_counterpart"
+}
+
+# F03_R9 — the registry entry, the budget it carries and the index row pairing the two paths.
+F03_R9_registry_and_index() {
+  printf '%s\n' "$HUMAN_DOCS" | tr ' ' '\n' | grep -qxF 'docs/WORKFLOW.md:300:yes' ||
+    fail "F03 R9: HUMAN_DOCS lacks the entry docs/WORKFLOW.md:300:yes"
+  index_rows "$AGENTS_README" | awk '$1 == "docs/WORKFLOW.md" && $2 == "docs/agents/WORKFLOW.md" { f = 1 } END { exit !f }' ||
+    fail "F03 R9: ## Index has no row pairing docs/WORKFLOW.md with docs/agents/WORKFLOW.md"
+  pass "F03_R9_registry_and_index"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1429,6 +1474,7 @@ row F02_R8_anchors_resolve
 row F02_R11_version_and_changelog
 # ---- E39-F03
 row F03_R1_counterpart_announcement; row F03_R1_counterpart_headings_in_order; row F03_R1_counterpart_retargets
+row F03_R6_suites_cite_counterpart
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"

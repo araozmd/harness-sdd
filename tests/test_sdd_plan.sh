@@ -232,19 +232,19 @@ pass "R20 portable_contract"
 
 # ── R21: WORKFLOW.md places /sdd-plan upstream of /sdd-drill + /sdd-next, producer ─
 # R21_workflow_doc
-grep -qF '/sdd-plan' docs/WORKFLOW.md               || fail "R21: WORKFLOW.md does not mention /sdd-plan"
-tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'roadmap[^.]{0,10}draft[^.]{0,10}epics' || fail "R21: WORKFLOW.md does not place the roadmap of draft epics"
-grep -qi '/sdd-drill\|drill' docs/WORKFLOW.md       || fail "R21: WORKFLOW.md does not mention /sdd-drill"
-tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'producer that never specs' || fail "R21: WORKFLOW.md does not state the producer-that-never-specs rule"
-grep -qi 'never.*feature spec\|no feature\|never specs' docs/WORKFLOW.md \
+grep -qF '/sdd-plan' docs/agents/WORKFLOW.md               || fail "R21: WORKFLOW.md does not mention /sdd-plan"
+tr '\n' ' ' < docs/agents/WORKFLOW.md | grep -qiE 'roadmap[^.]{0,10}draft[^.]{0,10}epics' || fail "R21: WORKFLOW.md does not place the roadmap of draft epics"
+grep -qi '/sdd-drill\|drill' docs/agents/WORKFLOW.md       || fail "R21: WORKFLOW.md does not mention /sdd-drill"
+tr '\n' ' ' < docs/agents/WORKFLOW.md | grep -qiE 'producer that never specs' || fail "R21: WORKFLOW.md does not state the producer-that-never-specs rule"
+grep -qi 'never.*feature spec\|no feature\|never specs' docs/agents/WORKFLOW.md \
   || fail "R21: WORKFLOW.md does not state never feature specs"
-grep -qi 'never advance.*past .*draft\|never advances an epic past\|past .draft.' docs/WORKFLOW.md \
+grep -qi 'never advance.*past .*draft\|never advances an epic past\|past .draft.' docs/agents/WORKFLOW.md \
   || fail "R21: WORKFLOW.md does not state never past draft"
 # The WORKFLOW draft definition must stay coherent with planner.md's drillable-minimum
 # contract (not the stale "brief only" wording) — a draft carries the drillable minimum.
-grep -qi 'drillable-minimum\|drillable minimum' docs/WORKFLOW.md \
+grep -qi 'drillable-minimum\|drillable minimum' docs/agents/WORKFLOW.md \
   || fail "R21: WORKFLOW.md draft definition drifted from planner.md drillable-minimum contract"
-grep -qi 'business brief only\|brief only' docs/WORKFLOW.md \
+grep -qi 'business brief only\|brief only' docs/agents/WORKFLOW.md \
   && fail "R21: WORKFLOW.md still uses stale 'brief only' draft definition (contradicts planner.md)"
 pass "R21 workflow_doc"
 

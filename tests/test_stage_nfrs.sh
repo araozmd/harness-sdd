@@ -273,9 +273,9 @@ R9_brief_template_stage
 
 # R10 — WORKFLOW documents the stage, the sticky/bolt-on table, the two forms and E36-F04.
 R10_workflow_stage_section() {
-  _w="$I/docs/WORKFLOW.md"
-  [ -f "$_w" ] || fail "R10: installed docs/WORKFLOW.md missing"
-  grep -qF '## Stage and NFRs (ADR-0009)' "$_w" || fail "R10: docs/WORKFLOW.md has no '## Stage and NFRs (ADR-0009)' section"
+  _w="$I/docs/agents/WORKFLOW.md"
+  [ -f "$_w" ] || fail "R10: installed docs/agents/WORKFLOW.md missing"
+  grep -qF '## Stage and NFRs (ADR-0009)' "$_w" || fail "R10: docs/agents/WORKFLOW.md has no '## Stage and NFRs (ADR-0009)' section"
   _a="$(lineno "$_w" '## Architecture-aligned specs')"; _x="$(lineno "$_w" '## Stage and NFRs (ADR-0009)')"
   [ "$_a" -gt 0 ] && [ "$_x" -gt "$_a" ] \
     || fail "R10: the Stage section is not after '## Architecture-aligned specs' (arch=$_a stage=$_x)"
@@ -335,7 +335,7 @@ R1_stage_read_command_line1() {
   fold "$T/r1rd.sec" | grep -qF 'A `---` block that starts on any later line is not frontmatter, so a `stage:` line inside it is absent.' \
     || fail "R1: SPEC-FORMAT grammar item 1 does not say a --- block starting on a later line is not frontmatter (its stage: is absent)"
   fold "$T/r1rd.sec" | grep -qF 'inside the first `---`' && fail "R1: SPEC-FORMAT grammar item 1 still says 'inside the first --- block'"
-  span "$I/docs/WORKFLOW.md" '## Stage and NFRs (ADR-0009)' '## Doc-critic checkpoints' "$T/r1rd.sec"
+  span "$I/docs/agents/WORKFLOW.md" '## Stage and NFRs (ADR-0009)' '## Doc-critic checkpoints' "$T/r1rd.sec"
   fold "$T/r1rd.sec" | grep -qF 'a `stage:` line in `specs/product.md` frontmatter (the `---` block that starts on line 1) — `discovery`, `pilot` or `production`' \
     || fail "R1: the WORKFLOW Stage section does not say the stage: line sits in the frontmatter block that starts on line 1"
   mkdir -p "$T/r1rd/specs"

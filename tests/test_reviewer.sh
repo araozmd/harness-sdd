@@ -74,8 +74,8 @@ pass "R10 round_recorded"
 # ── R11: docs coherent with multi-round loop (no single-pass claim) ──────────────
 # The review-phase wording in WORKFLOW.md must not present review as a single pass;
 # it should reflect the reject→in-progress→re-review loop.
-grep -qiE 're-review|repeats until green|loop repeats' docs/WORKFLOW.md \
-  || fail "R11: docs/WORKFLOW.md does not reflect the multi-round build↔review loop"
+grep -qiE 're-review|repeats until green|loop repeats' docs/agents/WORKFLOW.md \
+  || fail "R11: docs/agents/WORKFLOW.md does not reflect the multi-round build↔review loop"
 pass "R11 docs_coherent"
 
 # ── R12: VERSION is valid semver AND CHANGELOG carries its entry ─────────────────

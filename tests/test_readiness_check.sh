@@ -1150,7 +1150,7 @@ cat > "$T/pr-want.sec" <<'GRAMMAR'
 ## Plan rows cite an R-id or an ADR
 
 Stage-aware NFRs (ADR-0009) rest on one citation grammar, stated here once and copied exactly
-into the ADR and plan templates, `agents/architect.md` and `docs/WORKFLOW.md`. Four forms:
+into the ADR and plan templates, `agents/architect.md` and `docs/agents/WORKFLOW.md`. Four forms:
 
 1. **Stage line.** In `specs/product.md`'s frontmatter (the `---` block that starts on line 1
    and runs to the next `---` line), a line matching `^stage: (discovery|pilot|production)$`.
@@ -1207,7 +1207,7 @@ cmp -s "$T/pr-want.sec" "$T/pr-inst.sec" \
 grep -qF 'readiness-check' "$T/pr-inst.sec" && fail "R11_spec_format_section: the plan-row grammar section now names readiness-check"
 pass "R11_spec_format_section"
 
-span "$I/docs/WORKFLOW.md" '## Doc-critic checkpoints' '## Drift check on epic rollup' "$T/wf.sec"
+span "$I/docs/agents/WORKFLOW.md" '## Doc-critic checkpoints' '## Drift check on epic rollup' "$T/wf.sec"
 has R11_workflow_paragraph "$T/wf.sec" 'Beside the critic at the `feature-spec` checkpoint sits the implementation-readiness lint (E37-F01): the Architect runs `tools/readiness-check.py <feature-dir>` before hand-off and it must exit 0,'
 has R11_workflow_paragraph "$T/wf.sec" 'the doc-critic reports its lines as advisory findings,'
 has R11_workflow_paragraph "$T/wf.sec" 'the Reviewer rejects on exit 1 (check 9; a plan written before the tool merged is flagged, not rejected),'

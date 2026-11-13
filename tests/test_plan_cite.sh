@@ -1151,7 +1151,7 @@ span "$I/docs/SPEC-FORMAT.md" '## Plan rows cite an R-id or an ADR' '## Architec
 has R10_prose_present_tense "$T/s.sec" '`tools/plan-cite-check.py <plan> --spec <spec>` (E36-F04) turns this grammar into an exit code (0 ok, 1 violation, 2 usage/input error); `--sweep <specs-dir>` is the trigger sweep `init.sh` runs warn-only'
 has R10_prose_present_tense "$T/s.sec" "the Reviewer's check 8 rejects on exit 1. This section is the schema it lints."
 grep -qF 'not yet enforced' "$T/s.sec" && fail "R10_prose_present_tense: SPEC-FORMAT's grammar section still says 'not yet enforced'"
-span "$I/docs/WORKFLOW.md" '## Stage and NFRs (ADR-0009)' '## Doc-critic checkpoints' "$T/w.sec"
+span "$I/docs/agents/WORKFLOW.md" '## Stage and NFRs (ADR-0009)' '## Doc-critic checkpoints' "$T/w.sec"
 has R10_prose_present_tense "$T/w.sec" 'Enforcement is `E36-F04`: `tools/plan-cite-check.py` turns the grammar into an exit code, `init.sh` runs it and the deferred-ADR trigger sweep warn-only at session start, the doc-critic reports it at the `feature-spec` checkpoint, and the Reviewer rejects on exit 1 (check 8)'
 grep -qF 'not yet enforced' "$T/w.sec" && fail "R10_prose_present_tense: WORKFLOW's Stage section still says 'not yet enforced'"
 grep -qF 'This section declares and records only.' "$T/w.sec" && fail "R10_prose_present_tense: WORKFLOW still says the section only declares and records"

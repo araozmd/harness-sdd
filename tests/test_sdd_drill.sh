@@ -240,7 +240,7 @@ pass "R19 portable_contract"
 
 # ── R20: WORKFLOW.md places /sdd-drill between /sdd-plan + /sdd-next, only flip ────
 # R20_workflow_doc
-grep -qF '/sdd-drill' docs/WORKFLOW.md        || fail "R20: WORKFLOW.md does not mention /sdd-drill"
+grep -qF '/sdd-drill' docs/agents/WORKFLOW.md        || fail "R20: WORKFLOW.md does not mention /sdd-drill"
 # Section-scoped AND fence-aware (Codex #169 rounds 2-3): the fix lane's own "re-stamp
 # autonomous: true" prose elsewhere in WORKFLOW.md would satisfy a whole-file fold, and
 # a fenced example quoting the heading would re-open the slice on quoted text — the ONE
@@ -251,14 +251,14 @@ _r20_sect() {
     fence_delim($0) { next }
     !fence && /^#+ / { k = (index($0, "Per-epic drill-down") > 0); next }
     !fence && k { print }
-  ' docs/WORKFLOW.md | tr '\n' ' '
+  ' docs/agents/WORKFLOW.md | tr '\n' ' '
 }
 _r20_sect | grep -qiE 'flips? .{0,20}epic[^.]{0,10}draft → planned' || fail "R20: WORKFLOW.md drill section does not make /sdd-drill the draft-to-planned flip"
 _r20_sect | grep -qiE 'stamp[^.]{0,10}autonomous: true' || fail "R20: WORKFLOW.md drill section does not mention the autonomous: true stamp"
-grep -qF '/sdd-plan' docs/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-plan"
-grep -qF '/sdd-next' docs/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-next"
-grep -qi 'only step that flips\|only.*flip' docs/WORKFLOW.md || fail "R20: WORKFLOW.md does not state the only-flip step"
-grep -qi 'feature spec\|no feature' docs/WORKFLOW.md || fail "R20: WORKFLOW.md does not state it never writes feature specs"
+grep -qF '/sdd-plan' docs/agents/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-plan"
+grep -qF '/sdd-next' docs/agents/WORKFLOW.md         || fail "R20: WORKFLOW.md does not mention /sdd-next"
+grep -qi 'only step that flips\|only.*flip' docs/agents/WORKFLOW.md || fail "R20: WORKFLOW.md does not state the only-flip step"
+grep -qi 'feature spec\|no feature' docs/agents/WORKFLOW.md || fail "R20: WORKFLOW.md does not state it never writes feature specs"
 pass "R20 workflow_doc"
 
 # ── R21: README one-liner for /sdd-drill ──────────────────────────────────────────
@@ -322,10 +322,10 @@ pass "E21-F01 R1/R2 change_size_defaults_in_source_config"
 # R9_change_size_documented
 # Both tiers named, and the non-blocking property stated — the property most likely to be
 # lost when someone later "tightens" the rule.
-grep -qF 'change_size' docs/WORKFLOW.md   || fail "E21-F01 R9: WORKFLOW.md does not document change_size"
-tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'advise[^.]{0,10}advise_lines' || fail "E21-F01 R9: WORKFLOW.md does not name the advise tier"
-tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'escalate[^.]{0,10}escalate_lines' || fail "E21-F01 R9: WORKFLOW.md does not name the escalate tier"
-grep -qi 'Neither tier blocks\|neither blocks\|never a hard' docs/WORKFLOW.md \
+grep -qF 'change_size' docs/agents/WORKFLOW.md   || fail "E21-F01 R9: WORKFLOW.md does not document change_size"
+tr '\n' ' ' < docs/agents/WORKFLOW.md | grep -qiE 'advise[^.]{0,10}advise_lines' || fail "E21-F01 R9: WORKFLOW.md does not name the advise tier"
+tr '\n' ' ' < docs/agents/WORKFLOW.md | grep -qiE 'escalate[^.]{0,10}escalate_lines' || fail "E21-F01 R9: WORKFLOW.md does not name the escalate tier"
+grep -qi 'Neither tier blocks\|neither blocks\|never a hard' docs/agents/WORKFLOW.md \
   || fail "E21-F01 R9: WORKFLOW.md does not state that the budget never blocks"
 pass "E21-F01 R9 change_size_documented"
 

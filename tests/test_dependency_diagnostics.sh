@@ -430,7 +430,7 @@ if grep -Eq '^[[:space:]]*(from|import)[[:space:]]+(jsonschema|networkx|yaml|num
 fi
 pass "R4/R6/R14 import API, missing blockers, 2,000 nodes, and read-only behavior execute"
 
-for doc in "$ROOT/docs/WORKFLOW.md" "$ROOT/docs/agents/README.md"; do
+for doc in "$ROOT/docs/agents/WORKFLOW.md" "$ROOT/docs/agents/README.md"; do
   require_text "$doc" 'dependency-cycle'
   require_text "$doc" 'no actionable work'
   require_text "$doc" 'warn-only'

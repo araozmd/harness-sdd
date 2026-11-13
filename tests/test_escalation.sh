@@ -939,21 +939,21 @@ docs_agree_with_the_shipped_default() {
     || fail "F05-R11: the shipped config escalated with no recorded verdict"
 
   # No operator-facing doc may still claim the pre-opt-in meaning of 0.
-  for _d in "$SRC/docs/WORKFLOW.md" "$SRC/harness.config.yaml" "$SRC/agents/orchestrator.md"; do
+  for _d in "$SRC/docs/agents/WORKFLOW.md" "$SRC/harness.config.yaml" "$SRC/agents/orchestrator.md"; do
     grep -qi 'disables rejection-based\|leaving `complexity: complex` as the only route' "$_d" \
       && fail "F05-R11: $_d still documents the pre-opt-in meaning of 0"
   done
   # Nor may any line stating the DEFAULT still say 0. The docs legitimately mention 0 as the
   # off-switch, which is why this keys off "default"/"shipped" rather than the digit alone.
-  for _d in "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md" "$SRC/harness.config.yaml" \
+  for _d in "$SRC/docs/agents/WORKFLOW.md" "$SRC/CHANGELOG.md" "$SRC/harness.config.yaml" \
             "$SRC/agents/orchestrator.md" "$SRC/harness-install.sh" "$SRC/docs/agents/INSTALL.md"; do
     _bad="$(grep -i 'after_rejections' "$_d" | grep -iE 'default|shipped value' | grep -v '2' || true)"
     [ -z "$_bad" ] || fail "F05-R11: $_d states a non-2 default for after_rejections: $_bad"
   done
   # Positive control: the docs DO describe the current rule, so the sweeps above are not
   # passing merely because escalation went undocumented.
-  grep -qi 'disables BOTH triggers\|turns escalation OFF ENTIRELY' "$SRC/docs/WORKFLOW.md" \
-    || fail "F05-R11: docs/WORKFLOW.md does not state what 0 does"
+  grep -qi 'disables BOTH triggers\|turns escalation OFF ENTIRELY' "$SRC/docs/agents/WORKFLOW.md" \
+    || fail "F05-R11: docs/agents/WORKFLOW.md does not state what 0 does"
   pass "the shipped default is 2, behaves that way, and the docs say so (F05-R11)"
 }
 
@@ -963,7 +963,7 @@ no_doc_claims_the_harness_cannot_check() {
   # deliberately does not work out whether escalating would help and that they must verify it
   # themselves. It now does work it out. A claim repeated in six files is six defects.
   for _d in "$SRC/harness.config.yaml" "$SRC/harness-install.sh" "$SRC/tools/builder-role.sh" \
-            "$SRC/agents/orchestrator.md" "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md" \
+            "$SRC/agents/orchestrator.md" "$SRC/docs/agents/WORKFLOW.md" "$SRC/CHANGELOG.md" \
             "$SRC/docs/agents/INSTALL.md"; do
     # Several phrasings of the same superseded claim, because it was written differently in
     # each of the six files — matching only one spelling is how a sweep misses five sites.
@@ -975,7 +975,7 @@ no_doc_claims_the_harness_cannot_check() {
   # and E17-F05 doubly so (it is on by default when armed). The first version of this sweep
   # knew only the "harness cannot check" phrasing, so docs/INSTALL.md kept telling operators
   # to invoke the heavy Builder by hand while the test stayed green. One sweep, both classes.
-  for _d in "$SRC/harness.config.yaml" "$SRC/agents/orchestrator.md" "$SRC/docs/WORKFLOW.md" \
+  for _d in "$SRC/harness.config.yaml" "$SRC/agents/orchestrator.md" "$SRC/docs/agents/WORKFLOW.md" \
             "$SRC/docs/agents/INSTALL.md" "$SRC/tools/builder-role.sh"; do
     _bad="$(grep -in 'Nothing routes to it automatically\|you invoke it by hand\|is a separate feature' "$_d" || true)"
     [ -z "$_bad" ] || fail "F05-R11: $_d still says escalation is manual-only: $_bad"
@@ -1004,7 +1004,7 @@ no_doc_claims_the_harness_cannot_check() {
 
   # Positive control #1: the docs describe the mechanism that replaced it.
   _seen=0
-  for _d in "$SRC/harness.config.yaml" "$SRC/docs/WORKFLOW.md" "$SRC/agents/orchestrator.md" \
+  for _d in "$SRC/harness.config.yaml" "$SRC/docs/agents/WORKFLOW.md" "$SRC/agents/orchestrator.md" \
             "$SRC/docs/agents/INSTALL.md"; do
     grep -q 'escalation-arming' "$_d" && _seen=$((_seen + 1))
   done
@@ -1013,7 +1013,7 @@ no_doc_claims_the_harness_cannot_check() {
   # Positive control #2: the STATED LIMIT is documented. The verdict proves the model
   # changes, not that it is stronger — over-claiming that is the failure mode this feature
   # is one round away from, so the honest sentence is pinned rather than trusted.
-  for _d in "$SRC/harness.config.yaml" "$SRC/docs/WORKFLOW.md"; do
+  for _d in "$SRC/harness.config.yaml" "$SRC/docs/agents/WORKFLOW.md"; do
     grep -qi 'not check.*STRONGER\|DOES NOT CHECK' "$_d" \
       || fail "F05-R11: $_d does not state that the verdict proves change, not strength"
   done
@@ -1051,26 +1051,26 @@ effort_is_named_in_the_operator_docs() {
 
   _wf="$T/doc-workflow"
   awk 'BEGIN{h="### Which Builder runs"} /^#{2,} /{k=(index($0,h)>0);next} k' \
-    "$SRC/docs/WORKFLOW.md" | tr '\n' ' ' > "$_wf"
+    "$SRC/docs/agents/WORKFLOW.md" | tr '\n' ' ' > "$_wf"
   [ -s "$_wf" ] || fail "E99-F163: the 'Which Builder runs' section did not extract — the heading moved"
   grep -qiE 'different[[:space:]]+resolved[[:space:]]+stamp' "$_wf" \
-    || fail "E99-F163: docs/WORKFLOW.md's escalation section does not say the verdict compares the whole resolved stamp"
+    || fail "E99-F163: docs/agents/WORKFLOW.md's escalation section does not say the verdict compares the whole resolved stamp"
   # F1d: the `unstamped` clause and the absent-verdict clause named a "resolved model" only.
   # Both live in this same section, so scope to $_wf and use DISTINCT anchors: a lone
   # "either axis" anchor would be satisfied by the `none` bullet below while the absent clause
   # still said "to a model".
   grep -qiE 'resolved[[:space:]]+stamp[[:space:]]+then[[:space:]]+describes' "$_wf" \
-    || fail "E99-F163 F1d: docs/WORKFLOW.md's unstamped clause still says 'resolved model'"
+    || fail "E99-F163 F1d: docs/agents/WORKFLOW.md's unstamped clause still says 'resolved model'"
   grep -qiE 'no[[:space:]]+role[[:space:]]+resolves[[:space:]]+on[[:space:]]+either[[:space:]]+axis' "$_wf" \
-    || fail "E99-F163 F1d: docs/WORKFLOW.md's absent clause still says 'no role resolves to a model'"
+    || fail "E99-F163 F1d: docs/agents/WORKFLOW.md's absent clause still says 'no role resolves to a model'"
   # F1e(2): the `none` bullet's "nothing on either axis" is its own claim — R11 reverted it to
   # "nothing", and all suites stayed green because only "different resolved stamp" was anchored.
   grep -qiE 'nothing[[:space:]]+on[[:space:]]+either[[:space:]]+axis' "$_wf" \
-    || fail "E99-F163 F1e: docs/WORKFLOW.md's 'none' clause does not say nothing resolves on either axis"
+    || fail "E99-F163 F1e: docs/agents/WORKFLOW.md's 'none' clause does not say nothing resolves on either axis"
 
   # And the superseded gap statement is gone. The positive anchors above prove the current rule
   # IS documented, so this negative cannot pass merely because escalation went undocumented.
-  for _d in "$SRC/docs/agents/INSTALL.md" "$SRC/docs/WORKFLOW.md"; do
+  for _d in "$SRC/docs/agents/INSTALL.md" "$SRC/docs/agents/WORKFLOW.md"; do
     grep -qi 'compares `model` only' "$_d" \
       && fail "E99-F163: $_d still says the verdict compares model only"
   done
@@ -1743,7 +1743,7 @@ F182_R12_docs_version_changelog() {
     || fail "F182-R12: no CHANGELOG section names E99-F182, --frontend and tools/host-frontend.sh together"
 
   _t="$T/f182-r12"; install_to "$_t" "$T/ch-f182-r12" --agents=claude
-  _wf="$(tr '\n' ' ' < "$_t/.harness/docs/WORKFLOW.md" | tr -s ' ')"
+  _wf="$(tr '\n' ' ' < "$_t/.harness/docs/agents/WORKFLOW.md" | tr -s ' ')"
   _in="$(tr '\n' ' ' < "$_t/.harness/docs/agents/INSTALL.md" | tr -s ' ')"
   _rd="$(tr '\n' ' ' < "$SRC/docs/agents/README.md" | tr -s ' ')"
   [ -n "$_wf" ] && [ -n "$_in" ] || fail "F182-R12 setup: the installed WORKFLOW.md / INSTALL.md is missing"

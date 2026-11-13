@@ -1944,7 +1944,7 @@ test_body_dry_run() {                                 # R47
 # ══ Documentation, prose and wiring (R48–R54) ═════════════════════════════════
 
 test_prose_references_are_availability_phrased() {    # R48
-  for _f in "$SRC/agents/orchestrator.md" "$SRC/CLAUDE.md" "$SRC/docs/WORKFLOW.md"; do
+  for _f in "$SRC/agents/orchestrator.md" "$SRC/CLAUDE.md" "$SRC/docs/agents/WORKFLOW.md"; do
     grep -qF '/sdd-pr-loop' "$_f" || fail "R48: $_f does not name /sdd-pr-loop"
     # no bare `/pr-loop` reference survives (the token always carries the sdd- prefix)
     grep -oE '(^|[^-])/pr-loop' "$_f" | grep -q . \
@@ -1995,13 +1995,13 @@ test_source_layout_glue_present() {                   # R49
 }
 
 test_docs_document_pr_loop() {                        # R50
-  for _d in "$SRC/README.md" "$SRC/docs/agents/INSTALL.md" "$SRC/docs/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
+  for _d in "$SRC/README.md" "$SRC/docs/agents/INSTALL.md" "$SRC/docs/agents/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
     grep -qF '/sdd-pr-loop' "$_d" || fail "R50: $_d does not list /sdd-pr-loop"
     grep -qF 'Codex GitHub App' "$_d" || fail "R50: $_d does not state the Codex GitHub App precondition"
   done
   grep -qF 'pr_loop.enabled' "$SRC/docs/agents/INSTALL.md" || fail "R50: INSTALL.md does not document the gate"
   # the OPT-IN default is a documented contract, not an implementation detail
-  for _d in "$SRC/README.md" "$SRC/docs/agents/INSTALL.md" "$SRC/docs/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
+  for _d in "$SRC/README.md" "$SRC/docs/agents/INSTALL.md" "$SRC/docs/agents/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
     grep -qiF 'opt-in' "$_d" || fail "R50: $_d does not state that pr_loop.enabled is opt-in"
   done
   grep -qF 'enabled: false' "$SRC/docs/agents/INSTALL.md" \
@@ -2355,7 +2355,7 @@ test_lane_deprecation_reclaimed() {                    # F07 R2/R3/R4/R5
   done
   # R3: the WORKFLOW notice names the sibling split and drops the lane how-to,
   # asserted fence-aware over the section only (never a whole-file grep).
-  _wf="$SRC/docs/WORKFLOW.md"
+  _wf="$SRC/docs/agents/WORKFLOW.md"
   _sect="$(awk "$(cat "$SRC/tests/lib/fence.awk")"'
     fence_delim($0) { next }
     !fence && /^## Stacked-PR lane/ { s=1; next }

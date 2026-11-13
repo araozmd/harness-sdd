@@ -128,21 +128,21 @@ grep -qi 'cite\|touch' docs/SPEC-FORMAT.md       || fail "R13: SPEC-FORMAT.md do
 grep -qi 'ADRs touched: none\|none\|absent' docs/SPEC-FORMAT.md || fail "R13: SPEC-FORMAT.md does not document none/absent"
 pass "R13 spec_format_doc"
 
-# ── R14: docs/WORKFLOW.md adds a distinct ADR-citation section vs /sdd-plan + /sdd-drill
+# ── R14: docs/agents/WORKFLOW.md adds a distinct ADR-citation section vs /sdd-plan + /sdd-drill
 # R14_workflow_doc
-grep -qi 'Architecture-aligned\|cites ADRs\|Architecture alignment' docs/WORKFLOW.md \
+grep -qi 'Architecture-aligned\|cites ADRs\|Architecture alignment' docs/agents/WORKFLOW.md \
   || fail "R14: WORKFLOW.md does not add the architecture-aligned section"
-grep -qF '/sdd-plan' docs/WORKFLOW.md            || fail "R14: WORKFLOW.md section does not place it vs /sdd-plan"
-grep -qF '/sdd-drill' docs/WORKFLOW.md           || fail "R14: WORKFLOW.md section does not place it vs /sdd-drill"
-grep -qF 'ADR' docs/WORKFLOW.md                  || fail "R14: WORKFLOW.md does not mention ADRs"
+grep -qF '/sdd-plan' docs/agents/WORKFLOW.md            || fail "R14: WORKFLOW.md section does not place it vs /sdd-plan"
+grep -qF '/sdd-drill' docs/agents/WORKFLOW.md           || fail "R14: WORKFLOW.md section does not place it vs /sdd-drill"
+grep -qF 'ADR' docs/agents/WORKFLOW.md                  || fail "R14: WORKFLOW.md does not mention ADRs"
 # Distinct from F05's fix-lane heading: our ADR-citation section has its own dedicated
 # heading whose text is neither 'Lightweight fix lane' nor '/sdd-fix' (no section overlap).
-grep -qF '## Architecture-aligned specs (the Architect cites ADRs)' docs/WORKFLOW.md \
+grep -qF '## Architecture-aligned specs (the Architect cites ADRs)' docs/agents/WORKFLOW.md \
   || fail "R14: WORKFLOW.md lacks the distinct '## Architecture-aligned specs' heading"
 # The harness's own markdown headings (lines beginning with '#') must not name F05's
 # fix-lane in the SAME heading line as our ADR-citation section — they are distinct
 # sections. (Prose may reference /sdd-fix; only headings must stay disjoint.)
-grep -E '^#' docs/WORKFLOW.md | grep -i 'Architecture-aligned' | grep -qi 'fix lane\|sdd-fix' \
+grep -E '^#' docs/agents/WORKFLOW.md | grep -i 'Architecture-aligned' | grep -qi 'fix lane\|sdd-fix' \
   && fail "R14: the ADR-citation heading overlaps F05's fix-lane heading" || true
 pass "R14 workflow_doc"
 
