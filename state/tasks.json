@@ -2401,7 +2401,8 @@
           "sdd": true,
           "autonomous": true,
           "depends_on": [
-            "E39-F01"
+            "E39-F01",
+            "E39-F02"
           ],
           "spec_path": "specs/epics/E39-docs-for-humans/F03-workflow-split/"
         },
