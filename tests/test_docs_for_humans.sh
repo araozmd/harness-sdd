@@ -1075,11 +1075,12 @@ section_diagram() {
   echo "@@COUNT $_n"
   printf '%s\n' "$_s" | mermaid_blocks
 }
-# diagram_problems <doc> <heading> <tokens, one per line> <prose tokens, one per line>
+# diagram_problems <doc> <heading> <tokens, one per line> <prose tokens, one per line> [<type>, default flowchart]
 diagram_problems() {
   _d="$(section_diagram "$1" "$2")"
   [ "$(printf '%s\n' "$_d" | sed -n '1p')" = "@@COUNT 1" ] || echo "$2 does not hold exactly one mermaid block"
-  printf '%s\n' "$_d" | sed -n '3p' | sed 's/^[[:space:]]*//' | grep -qE '^flowchart( |$)' || echo "the $2 diagram is not a flowchart"
+  _ty="${5:-flowchart}"
+  printf '%s\n' "$_d" | sed -n '3p' | sed 's/^[[:space:]]*//' | grep -qE "^$_ty( |\$)" || echo "the $2 diagram is not a $_ty"
   while IFS= read -r _w; do
     [ -n "$_w" ] || continue
     printf '%s\n' "$_d" | grep -qF -- "$_w" || echo "the $2 diagram does not name '$_w'"
@@ -1485,6 +1486,48 @@ F03_R2_human_shape() {
   DOCS_DIR="$ROOT/docs"
   pass "F03_R2_human_shape"
 }
+
+# F03_R3 — the feature state machine diagram. wf_state_problems <doc> adds the done-edge rules.
+WF_STATE_TOKENS='pending
+spec-ready
+in-progress
+in-review
+done
+autonomous
+rejects
+builder-heavy
+approves
+merges'
+WF_STATE_PROSE='sdd: true
+sdd: false
+--gated'
+wf_state_problems() {
+  diagram_problems "$1" "## The feature state machine" "$WF_STATE_TOKENS" "$WF_STATE_PROSE" stateDiagram-v2
+  _d="$(section_diagram "$1" "## The feature state machine")"
+  [ "$(printf '%s\n' "$_d" | grep -c -- '--> done')" -eq 1 ] || echo "the state diagram does not hold exactly one '--> done' line"
+  printf '%s\n' "$_d" | grep -- '--> done' | grep -qF 'merge' || echo "the '--> done' line does not name the merge"
+  printf '%s\n' "$_d" | grep -qF 'done: Reviewer approves' && echo "the state diagram says done: Reviewer approves"
+  return 0
+}
+F03_R3_state_diagram() {
+  _bad="$(wf_state_problems "$ROOT/$WF_H")"
+  [ -z "$_bad" ] || fail "F03 R3: $(printf '%s' "$_bad" | tr '\n' ';')"
+  rm -rf "$T/f33"; mkdir -p "$T/f33"
+  _m() { sed "$2" "$ROOT/$WF_H" > "$T/f33/m.md"
+         cmp -s "$ROOT/$WF_H" "$T/f33/m.md" && fail "F03 R3: setup: the mutant $1 did not apply"
+         [ -n "$(wf_state_problems "$T/f33/m.md")" ] || fail "F03 R3: the state-diagram check misses the mutant $1"; }
+  _m done-edge 's/in_review --> done: the PR merges — set-status done with the merge commit as evidence/in_review --> done: the Reviewer approves/'
+  _m type 's/^stateDiagram-v2$/flowchart TB/'
+  _m heavy 's/, builder-heavy after after_rejections rejections//'
+  _m gated 's/--gated/the gated flag/g'
+  _m sddfalse 's/`sdd: false`/the no-spec flag/g'
+  # a second line targeting done, and the pinned old label
+  awk '/^    done --> \[\*\]$/ { print "    in_progress --> done: skip"; } { print }' "$ROOT/$WF_H" > "$T/f33/m.md"
+  [ -n "$(wf_state_problems "$T/f33/m.md")" ] || fail "F03 R3: the state-diagram check misses a second '--> done' line"
+  awk '/^    done --> \[\*\]$/ { print "    note right of done: done: Reviewer approves and merges"; } { print }' "$ROOT/$WF_H" > "$T/f33/m.md"
+  wf_state_problems "$T/f33/m.md" | grep -qF 'done: Reviewer approves' || fail "F03 R3: the state-diagram check misses the old 'done: Reviewer approves' label"
+  pass "F03_R3_state_diagram"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1516,6 +1559,7 @@ row F02_R11_version_and_changelog
 row F03_R1_counterpart_announcement; row F03_R1_counterpart_headings_in_order; row F03_R1_counterpart_retargets
 row F03_R6_suites_cite_counterpart
 row F03_R2_human_shape
+row F03_R3_state_diagram
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
