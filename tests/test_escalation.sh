@@ -946,7 +946,7 @@ docs_agree_with_the_shipped_default() {
   # Nor may any line stating the DEFAULT still say 0. The docs legitimately mention 0 as the
   # off-switch, which is why this keys off "default"/"shipped" rather than the digit alone.
   for _d in "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md" "$SRC/harness.config.yaml" \
-            "$SRC/agents/orchestrator.md" "$SRC/harness-install.sh" "$SRC/docs/INSTALL.md"; do
+            "$SRC/agents/orchestrator.md" "$SRC/harness-install.sh" "$SRC/docs/agents/INSTALL.md"; do
     _bad="$(grep -i 'after_rejections' "$_d" | grep -iE 'default|shipped value' | grep -v '2' || true)"
     [ -z "$_bad" ] || fail "F05-R11: $_d states a non-2 default for after_rejections: $_bad"
   done
@@ -964,7 +964,7 @@ no_doc_claims_the_harness_cannot_check() {
   # themselves. It now does work it out. A claim repeated in six files is six defects.
   for _d in "$SRC/harness.config.yaml" "$SRC/harness-install.sh" "$SRC/tools/builder-role.sh" \
             "$SRC/agents/orchestrator.md" "$SRC/docs/WORKFLOW.md" "$SRC/CHANGELOG.md" \
-            "$SRC/docs/INSTALL.md"; do
+            "$SRC/docs/agents/INSTALL.md"; do
     # Several phrasings of the same superseded claim, because it was written differently in
     # each of the six files — matching only one spelling is how a sweep misses five sites.
     _bad="$(grep -in 'deliberately does .*infer\|does not try to infer\|not infer this for you\|cannot verify that assertion\|BEFORE YOU ENABLE IT\|the opt-in is your assertion' "$_d" || true)"
@@ -976,7 +976,7 @@ no_doc_claims_the_harness_cannot_check() {
   # knew only the "harness cannot check" phrasing, so docs/INSTALL.md kept telling operators
   # to invoke the heavy Builder by hand while the test stayed green. One sweep, both classes.
   for _d in "$SRC/harness.config.yaml" "$SRC/agents/orchestrator.md" "$SRC/docs/WORKFLOW.md" \
-            "$SRC/docs/INSTALL.md" "$SRC/tools/builder-role.sh"; do
+            "$SRC/docs/agents/INSTALL.md" "$SRC/tools/builder-role.sh"; do
     _bad="$(grep -in 'Nothing routes to it automatically\|you invoke it by hand\|is a separate feature' "$_d" || true)"
     [ -z "$_bad" ] || fail "F05-R11: $_d still says escalation is manual-only: $_bad"
   done
@@ -1005,7 +1005,7 @@ no_doc_claims_the_harness_cannot_check() {
   # Positive control #1: the docs describe the mechanism that replaced it.
   _seen=0
   for _d in "$SRC/harness.config.yaml" "$SRC/docs/WORKFLOW.md" "$SRC/agents/orchestrator.md" \
-            "$SRC/docs/INSTALL.md"; do
+            "$SRC/docs/agents/INSTALL.md"; do
     grep -q 'escalation-arming' "$_d" && _seen=$((_seen + 1))
   done
   [ "$_seen" -ge 4 ] \
@@ -1029,7 +1029,7 @@ no_doc_claims_the_harness_cannot_check() {
 effort_is_named_in_the_operator_docs() {
   _inst="$T/doc-install"
   awk 'BEGIN{h="### Codex reasoning effort"} /^#{2,} /{k=(index($0,h)>0);next} k' \
-    "$SRC/docs/INSTALL.md" | tr '\n' ' ' > "$_inst"
+    "$SRC/docs/agents/INSTALL.md" | tr '\n' ' ' > "$_inst"
   [ -s "$_inst" ] || fail "E99-F163: the Codex reasoning effort section did not extract — the heading moved"
   grep -qiE 'effort difference alone' "$_inst" \
     || fail "E99-F163: docs/INSTALL.md's Codex effort section does not say an effort difference alone arms"
@@ -1040,7 +1040,7 @@ effort_is_named_in_the_operator_docs() {
   # section kept saying a single "own resolver" checks whether "the model" is stronger.
   _bh="$T/doc-builder-heavy"
   awk 'BEGIN{h="### `builder-heavy`"} /^#{2,} /{k=(index($0,h)>0);next} k' \
-    "$SRC/docs/INSTALL.md" | tr '\n' ' ' > "$_bh"
+    "$SRC/docs/agents/INSTALL.md" | tr '\n' ' ' > "$_bh"
   [ -s "$_bh" ] || fail "E99-F163 F1c: the builder-heavy section did not extract — the heading moved"
   grep -qiE 'own[[:space:]]+resolvers' "$_bh" \
     || fail "E99-F163 F1c: docs/INSTALL.md still says a single 'own resolver'"
@@ -1070,7 +1070,7 @@ effort_is_named_in_the_operator_docs() {
 
   # And the superseded gap statement is gone. The positive anchors above prove the current rule
   # IS documented, so this negative cannot pass merely because escalation went undocumented.
-  for _d in "$SRC/docs/INSTALL.md" "$SRC/docs/WORKFLOW.md"; do
+  for _d in "$SRC/docs/agents/INSTALL.md" "$SRC/docs/WORKFLOW.md"; do
     grep -qi 'compares `model` only' "$_d" \
       && fail "E99-F163: $_d still says the verdict compares model only"
   done
@@ -1744,7 +1744,7 @@ F182_R12_docs_version_changelog() {
 
   _t="$T/f182-r12"; install_to "$_t" "$T/ch-f182-r12" --agents=claude
   _wf="$(tr '\n' ' ' < "$_t/.harness/docs/WORKFLOW.md" | tr -s ' ')"
-  _in="$(tr '\n' ' ' < "$_t/.harness/docs/INSTALL.md" | tr -s ' ')"
+  _in="$(tr '\n' ' ' < "$_t/.harness/docs/agents/INSTALL.md" | tr -s ' ')"
   _rd="$(tr '\n' ' ' < "$SRC/docs/agents/README.md" | tr -s ' ')"
   [ -n "$_wf" ] && [ -n "$_in" ] || fail "F182-R12 setup: the installed WORKFLOW.md / INSTALL.md is missing"
 

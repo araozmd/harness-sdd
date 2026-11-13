@@ -379,10 +379,10 @@ folded_section() {
 }
 
 test_install_doc_contract() {
-  _section '## Harness feedback (`feedback:`) — on by default' "$SRC/docs/INSTALL.md" > "$T/install-feedback-section.txt"
+  _section '## Harness feedback (`feedback:`) — on by default' "$SRC/docs/agents/INSTALL.md" > "$T/install-feedback-section.txt"
   [ -s "$T/install-feedback-section.txt" ] \
     || fail "R9: could not extract the '## Harness feedback' section from docs/INSTALL.md — heading anchor is stale"
-  _isec="$(folded_section '## Harness feedback (`feedback:`) — on by default' "$SRC/docs/INSTALL.md")"
+  _isec="$(folded_section '## Harness feedback (`feedback:`) — on by default' "$SRC/docs/agents/INSTALL.md")"
 
   printf '%s' "$_isec" | grep -qF 'only** the bare, unquoted, lower-case token `true` enables reporting' \
     || fail "R9: INSTALL.md feedback section does not state that only the bare token true enables"
@@ -406,7 +406,7 @@ test_install_doc_contract() {
 }
 
 test_umbrella_resolution_docs() {
-  _isec="$(folded_section '## Harness feedback (`feedback:`) — on by default' "$SRC/docs/INSTALL.md")"
+  _isec="$(folded_section '## Harness feedback (`feedback:`) — on by default' "$SRC/docs/agents/INSTALL.md")"
   printf '%s' "$_isec" | grep -qF '`feedback:` block governs sessions rooted in that child' \
     || fail "R10: INSTALL.md feedback section does not state that the child's own block governs"
   printf '%s' "$_isec" | grep -qF 'no inheritance from the coordinator' \

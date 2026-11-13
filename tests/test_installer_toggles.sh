@@ -666,7 +666,7 @@ test_reports_once() {
 
 # ── R13 — the docs and the installer's own text document the second question ──
 test_docs_document_backend_prompt() {
-  _doc="$SRC/docs/INSTALL.md"
+  _doc="$SRC/docs/agents/INSTALL.md"
   for _s in 'execution.builder.backend' '--builder-backend' 'HARNESS_BUILDER_BACKEND' \
             'in-session' 'delegate_cmd'; do
     grep -qF -e "$_s" "$_doc" || fail "R13: docs/INSTALL.md does not mention '$_s'"
@@ -1434,7 +1434,7 @@ test_pr_loop_reports_once() {
 
 # ── F02 R13 — the docs and the installer's own text document the third question ─
 test_docs_document_pr_loop_prompt() {
-  _doc="$SRC/docs/INSTALL.md"
+  _doc="$SRC/docs/agents/INSTALL.md"
   for _s in 'pr_loop.enabled' '--pr-loop' 'HARNESS_PR_LOOP_ENABLED' 'Codex GitHub App'; do
     grep -qF -e "$_s" "$_doc" || fail "F02 R13: docs/INSTALL.md does not mention '$_s'"
   done

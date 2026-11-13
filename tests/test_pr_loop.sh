@@ -1995,24 +1995,24 @@ test_source_layout_glue_present() {                   # R49
 }
 
 test_docs_document_pr_loop() {                        # R50
-  for _d in "$SRC/README.md" "$SRC/docs/INSTALL.md" "$SRC/docs/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
+  for _d in "$SRC/README.md" "$SRC/docs/agents/INSTALL.md" "$SRC/docs/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
     grep -qF '/sdd-pr-loop' "$_d" || fail "R50: $_d does not list /sdd-pr-loop"
     grep -qF 'Codex GitHub App' "$_d" || fail "R50: $_d does not state the Codex GitHub App precondition"
   done
-  grep -qF 'pr_loop.enabled' "$SRC/docs/INSTALL.md" || fail "R50: INSTALL.md does not document the gate"
+  grep -qF 'pr_loop.enabled' "$SRC/docs/agents/INSTALL.md" || fail "R50: INSTALL.md does not document the gate"
   # the OPT-IN default is a documented contract, not an implementation detail
-  for _d in "$SRC/README.md" "$SRC/docs/INSTALL.md" "$SRC/docs/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
+  for _d in "$SRC/README.md" "$SRC/docs/agents/INSTALL.md" "$SRC/docs/WORKFLOW.md" "$SRC/docs/HARNESS.md"; do
     grep -qiF 'opt-in' "$_d" || fail "R50: $_d does not state that pr_loop.enabled is opt-in"
   done
-  grep -qF 'enabled: false' "$SRC/docs/INSTALL.md" \
+  grep -qF 'enabled: false' "$SRC/docs/agents/INSTALL.md" \
     || fail "R50: INSTALL.md does not show the seeded opt-in default"
   for _k in auto_merge max_rounds blocking_severities merge_strategy; do
-    grep -qF "$_k" "$SRC/docs/INSTALL.md" || fail "R50: INSTALL.md does not document pr_loop.$_k"
+    grep -qF "$_k" "$SRC/docs/agents/INSTALL.md" || fail "R50: INSTALL.md does not document pr_loop.$_k"
   done
   for _v in HARNESS_POLL_INTERVAL HARNESS_POLL_CEILING HARNESS_FIRST_RESPONSE HARNESS_DRY_RUN; do
-    grep -qF "$_v" "$SRC/docs/INSTALL.md" || fail "R50: INSTALL.md does not document $_v"
+    grep -qF "$_v" "$SRC/docs/agents/INSTALL.md" || fail "R50: INSTALL.md does not document $_v"
   done
-  grep -qF 'jq' "$SRC/docs/INSTALL.md" || fail "R50: INSTALL.md does not state the jq precondition"
+  grep -qF 'jq' "$SRC/docs/agents/INSTALL.md" || fail "R50: INSTALL.md does not state the jq precondition"
   pass "R50 README + INSTALL + WORKFLOW + HARNESS document the command, gate, knobs, preconditions"
 }
 

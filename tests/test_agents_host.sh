@@ -827,7 +827,7 @@ test_docs_document_host_mode() {
   _x="$(sandbox docs)"; _t="$_x/t"; mkdir -p "$_t"
   hrun "$_x" CLAUDECODE=1 -- --agents=host "$_t" >/dev/null 2>&1 || fail "R27: install failed"
   # The docs must SHIP (the installed copy), not merely exist in the source tree.
-  _mi="$_t/.harness/docs/INSTALL.md"
+  _mi="$_t/.harness/docs/agents/INSTALL.md"
   for _s in '--agents=host' 'HARNESS_HOST_AGENT' '--print-agents' 'CLAUDECODE'; do
     grep -qF -e "$_s" "$_mi" || fail "R27: installed docs/INSTALL.md does not document $_s"
   done
@@ -1152,7 +1152,7 @@ test_orphan_metadata_grants_no_removal() {
 # cannot satisfy the check, and phrased as SUBSTANCE (the three cases the default has),
 # not as a keyword hunt.
 test_docs_document_fresh_default() {
-  _doc="$SRC/docs/INSTALL.md"
+  _doc="$SRC/docs/agents/INSTALL.md"
   _sec="$(awk '/^### The fresh-install default/{f=1;next} /^#{2,3} /{f=0} f' "$_doc")"
   [ -n "$_sec" ] \
     || fail "R10: docs/INSTALL.md has no '### The fresh-install default' section"
@@ -1213,7 +1213,7 @@ test_docs_document_fresh_default() {
 # This fact shipped only inside a source header comment; it is the first question the new
 # default provokes, so the doc must carry the command AND the fact that a re-run removes.
 test_docs_document_retoggle_path() {
-  _doc="$SRC/docs/INSTALL.md"
+  _doc="$SRC/docs/agents/INSTALL.md"
   _sec="$(awk '/^### Changing the selection later/{f=1;next} /^#{2,3} /{f=0} f' "$_doc")"
   [ -n "$_sec" ] \
     || fail "R11: docs/INSTALL.md has no '### Changing the selection later' section"
@@ -1229,7 +1229,7 @@ test_docs_document_retoggle_path() {
   # of the harness reads).
   _x="$(sandbox f2docs)"; _t="$_x/t"; mkdir -p "$_t"
   hrun "$_x" CLAUDECODE=1 -- --agents=host "$_t" >/dev/null 2>&1 || fail "R11: install failed"
-  grep -qF 'Changing the selection later' "$_t/.harness/docs/INSTALL.md" \
+  grep -qF 'Changing the selection later' "$_t/.harness/docs/agents/INSTALL.md" \
     || fail "R11: the installed docs/INSTALL.md does not carry the re-toggle section"
   return 0
 }

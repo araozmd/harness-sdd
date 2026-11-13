@@ -113,7 +113,7 @@ grep -qxF 'openrouter/openai/gpt-5-mini' "$T/out2" || fail "R10: the last fixtur
 ok "helper_parse_parity (R10)"
 
 # ── R11: INSTALL.md states the 2.x facts, each in the section that owns it ────────────────
-INSTALL="$SRC/docs/INSTALL.md"
+INSTALL="$SRC/docs/agents/INSTALL.md"
 FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 section() {  # section <heading text> : the body of that heading, fence-aware
   awk "$FENCE_AWK"'

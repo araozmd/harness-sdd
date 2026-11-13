@@ -778,7 +778,7 @@ test_shipping_artifacts() {
     || fail "R12: the CHANGELOG [0.86.0] section does not name tools/harness-report.sh"
 
   _is="$T/install-feedback.txt"
-  _section '## Harness feedback' "$SRC/docs/INSTALL.md" > "$_is"
+  _section '## Harness feedback' "$SRC/docs/agents/INSTALL.md" > "$_is"
   [ -s "$_is" ] || fail "R12: could not extract the '## Harness feedback' section from docs/INSTALL.md"
   if grep -qF 'No reporter ships yet' "$_is"; then
     fail "R12: the INSTALL.md feedback section still carries the stale 'No reporter ships yet' sentence"
@@ -797,7 +797,7 @@ test_shipping_artifacts() {
   # is recorded N/A. It is deliberately NOT a failing assertion — the load-bearing half is
   # the working-file negative below, which always runs, so reverting the sentence reds in
   # every environment.
-  _now="$(grep -cF 'Reporting stays inert until' "$SRC/docs/INSTALL.md")" || _now=0
+  _now="$(grep -cF 'Reporting stays inert until' "$SRC/docs/agents/INSTALL.md")" || _now=0
   [ "$_now" = "0" ] \
     || fail "R12: the working docs/INSTALL.md still states reporting is inert ($_now line(s))"
   _base=""
@@ -805,9 +805,9 @@ test_shipping_artifacts() {
     if git -C "$SRC" rev-parse --verify --quiet "$_ref" >/dev/null 2>&1; then _base="$_ref"; break; fi
   done
   _base_file="$T/r12-base-install.md"
-  if [ -n "$_base" ] && git -C "$SRC" show "$_base:docs/INSTALL.md" > "$_base_file" 2>/dev/null; then
+  if [ -n "$_base" ] && git -C "$SRC" show "$_base:docs/agents/INSTALL.md" > "$_base_file" 2>/dev/null; then
     _old="$(grep -cF 'Reporting stays inert until' "$_base_file")" || _old=0
-    if cmp -s "$_base_file" "$SRC/docs/INSTALL.md"; then
+    if cmp -s "$_base_file" "$SRC/docs/agents/INSTALL.md"; then
       _ctrl="$_base already carries the working copy (post-merge); base-liveness N/A; working-file negative ran"
     elif [ "$_old" -ge 1 ]; then
       _ctrl="$_base carries the real pre-change sentence on $_old line(s) (recorded, informational)"

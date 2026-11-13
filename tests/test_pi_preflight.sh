@@ -1027,7 +1027,7 @@ test_docs() {
   grep -q '^## \[0.95.0\]' "$SRC/CHANGELOG.md" || fail "R12: the ## [0.95.0] CHANGELOG heading is gone"
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F04' || fail "R12: the 0.95.0 changelog entry does not name E35-F04"
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | tr '\n' ' ' | grep -q 'package-lock.json' || fail "R12: the changelog does not name the npm lockfiles"
-  _sec="$(awk '/^### pi$/{k=1;next} /^#{1,3} /{k=0} k' "$SRC/docs/INSTALL.md")"
+  _sec="$(awk '/^### pi$/{k=1;next} /^#{1,3} /{k=0} k' "$SRC/docs/agents/INSTALL.md")"
   for w in '--pi-deps=check' '--pi-deps=install' '--pi-deps=skip' 'HARNESS_PI_DEPS' 'pi install -l -a npm:pi-subagents@0.78.0' 'cannot approve' 'package-lock.json' 'user-scope' 'has no effect' '~/.agents'; do
     printf '%s\n' "$_sec" | grep -qF -- "$w" || fail "R12: the INSTALL.md pi section does not mention '$w'"
   done

@@ -148,7 +148,7 @@ pass "harness-owned-paths.sh excludes specs/glossary.md at the source (R10) [R10
 
 # ── E28-F02 R12: the derived Planner draft is project-owned, not harness drift ─────
 # draft_untracked_does_not_trip_guard
-# /sdd-plan writes .harness/umbrella.manifest.draft.yaml, and docs/INSTALL.md commits the
+# /sdd-plan writes .harness/umbrella.manifest.draft.yaml, and docs/agents/INSTALL.md commits the
 # planning baseline only AFTER /sdd-drill — so between those steps the draft is untracked.
 # The whole .harness/ tree is claimed as body, so the draft hard-failed the MANDATORY gate
 # on a file the Planner legitimately wrote (P1 finding 4043317437). The exclusion is in the

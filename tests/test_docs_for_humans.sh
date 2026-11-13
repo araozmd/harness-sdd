@@ -963,6 +963,22 @@ F02_R1_counterpart_retargets() {
   pass "F02_R1_counterpart_retargets"
 }
 
+# F02_R6 — each suite of the coupling table reads the counterpart. <root> lets a mutant mirror be scanned.
+INSTALL_SUITES="agents_host escalation feedback_config feedback_report greenfield install installer_toggles opencode_compat pi_agents pi_front pi_integrity pi_preflight pr_loop promote reporting_rule sdd_fix_parallel init_drift_guard planner_topology"
+suites_missing_counterpart() {
+  for _s in $INSTALL_SUITES; do
+    grep -qF 'docs/agents/INSTALL.md' "$1/tests/test_$_s.sh" || echo "tests/test_$_s.sh"
+  done
+}
+F02_R6_suites_cite_counterpart() {
+  _bad="$(suites_missing_counterpart "$ROOT")"
+  [ -z "$_bad" ] || fail "F02 R6: these suites do not cite docs/agents/INSTALL.md: $_bad"
+  rm -rf "$T/f6"; mkdir -p "$T/f6/tests"; cp "$ROOT"/tests/test_*.sh "$T/f6/tests/"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f6/tests/test_promote.sh" > "$T/f6/p.new" && mv "$T/f6/p.new" "$T/f6/tests/test_promote.sh"
+  suites_missing_counterpart "$T/f6" | grep -qF 'tests/test_promote.sh' || fail "F02 R6: the check misses a suite still citing docs/INSTALL.md"
+  pass "F02_R6_suites_cite_counterpart"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -983,6 +999,7 @@ row R8_move_link_retarget_counts_as_moved; row R8_move_exit2_usage; row R8_move_
 row R10_agents_md_rows; row R10_repo_citations_resolve
 row R12_version_minor_and_changelog
 row F02_R1_counterpart_announcement; row F02_R1_counterpart_headings_in_order; row F02_R1_counterpart_retargets
+row F02_R6_suites_cite_counterpart
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"

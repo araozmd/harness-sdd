@@ -672,7 +672,7 @@ test_docs() {
   awk '/^## \[0.96.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F05' || fail "R12: the 0.96.0 changelog entry does not name E35-F05"
   # F04's entry still exists and still names E35-F04 (PP's R12 relies on it)
   awk '/^## \[0.95.0\]/{k=1;next} /^## \[/{k=0} k' "$SRC/CHANGELOG.md" | grep -q 'E35-F04' || fail "R12: the 0.95.0 changelog entry no longer names E35-F04"
-  _sec="$(awk '/^### pi$/{k=1;next} /^#{1,3} /{k=0} k' "$SRC/docs/INSTALL.md")"
+  _sec="$(awk '/^### pi$/{k=1;next} /^#{1,3} /{k=0} k' "$SRC/docs/agents/INSTALL.md")"
   ! printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qF 'not an integrity pin' || fail "R12: the INSTALL.md pi section still says 'not an integrity pin'"
   for w in 'byte-verified' 'npm command override' 'existing .pi/npm/node_modules' 'unexpected entry in .pi/npm' 'not canonical' 'unverified' 'pinned (user)' 'mirror' 'not re-verified' 'cache' 'other registry packages' 'remove'; do
     printf '%s\n' "$_sec" | tr '\n' ' ' | grep -qF -- "$w" || fail "R12: the INSTALL.md pi section does not mention '$w'"
