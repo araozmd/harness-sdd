@@ -1524,17 +1524,18 @@
         {
           "id": "E99-F183",
           "title": "Repoint harness-sdd URL defaults to the renamed araozmd/harness-loop repo (update-check remote, feedback.repo seed) + refresh social preview tagline",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "82e91af52bf10bce3e4dee06acd51bac6631a780",
+            "ref": "82e91af52bf10bce3e4dee06acd51bac6631a780",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": false,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E99-maintenance/F183-repoint-harness-loop-url/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (332)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E99-F183 done --evidence <merge-ref>`",
-            "pr": "332"
-          }
+          "spec_path": "specs/epics/E99-maintenance/F183-repoint-harness-loop-url/"
         }
       ]
     },
