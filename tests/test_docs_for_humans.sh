@@ -1008,6 +1008,14 @@ F02_R10_registry_and_index() {
 }
 
 # F02_R2 — the human INSTALL's shape. <file> lets a mutant copy under $T be checked.
+HUMAN_INSTALL_HEADS='## Prerequisites
+## Install
+## Choose your front-ends
+## Bootstrap (first run)
+## Upgrade
+## Umbrella (many repositories)
+## Ownership
+## Further reading'
 HUMAN_INSTALL_ANCHORS='agents/INSTALL.md#pi
 agents/INSTALL.md#retiring-gemini
 agents/INSTALL.md#host-detection----agentshost-opt-in
@@ -1018,26 +1026,20 @@ agents/INSTALL.md#per-role-model-routing-models--opt-in
 agents/INSTALL.md#self-mode----self-harness-developers-only
 agents/INSTALL.md#config-migration-on-upgrade-non-destructive
 agents/INSTALL.md#layout--ownership'
-install_shape_problems() {
+# shape_problems <file> <## headings, one per line> <further-reading anchors, one per line> <counterpart basename>
+shape_problems() {
   _f="$1"
   [ "$(nlines "$_f")" -le 300 ] || echo "exceeds 300 lines"
   sed -n '1p' "$_f" | grep -qE '^# ' || echo "line 1 is not a Markdown H1"
-  sed -n '1,15p' "$_f" | grep -qF '](agents/INSTALL.md)' || echo "no counterpart link within the first 15 lines"
+  sed -n '1,15p' "$_f" | grep -qF "](agents/$4)" || echo "no counterpart link within the first 15 lines"
   _h="$(unfenced "$_f" | grep '^## ')"
-  _want='## Prerequisites
-## Install
-## Choose your front-ends
-## Bootstrap (first run)
-## Upgrade
-## Umbrella (many repositories)
-## Ownership
-## Further reading'
-  [ "$_h" = "$_want" ] || echo "the ## headings are not the eight pinned ones in order"
+  _want="$2"
+  [ "$_h" = "$_want" ] || echo "the ## headings are not the pinned ones in order"
   _fr="$(slice "$_f" "## Further reading")"
   while IFS= read -r _a; do
     printf '%s\n' "$_fr" | grep -qF "]($_a)" || echo "## Further reading does not link $_a"
   done <<EOA
-$HUMAN_INSTALL_ANCHORS
+$3
 EOA
   link_targets "$_f" | while IFS= read -r _t; do
     case "$_t" in ""|\#*|http://*|https://*|mailto:*) continue ;; esac
@@ -1050,19 +1052,19 @@ EOA
 DOCS_DIR="$ROOT/docs"
 F02_R2_human_shape() {
   [ -f "$ROOT/$INSTALL_H" ] || fail "F02 R2: docs/INSTALL.md does not exist"
-  _bad="$(install_shape_problems "$ROOT/$INSTALL_H")"
+  _bad="$(shape_problems "$ROOT/$INSTALL_H" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md)"
   [ -z "$_bad" ] || fail "F02 R2: docs/INSTALL.md: $(printf '%s' "$_bad" | tr '\n' ';')"
   # mutants on private copies: each must be reported
   rm -rf "$T/f2"; mkdir -p "$T/f2/docs"; DOCS_DIR="$T/f2/docs"
   sed 's/^## Ownership$/## What is yours/' "$ROOT/$INSTALL_H" > "$T/f2/docs/a.md"
-  [ -n "$(install_shape_problems "$T/f2/docs/a.md")" ] || fail "F02 R2: the shape check misses a renamed ## heading"
+  [ -n "$(shape_problems "$T/f2/docs/a.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md)" ] || fail "F02 R2: the shape check misses a renamed ## heading"
   grep -vF '#worker-roster-workersroster--opt-in-local-only' "$ROOT/$INSTALL_H" > "$T/f2/docs/b.md"
-  [ -n "$(install_shape_problems "$T/f2/docs/b.md")" ] || fail "F02 R2: the shape check misses a dropped further-reading anchor"
+  [ -n "$(shape_problems "$T/f2/docs/b.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md)" ] || fail "F02 R2: the shape check misses a dropped further-reading anchor"
   { cat "$ROOT/$INSTALL_H"; printf '\n[x](../AGENTS.md)\n'; } > "$T/f2/docs/c.md"
   cp "$ROOT/AGENTS.md" "$T/f2/AGENTS.md"
-  install_shape_problems "$T/f2/docs/c.md" | grep -qF 'leaves docs/' || fail "F02 R2: the shape check misses a link that leaves docs/"
+  shape_problems "$T/f2/docs/c.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md | grep -qF 'leaves docs/' || fail "F02 R2: the shape check misses a link that leaves docs/"
   { printf '# Installing\n'; for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do echo; done; sed -n '2,$p' "$ROOT/$INSTALL_H" | grep -vF '](agents/INSTALL.md)'; printf '\n[agents](agents/INSTALL.md)\n'; } > "$T/f2/docs/d.md"
-  install_shape_problems "$T/f2/docs/d.md" | grep -qF 'first 15 lines' || fail "F02 R2: the shape check misses a counterpart link past line 15"
+  shape_problems "$T/f2/docs/d.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md | grep -qF 'first 15 lines' || fail "F02 R2: the shape check misses a counterpart link past line 15"
   DOCS_DIR="$ROOT/docs"
   pass "F02_R2_human_shape"
 }
@@ -1445,6 +1447,44 @@ F03_R9_registry_and_index() {
     fail "F03 R9: ## Index has no row pairing docs/WORKFLOW.md with docs/agents/WORKFLOW.md"
   pass "F03_R9_registry_and_index"
 }
+
+# F03_R2 — the human WORKFLOW's shape (the generalised shape_problems). <file> lets a mutant copy be checked.
+HUMAN_WF_HEADS='## From idea to task
+## The feature state machine
+## The human gate
+## Build and review
+## The PR review loop
+## When work stops
+## Further reading'
+HUMAN_WF_ANCHORS='agents/WORKFLOW.md#intake--the-step-before-pending-sdd-new
+agents/WORKFLOW.md#epic-lifecycle
+agents/WORKFLOW.md#state-machine
+agents/WORKFLOW.md#the-human-in-the-loop-gate
+agents/WORKFLOW.md#selective-sdd-the-sdd-flag
+agents/WORKFLOW.md#which-builder-runs--deterministic-escalation
+agents/WORKFLOW.md#the-pr-review-loop-sdd-pr-loop
+agents/WORKFLOW.md#parking-a-feature-parked
+agents/WORKFLOW.md#diagnosing-blocked-selection
+agents/WORKFLOW.md#running-in-waves-and-across-machines'
+F03_R2_human_shape() {
+  [ -f "$ROOT/$WF_H" ] || fail "F03 R2: docs/WORKFLOW.md does not exist"
+  _bad="$(shape_problems "$ROOT/$WF_H" "$HUMAN_WF_HEADS" "$HUMAN_WF_ANCHORS" WORKFLOW.md)"
+  [ -z "$_bad" ] || fail "F03 R2: docs/WORKFLOW.md: $(printf '%s' "$_bad" | tr '\n' ';')"
+  rm -rf "$T/f32"; mkdir -p "$T/f32/docs"; DOCS_DIR="$T/f32/docs"
+  _sp() { shape_problems "$1" "$HUMAN_WF_HEADS" "$HUMAN_WF_ANCHORS" WORKFLOW.md; }
+  sed 's/^## When work stops$/## Blocked/' "$ROOT/$WF_H" > "$T/f32/docs/a.md"
+  cmp -s "$ROOT/$WF_H" "$T/f32/docs/a.md" && fail "F03 R2: setup: the renamed-heading mutant did not apply"
+  [ -n "$(_sp "$T/f32/docs/a.md")" ] || fail "F03 R2: the shape check misses a renamed ## heading"
+  grep -vF '#parking-a-feature-parked' "$ROOT/$WF_H" > "$T/f32/docs/b.md"
+  [ -n "$(_sp "$T/f32/docs/b.md")" ] || fail "F03 R2: the shape check misses a dropped further-reading anchor"
+  { cat "$ROOT/$WF_H"; printf '\n[x](../AGENTS.md)\n'; } > "$T/f32/docs/c.md"
+  cp "$ROOT/AGENTS.md" "$T/f32/AGENTS.md"
+  _sp "$T/f32/docs/c.md" | grep -qF 'leaves docs/' || fail "F03 R2: the shape check misses a link that leaves docs/"
+  { sed -n '1p' "$ROOT/$WF_H"; for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do echo; done; sed -n '2,$p' "$ROOT/$WF_H" | grep -vF '](agents/WORKFLOW.md)'; printf '\n[agents](agents/WORKFLOW.md)\n'; } > "$T/f32/docs/d.md"
+  _sp "$T/f32/docs/d.md" | grep -qF 'first 15 lines' || fail "F03 R2: the shape check misses a counterpart link past line 15"
+  DOCS_DIR="$ROOT/docs"
+  pass "F03_R2_human_shape"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1475,6 +1515,7 @@ row F02_R11_version_and_changelog
 # ---- E39-F03
 row F03_R1_counterpart_announcement; row F03_R1_counterpart_headings_in_order; row F03_R1_counterpart_retargets
 row F03_R6_suites_cite_counterpart
+row F03_R2_human_shape
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
