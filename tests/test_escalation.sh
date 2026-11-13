@@ -1745,7 +1745,7 @@ F182_R12_docs_version_changelog() {
   _t="$T/f182-r12"; install_to "$_t" "$T/ch-f182-r12" --agents=claude
   _wf="$(tr '\n' ' ' < "$_t/.harness/docs/WORKFLOW.md" | tr -s ' ')"
   _in="$(tr '\n' ' ' < "$_t/.harness/docs/INSTALL.md" | tr -s ' ')"
-  _rd="$(tr '\n' ' ' < "$SRC/README.md" | tr -s ' ')"
+  _rd="$(tr '\n' ' ' < "$SRC/docs/agents/README.md" | tr -s ' ')"
   [ -n "$_wf" ] && [ -n "$_in" ] || fail "F182-R12 setup: the installed WORKFLOW.md / INSTALL.md is missing"
 
   printf '%s' "$_wf" | grep -qE "reads that front-end's own line[^.]{0,40}ADR-0011" \

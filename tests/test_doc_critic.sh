@@ -15,7 +15,7 @@ SCHEMA="$SRC/store/tasks.schema.json"
 STATE="$SRC/state/tasks.json"
 REVIEWER="$SRC/agents/reviewer.md"
 TEMPLATE="$SRC/specs/_templates/feature.spec.md"
-README="$SRC/README.md"
+README="$SRC/docs/agents/README.md"
 RATIONALE="$SRC/docs/RATIONALE.md"
 FENCE_AWK="$(cat "$SRC/tests/lib/fence.awk")"
 

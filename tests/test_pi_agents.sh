@@ -1101,7 +1101,7 @@ test_pi_dispatch_prose_and_docs() {
     grep -qF -- "$_tok" "$_t/.harness/manifest.txt" || fail "R12c: .harness/manifest.txt lacks '$_tok'"
   done
   # (d) the five docs
-  for _d in README.md AGENTS.md docs/HARNESS.md docs/INSTALL.md docs/WORKFLOW.md; do
+  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/INSTALL.md docs/WORKFLOW.md; do
     grep -qF '.pi/agents' "$SRC/$_d" || fail "R12d: $_d does not mention .pi/agents"
     grep -qF 'pi-dispatch.sh' "$SRC/$_d" || fail "R12d: $_d does not mention pi-dispatch.sh"
     if grep -q 'arrives with E35-F02' "$SRC/$_d"; then fail "R12d: $_d still says role isolation arrives with E35-F02"; fi
@@ -1436,7 +1436,7 @@ test_pi_routing_docs() {
   _t="$(new_target r11d)"; ok_inst --agents=pi "$_t"
   grep -qF 'resolve_pi_thinking' "$_t/.harness/manifest.txt" || fail "R11d: manifest.txt does not name resolve_pi_thinking"
   grep -qF '.pi/agents/builder' "$_t/.harness/manifest.txt" || fail "R11d: manifest.txt does not name the pi unstamped cause"
-  for _d in README.md AGENTS.md docs/HARNESS.md docs/INSTALL.md docs/WORKFLOW.md; do
+  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/INSTALL.md docs/WORKFLOW.md; do
     tr '\n' ' ' < "$SRC/$_d" | grep -qE 'no `model:` or `thinking:`[^.]{0,60}\(E35-F03\)' && fail "R11d: $_d still says role files carry no model:/thinking: (E35-F03)"
   done
   grep -q '^## \[0.94.0\]' "$SRC/CHANGELOG.md" || fail "R11d: CHANGELOG.md lacks ## [0.94.0]"

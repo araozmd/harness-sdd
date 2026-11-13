@@ -1,0 +1,590 @@
+# harness-loop docs for agents
+
+> For agents — exact contracts; humans start at docs/.
+
+The files in this directory hold the exact text agents, tests and the installer rely on:
+exit codes, environment variables, edge cases, precedence rules and the sentences tests pin.
+Each file is the machine counterpart of one human doc. Humans start at
+[docs/README.md](../README.md) and the repository `README.md` (not installed, so not linked).
+
+## Index
+
+| Human doc | Machine counterpart | What moved |
+|---|---|---|
+| `README.md` | `docs/agents/README.md` | Every section of the 0.109 README except the title, the loop diagram, quick start, the short CLI table and the documentation links |
+
+## Conventions
+
+Every slice of the docs-for-humans work follows these rules; the suite
+`tests/test_docs_for_humans.sh`, `tools/doc-cite-check.py` and `tools/docs-move-check.sh`
+enforce the parts that can be checked.
+
+- **C1 Layout** — `docs/<NAME>.md` is the human doc; `docs/agents/<NAME>.md` is its machine
+  counterpart, same basename. The repository `README.md` pairs with this file.
+  `docs/history/` archives measurements. Harness docs have upper-case names (`INSTALL.md`, `WORKFLOW.md`); a lowercase
+  `docs/x.md` in a citation is an external doc and is never checked.
+- **C2 Move verbatim** — contract text moves at paragraph granularity. A moved section keeps
+  its heading line byte-identical and its body byte-identical, except that a relative link
+  target may be retargeted so it resolves from the new location. Never paraphrase a moved
+  sentence; a human doc may add a plain-language restatement, the exact sentence lives here.
+- **C3 Path-only re-point** — a test or citation that pinned moved text changes only the path
+  (`docs/<NAME>.md` → `docs/agents/<NAME>.md`). Patterns, anchors and fail messages do not change, and
+  no assertion is weakened to pass.
+- **C4 Prove it before the PR** — `tools/docs-move-check.sh <base-ref>` exits 0 (no vanished
+  token) and `tools/doc-cite-check.py` exits 0. The Reviewer reruns both.
+- **C5 Human style** — plain language, one idea per paragraph, imperative steps. A line budget
+  per doc (README 150, docs/README.md 60, CONCEPTS 220, BRAND 90, default 300). At least one
+  Mermaid diagram wherever a flow, state machine or structure is described. No filler
+  (`note that`, `it is worth noting`, `in other words`, `basically` and the rest of the suite's
+  list). No incident archaeology: no feature ids, no review-comment ids, no round numbers, no
+  reviewer attributions (`Codex r3`, `Codex #…`; the CLI name itself is fine) — those stay in
+  the counterpart.
+- **C6 Navigation** — a human doc links its counterpart in its first 15 lines; this index lists
+  every file in `docs/agents/`; every relative link under `README.md` and `docs/` resolves.
+- **C7 Shipping** — `docs/` ships to every install, so `docs/agents/` ships with it. `assets/`
+  and the repository README do not ship, so no file under `docs/` links or embeds anything
+  under `assets/` by a relative path. Links from `docs/` to other files outside the installed
+  body are a known limit, not yet enforced, and are handled per slice.
+  The one exception is `docs/BRAND.md`, which may embed art by an absolute canonical URL
+  (`https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/…` or
+  `https://github.com/araozmd/harness-loop/blob/main/assets/…`); those resolve in an
+  installed target once the file is on `main`.
+- **C8 Brand** — the name `harness-loop` appears in the README heading (the wordmark alt text), the wordmark and
+  `docs/BRAND.md`; the tagline is authored in `docs/BRAND.md` and copied into the README.
+  Installed names never change.
+
+## Moved from the README (0.109)
+
+The [0.78.1 baseline](../BASELINE-0.78.1.md) preserves the historical five-front-end
+inventory and its validation limits. Gemini CLI legacy installer emitters remain retired;
+Antigravity is supported natively via shared `.agents/skills/` units and dynamic subagent dispatch.
+See [upgrade guidance](../INSTALL.md#retiring-gemini)
+for selection migration and preservation of customized legacy files.
+
+## How it works
+
+An interactive **intake** (Inception) turns a raw idea into a seeded `pending` task;
+from there the roles move it through files, each in a clean context:
+
+```mermaid
+flowchart LR
+    project(["whole project"]) -->|/sdd-plan| Planner["Planner<br/>(vision + ADRs)"]
+    Planner --> draft["draft epics"]
+    draft -->|/sdd-drill| Driller["Driller<br/>(epic → features)"]
+    Driller --> pending
+
+    idea(["raw idea"]) -->|/sdd-new| Inception["Inception<br/>(intake)"]
+    Inception --> pending["pending<br/>(task)"]
+
+    pending -->|/sdd-next| Orchestrator["Orchestrator<br/>(state)"]
+    Orchestrator --> Architect["Architect<br/>(specs)"]
+    Architect --> Builder["Builder<br/>(code)"]
+    Builder --> Reviewer["Reviewer<br/>(verify)"]
+    Scout["Scout<br/>(read-only recon)"] -.assists.-> Orchestrator
+
+    fix(["quick fix"]) -->|/sdd-fix| Builder
+    fixes(["ready E99 fixes"]) -->|/sdd-fix-parallel| Orchestrator
+```
+
+Specs follow a **Product → Epic → Feature** hierarchy, where each feature is a
+4-file spec (`.spec` / `.plan` / `.tasks` / `.tests`) with **EARS** acceptance
+criteria and full requirement→test **traceability**. When the project has an
+architecture (`/sdd-plan`), each feature spec also **cites the architecture decisions
+(ADRs) it touches** in a `## Architecture alignment` section. See `docs/SPEC-FORMAT.md`.
+
+Epics carry their own lifecycle — `draft → planned → in-progress → done` (epic-level
+`pending` stays valid as a legacy alias of `planned`). A `draft` epic is an inception
+sketch: the Orchestrator **never selects features from a `draft` epic**, no matter
+what the feature itself says — the foundation for rolling-wave planning (epic
+roadmap: `specs/epics/E06-planning-tier/epic.md`). See `docs/WORKFLOW.md`.
+
+The Reviewer runs a **cross-file consistency** check (a change must not contradict the
+contracts it invokes) and the build↔review loop is **multi-round until green** — see
+`agents/reviewer.md`.
+Parallel Reviewer mutation campaigns use private fixtures so shared tracked files
+remain stable; see `agents/reviewer.md` check 3b.
+
+Three deterministic spec lints gate a feature before the Builder sees it —
+`tools/tasks-pair-check.py` (red/green pair shape, ADR-0008), `tools/plan-cite-check.py`
+(every plan row cites an R-id or an ADR, ADR-0009) and `tools/readiness-check.py` (every
+backticked repo-rooted path and symbol it recognises in the plan, tasks and tests resolves or
+is declared created — an unrecognised token is ignored, never flagged, E37-F01); each exits
+0/1/2 and the Reviewer rejects on exit 1.
+
+Before the Builder sees a spec, the Doc-critic also paraphrases it back from the four files
+alone — what it proposes and how the existing system works, per the document — and anything
+the cold reader could not restate is fixed or recorded in the spec as an accepted trade-off
+(E37-F02).
+
+On demand — suggested once per release — `tools/drift-report.py` compares the living documents
+(`specs/product.md`, `specs/architecture.md`, the ADRs) with the tree and writes an advisory
+`progress/drift/<date>.md` naming each backticked repo-rooted path or path:name symbol it
+recognises that the code lacks, and every file in a requested inventory that no document names,
+each with the reconciliation choice (doc or code) left to a human (E37-F03).
+
+## Quick start in this source checkout (Claude Code)
+
+To use the harness in your own project, follow
+[Installing into an existing project](#installing-into-an-existing-project).
+The default local TaskStore requires Unix Python 3 with the stdlib `fcntl` module;
+no third-party Python packages are required.
+
+```bash
+cd harness-sdd
+./init.sh                 # environment gate — must pass
+claude                    # CLAUDE.md → AGENTS.md auto-loads
+# new product? /sdd-plan "<idea>"  # the whole-project inception skill: writes vision/architecture + ADRs and seeds draft epics; >1 deployable also writes a repo-topology ADR + an inert umbrella.manifest.draft.yaml
+# later idea? /sdd-new "<idea>"   # Inception triages it → seeds a pending task
+# deepen one? /sdd-drill <epic-id>  # the per-epic drill-down skill: decomposes a draft epic into features + ADR deltas, then one epic-level approval (draft → planned)
+# quick fix? /sdd-fix "<desc>"   # the lightweight fix lane: seeds an sdd:false fix under the reserved maintenance epic (brief only, no spec) and runs Builder → Reviewer
+# batch fixes? /sdd-fix-parallel # bounded E99 batch: isolated safe fixes overlap; shared/unknown paths serialize
+# then:     /sdd-next            # runs the Orchestrator on the next task
+# PR open?  /sdd-pr-loop <pr>    # drives the Codex review cycle: trigger, background watch, classify, fix, merge
+# triage?   /sdd-triage          # source only; propose, then request human approval
+# defect?   /sdd-report          # report a harness defect (top-level session role)
+```
+
+`init.sh` also tells you when a newer harness ships and, at a terminal, offers to install it (preview, backups, and a check that your config values and `CLAUDE.md`/`AGENTS.md` prose survive) — see [`docs/INSTALL.md`](../INSTALL.md#staying-current--the-update-check-e38-f01).
+
+If `./init.sh` prints a `TaskStore dependency-cycle` warning, follow the closed
+feature/slice path to repair `depends_on`; the check is **warn-only** and does not
+make a structurally valid board fail. If `/sdd-next` selects nothing, its
+`blocked <id> [<reason-code>]` lines explain the relevant dependency, epic,
+human-gate, or scoped-owner gate and finish with a `no actionable work` summary.
+Diagnostics are read-only and do not change selection policy. See
+[Diagnosing blocked selection](../WORKFLOW.md#diagnosing-blocked-selection).
+
+`/sdd-next` uses `tools/next-task.mjs` for deterministic, read-only JSON
+selection. Missing Node or invalid selector output is reported and falls back to
+the preserved Orchestrator prose oracle, so Node is an optional upgrade rather
+than an `init.sh` prerequisite. For direct troubleshooting, run
+`node tools/next-task.mjs --json` (or
+`node .harness/tools/next-task.mjs --json` after installation).
+
+A **new product** starts with whole-project inception: `/sdd-plan` writes the vision,
+architecture and ADRs and seeds draft epics, `/sdd-drill <epic-id>` decomposes one, and
+`/sdd-next` specs and builds. When the architecture names **more than one deployable**,
+`/sdd-plan` also writes a repo-topology ADR and a **`umbrella.manifest.draft.yaml`** that is
+**inert** — its presence does not engage umbrella mode; only a later explicit promotion step
+(E28-F03) does. See
+[Starting from nothing](../INSTALL.md#starting-from-nothing-new-product).
+
+For **later work** in an existing project, `/sdd-new` is the front door: it asks a few
+questions, decides whether the idea is a new epic / feature / task, and writes a
+`pending` entry plus an intent brief — without hand-editing `state/tasks.json`. Then the
+Orchestrator spawns `architect` → (human approves) → `builder` → `reviewer`.
+
+## Supported CLIs
+
+| CLI | Entry file | Sub-agents |
+|---|---|---|
+| **Claude Code** | `CLAUDE.md` → `AGENTS.md` | `.claude/agents/*` (+ `pr-fixer`) + `/sdd-new`, `/sdd-plan`, `/sdd-drill`, `/sdd-fix`, `/sdd-fix-parallel`, `/sdd-next`, `/sdd-report`, `/sdd-pr-loop` |
+| **Codex** | `AGENTS.md` (native) | `.codex/agents/*.toml` roles + the shared repository-local `$sdd-*` skills in `.agents/skills/` (including gated `$sdd-pr-loop`) |
+| **OpenCode** | `AGENTS.md` (native) + `opencode.json` | `opencode.json` agents + `.opencode/command/*`, including `/sdd-test-concurrency` and `/sdd-pr-loop`; it also reads the shared `.agents/skills/` units, so `/sdd-*` resolve from both surfaces; `/sdd-fix-parallel` is opt-in (verified by `/sdd-test-concurrency`) |
+| **Antigravity** | `AGENTS.md` (native) | Dynamic subagents leased via `define_subagent` / `invoke_subagent` from `agents/<role>.md` + `/sdd-*` slash commands via shared `.agents/skills/` |
+| **pi** | `AGENTS.md` (native) | `/sdd-*` prompt templates in `.pi/prompts/` (thin pointers to the shared units) + the shared `.agents/skills/` (`/skill:sdd-*`). Project must be trusted first (`/trust`, or `-a` on a headless run), then `/reload` (or restart pi) in an already-open session. Role isolation: generated `.pi/agents/<role>.md` files for the `pi-subagents` package, with `tools/pi-dispatch.sh` (a separate `pi -p` process per role) as the fallback. |
+
+The tables and workflow prose use the portable `/sdd-*` spelling; in Codex, invoke the
+shared repository skills as `$sdd-next`, `$sdd-new`, `$sdd-plan`, `$sdd-drill`, `$sdd-fix`,
+`$sdd-fix-parallel`, `$sdd-report`, and (when enabled) `$sdd-pr-loop`. For example, enter
+`$sdd-new Add a settings page`, then `$sdd-next`; accompanying text supplies the
+workflow’s `$ARGUMENTS`. OpenCode reads the same shared units, so `/sdd-*` resolve from
+`.agents/skills/` as well as from `.opencode/command/`; in Codex, `/skills` is the
+discovery UI. In Antigravity, skills in `.agents/skills/` are discovered natively as
+`/sdd-*` slash commands, and role handoffs use dynamic subagents (`define_subagent` /
+`invoke_subagent`) with clean contexts loaded from `agents/<role>.md`. The human spec
+approval gate and independent Reviewer verdict apply across all hosts.
+
+`/sdd-pr-loop` and front-end-specific `pr-fixer` glue follow the **PR-policy gate**:
+they are stamped only while `pr_loop.enabled` is `true` in `harness.config.yaml`.
+The gate is **opt-in — a fresh install seeds `false`**. The loop needs the **Codex GitHub App** on the
+repo, an **authed `gh`** and **`jq`**; without them `/sdd-pr-loop` could only fail its own
+preflight, so nothing is written until you set `pr_loop.enabled: true` and re-run the
+installer. An absent block, an absent key or any non-`true` value all mean off.
+OpenCode separately gates `/sdd-fix-parallel` on its concurrency capability
+marker or an explicit override; the shared `sdd-fix-parallel` skill body carries the
+same precondition, so it holds wherever the workflow is invoked in OpenCode. Codex has
+seven standard roles and an eighth native `pr-fixer` only while the PR-loop gate is on.
+It handles each comment in a fresh role context with file-only handoffs. A host unable
+to start that role must report the limitation and handoff path; it cannot claim an
+isolated fix ran.
+
+The harness body — `AGENTS.md`, `agents/`, `specs/`, `progress/`, `init.sh`, the
+stores — is **identical** across all of them. Only the entry filename and the
+sub-agent mechanism differ. Which of these front-ends gets installed is your choice —
+the installer lets you select the agents to support and re-prompts on interactive upgrades
+(see [Installing into an existing project](#installing-into-an-existing-project)).
+
+## Configuring the knowledge base / state
+
+`harness.config.yaml` picks the store backend (no prompt changes when you swap):
+
+| Backend | Status | Notes |
+|---|---|---|
+| `local` | ✅ default | `state/tasks.json` + markdown; Unix Python 3 with stdlib `fcntl` |
+| `obsidian` | ✅ | point a vault at the repo; frontmatter + `[[wikilinks]]` |
+| `jira` | ⏳ stub | contract defined in `store/jira.md`; wire MCP in a follow-up |
+
+A **backend** is *where state lives*. Two optional, **VCS/PM-neutral** seams sit beside it
+(both empty/off by default, so nothing changes unless you opt in):
+
+- **`store.on_write_command`** — a command the Orchestrator runs after every persisted
+  store write (best-effort, never blocks the loop). Point it at a `git push`, a board
+  mirror, or a wrapper doing both. The harness never learns what it does. See
+  `store/local.md` → "Post-write sync".
+- **Project board mirror** — a one-way projection of `state/tasks.json` onto a Kanban
+  board (see below).
+
+## Delegating implementation (execution backend)
+
+By default the **Builder writes code itself**, in whatever CLI you're running — no
+extra dependencies, works for everyone. That's `execution.builder.backend: in-session`.
+
+If you have an external executor (a multi-agent orchestrator, a remote build
+service, anything that takes a spec and produces an implementation), you can hand
+the **Builder phase** off to it without forking any role file:
+
+```yaml
+# harness.config.yaml
+execution:
+  builder:
+    backend: delegate
+    delegate_cmd: "bash path/to/your-executor.sh"
+```
+
+In `delegate` mode the Builder does not write code — it invokes
+`delegate_cmd <feature-id> <abs-spec-path>` and surfaces the result. The executor
+owns implementation (and may own PR creation / review too). On non-zero exit the
+Builder records the failure and hands back to the Orchestrator.
+For briefs with `Source issues`, the command must also consume the file named by
+`HARNESS_BUILDER_HANDOFF` into its executor instructions and report handoff
+acknowledgment plus every resulting PR URL (or no PR), as defined in
+[the Builder contract](../../agents/builder.md#delegate-provenance-extension). Unsupported
+adapters stop before dispatch; other calls retain the two-argument interface.
+
+Scope is deliberate and structural:
+
+- **Only the Builder is delegatable.** The Orchestrator is *never* a key here — it
+  is the loop that reads this config and calls `delegate_cmd`, so it always runs in
+  the host code-agent. Architect / Reviewer / Scout also stay in-session.
+- To make a new role delegatable later, add a sibling key (e.g. `architect:`) — the
+  Orchestrator can never be one.
+
+This is the seam that lets a heavier orchestrator *consume* the harness while the
+harness stays standalone: the harness never learns what the executor is, and a
+single-CLI user is unaffected (they keep the `in-session` default). For a worked
+example, see the multi-cli-orchestrator project, which wires its CLI-routing +
+Codex-PR pipeline in as one such executor.
+
+## Observability (telemetry)
+
+The harness records its own work — per-sub-agent **durations**, build↔review **round
+counts**, and **human spec-approval latency** (the gap between `spec-ready` and a human
+moving it to `in-progress`) — to a zero-dependency JSONL log, and rolls it up into
+reports. It is **on by default** and **best-effort** (a telemetry write never blocks a
+gate or build).
+
+```bash
+python3 tools/telemetry-report.py            # all-granularity summary
+python3 tools/telemetry-report.py weekly      # daily|weekly|monthly|quarterly|semester|annual
+python3 tools/telemetry-report.py session     # this session (also printed at session end)
+```
+
+The log is **local-only / gitignored** runtime data at `<HARNESS_DIR>/telemetry.jsonl`
+(`.harness/telemetry.jsonl` in an installed consumer; the installer seeds a targeted
+`.harness/.gitignore`), configurable via the `telemetry:` block (incl. an `enabled`
+kill-switch) in `harness.config.yaml`. Token/USD cost is out of scope for the portable
+markdown-prompt runtime (a reserved `cost` slot is left for an instrumented SDK runtime).
+See `agents/orchestrator.md` → "## Telemetry".
+
+## Project board mirror
+
+Optionally **mirror** `state/tasks.json` onto an external project board so humans get a
+Kanban view — one issue/work-item per feature, with Status + Epic fields, closing done /
+reopening regressed. It is a **one-way projection**: `tasks.json` stays the source of
+truth and the agents never read the board, so unlike a store backend it never has to be
+reachable for the loop to run. **Opt-in and inert by default.**
+
+```yaml
+# harness.config.yaml
+mirror:
+  board:
+    provider: github-projects   # ""/none (default) · github-projects · jira · azure-boards
+    owner: my-org
+    project_number: 1
+    repo: my-org/specs
+```
+
+```bash
+node tools/sync-board.mjs            # sync the configured provider
+node tools/sync-board.mjs --dry-run  # preview, mutate nothing
+```
+
+`github-projects` (needs `gh`) and Jira Server/Data Center (`jira`, REST + Bearer PAT)
+are implemented mirrors. `azure-boards` remains a recognized no-op **stub**.
+Mirror execution requires Node. Run it automatically after each status change via
+`store.on_write_command`. **Mirror ≠ backend**: a mirror projects local truth outward; a
+backend (`tasks: jira`) *is* the truth. Full contract, the provider table, and column
+configuration: [board mirror contract](../../store/board-mirror.md).
+
+## Source checkout layout
+
+```
+AGENTS.md                    entrypoint (open standard)
+CLAUDE.md                    thin Claude pointer
+opencode.json                OpenCode agents + AGENTS.md instruction
+harness.config.yaml          store backends, hooks, mirror, telemetry, umbrella, feedback
+harness-install.sh           install/upgrade into a target (+ --umbrella, --shared-repo)
+init.sh                      environment verification gate
+agents/                      role prompts (canonical)
+tools/                       shell, Python and Node utilities (next-task.mjs, telemetry-report.py, sync-board.mjs, wait-for-codex.sh, opencode-model-helper.sh, harness-report.sh, sweep-scratch.sh)
+specs/                       product.md, glossary.md, _templates/, epics/<E>/<F>/*.md
+state/                       tasks.json (local TaskStore)
+progress/                    run output + history.md
+store/                       tasks.schema.json, store contract + adapters (local, obsidian, jira) + board-mirror
+docs/                        [RATIONALE.md](docs/RATIONALE.md), SPEC-FORMAT, WORKFLOW, HARNESS, INSTALL, UMBRELLA, CONFIG-LAYERING
+umbrella.manifest.example.yaml   cross-repo coordinator manifest template
+umbrella.gitignore.example       shared-spec-repo .gitignore reference
+.claude/                     generated Claude Code sub-agents + commands + glue manifest
+.codex/agents/               generated native Codex role TOMLs
+.agents/skills/              shared repository-local workflow skills (Codex, Antigravity, OpenCode, pi)
+.pi/prompts/                 pi `/sdd-*` prompt templates (pointers to the shared skills; pi only)
+.pi/agents/                  pi role agents for `pi-subagents` (pointers to `agents/<role>.md`; pi only)
+```
+
+Consumer installs put the body under `.harness/` and generate only selected and
+enabled front-end surfaces. Source `./harness-install.sh --self` defaults to
+**Claude + Codex**; `--agents=claude`, `--agents=codex`, or `--agents=opencode` selects one source set.
+Source references resolve from the repository root, while consumer glue resolves
+from `.harness/`. Existing per-role models survive regeneration. With inherited
+Codex models, the combined source first line stays `blocked`, while Claude Code sessions
+still escalate on their own `claude=raise` line (E99-F182); explicit Claude-only generation
+keeps an `armed` first line. See
+[self mode and optional models](../INSTALL.md#self-mode----self-harness-developers-only).
+
+### Codex PR review loop
+
+`/sdd-pr-loop <pr>` (or `$sdd-pr-loop <pr>` in Codex) drives the Codex review cycle on one open PR: it preflights
+`gh`/auth/`jq`/the PR, posts `@codex review`, launches `tools/wait-for-codex.sh` in the
+**background** (so a review landing minutes later still wakes the session), classifies
+`P0|P1|P2|nit` from the inline findings + review bodies + issue comments, spawns one
+`pr-fixer` per blocking comment, and merges when every gate is green and every remaining
+unresolved thread is Codex-owned. A non-Codex unresolved thread routes to `needs-human`
+and never merges. Both terminal paths, the merge and the `auto_merge: false` hand-back,
+first wait on the PR's **required** checks (`gh pr checks --required`, bounded by
+`HARNESS_POLL_CEILING`). Red or still-pending required CI goes to `needs-human`, never
+to a green summary. Both paths also refuse to go green if a review thread changed during
+that wait, and a merge that was only queued is reconciled and cancelled before the hand-off
+to `needs-human` (if the queue lands it during the reconcile, the PR takes the normal merged path) (details in [docs/WORKFLOW.md](../WORKFLOW.md)).
+
+Policy lives in `harness.config.yaml` under `pr_loop:` — `enabled` (opt-in master gate,
+seeded `false`), `auto_merge`, `max_rounds`, `blocking_severities`, `merge_strategy` —
+each overridable
+per run by `HARNESS_PR_LOOP_ENABLED`, `HARNESS_AUTO_MERGE`, `HARNESS_MAX_ROUNDS`,
+`HARNESS_BLOCKING_SEVERITIES`, `HARNESS_MERGE_STRATEGY`. Execution knobs are env-only:
+`HARNESS_POLL_INTERVAL` (60s), `HARNESS_POLL_CEILING` (900s), `HARNESS_FIRST_RESPONSE`
+(180s — fail fast when the Codex GitHub App never answers),
+`HARNESS_MERGE_VERIFY_CEILING` (180s), `HARNESS_MERGE_VERIFY_INTERVAL` (10s),
+`HARNESS_QUEUE_RECONCILE_CEILING` (300s) and `HARNESS_DRY_RUN`
+(`1` = a read-only rehearsal: every PR, push, label, thread and merge mutation is skipped
+and the round cache is kept apart under `.pr-loop/dry-run/`).
+`gh` and `jq` are required only by this loop; `init.sh` does not check for them.
+
+### Parallel maintenance fixes
+
+`/sdd-fix-parallel` consumes a deterministic bounded batch of ready autonomous
+`sdd:false` fixes already seeded under E99. `fix_lane.max_parallel` defaults to `3`.
+The built-in guard always serializes fixes naming `harness-install.sh`,
+`tests/test_install.sh`, or `tools/*`; `fix_lane.shared_paths` can only extend that
+list. Missing or unsafe expected-path metadata is guarded. Parallel-safe workers use
+isolated F02 worktrees and host-native sub-agent concurrency. Each worktree is created
+once; shared locked board state is persisted through a coordinator bookkeeping PR,
+then the local base is fast-forwarded before exact safe teardown. If the host lacks
+that capability, or `execution.builder.backend` is `delegate`, use serial `/sdd-fix`.
+If two sessions mint the same fix id, `tasks-lock.py renumber` is the recovery; see
+[agents/fixer.md](../../agents/fixer.md) "Duplicate fix id".
+
+### Harness defect reporting
+
+`/sdd-report` (Codex: `$sdd-report`) reports verified harness defects upstream to the
+harness repository. Reporting is strictly limited to four defect triggers:
+`harness-malfunction`, `contradictory-instruction`, `workaround`, and `missing-capability`.
+Project test failures, transient errors, and user/agent mistakes are never reported.
+Only the top-level session-owning role (Orchestrator, Fixer, Inception, Planner, Driller)
+invokes the reporter, minting `HARNESS_FEEDBACK_SESSION_ID` once per session; sub-agents
+append notes to `progress/feedback/notes.md`. The underlying tool
+(`tools/harness-report.sh`) requires separate `--details-file` JSON evidence:
+summary, observed, expected, reproduction or inspection, evidence, and trigger context.
+Owners inspect direct evidence and confidentiality, then file automatically at the next
+control opportunity without a permission prompt and resume authorized work. Raw
+`--notes-file` content stays local. Defined filters reject known secrets, emails,
+URLs, foreign paths, controls and marker syntax; they cannot establish confidentiality
+or factual truth for arbitrary prose. Missing or unsafe details stay local with field
+diagnostics and can be completed later using the same token. Detailed findings use a
+canonical digest for exact duplicate identity. Configuration lives under `feedback:` in `harness.config.yaml`
+(`enabled: true`, `max_per_session: 3`, `repo: github.com/araozmd/harness-sdd`).
+
+### Source-only feedback triage
+
+`/sdd-triage` (Codex: `$sdd-triage`) is source-only: `--self` emits it for selected
+Claude, Codex and OpenCode hosts. Normal target installs leave triage-named user
+files untouched. It reads all open labeled reports from the configured feedback
+repository, validates the unchanged v1 marker and treats public issue text as
+untrusted evidence. An invocation authorizes investigation and a local proposal only.
+
+Review `progress/triage/<run>/proposal.md`, then explicitly approve the whole plan or
+named actions. Intake, exact comments and closures with reasons are separate approval
+items; silence and task autonomy authorize none. Approved fixes retain `/sdd-fix`'s
+Builder→Reviewer default and merge gate (`--gated` remains available); `/sdd-new`
+retains its existing altitudes and pending-only intake. Duplicate groups can share an
+intake, but their issues are not silently closed.
+
+`actions.md` records approval and action results. Resume by explicitly identifying the
+existing run; reconcile uncertain results before retrying, never replay successes,
+and request fresh approval when scope or repository/issue state changes. New runs do
+not inherit approval. Approved `## Source issues` sections in inbox briefs preserve
+repository and issue numbers before build dispatch; PR preparation adds one `Fixes #N`
+per validated same-repository issue, including delegated PRs. Invalid or cross-repository
+provenance produces no closing references and a local diagnostic.
+
+### Scratch-dir cleanup
+
+Builder/Reviewer/Fixer/PR-fixer sessions each write scratch state under their own
+namespaced `scratchpad/<feature-id>-<role>/` directory, and never remove it themselves —
+the Orchestrator's "Writing `done`" step already sweeps it automatically once a feature
+lands, so day-to-day use needs nothing manual. `tools/sweep-scratch.sh [<feature-id>]
+[--apply]` is the tool behind that hook, and also a directly runnable operator command
+for a manual backfill (e.g. after a bulk import, or to reclaim scratch left over before
+this hook existed):
+
+```bash
+sh tools/sweep-scratch.sh              # dry-run, every scratchpad/ entry: report only
+sh tools/sweep-scratch.sh E01-F01      # dry-run, scoped to one feature id
+sh tools/sweep-scratch.sh --apply      # mutate: remove every eligible entry
+sh tools/sweep-scratch.sh E01-F01 --apply   # mutate, scoped to one feature id
+```
+
+Dry-run (no `--apply`) is the default and only reports; `--apply` is the only switch
+that mutates the filesystem. An entry is eligible for removal only once its owning
+feature's TaskStore status is `done`; anything else (not found, not yet `done`, an
+unrecognized directory name, or a symlink escaping `scratchpad/`) is skipped and
+reported, never removed. Requires the `local` TaskStore backend (`store.tasks: local`
+in `harness.config.yaml`) — the tool refuses outright under any other backend.
+Escaped double-quoted mapping keys at the document top level or directly within
+`store:` are refused because the config reader cannot resolve them safely. A board
+containing any malformed feature ID also aborts before scratch is classified or
+deleted.
+
+## Installing into an existing project
+
+```bash
+./harness-install.sh /path/to/your-project
+```
+
+Idempotent install/upgrade: drops the harness body into `<project>/.harness/`, appends
+a marked pointer block to `AGENTS.md` and selected `CLAUDE.md` (your prose
+is preserved), generates the glue for the selected agents, and seeds a runnable
+workspace. Re-run to upgrade — project-authored specs/state are never clobbered. See
+`docs/INSTALL.md`.
+
+**Choosing which agents to support.** The supported keys are `claude`, `codex`,
+`opencode`, `antigravity`, and `pi`, in that priority order. The interactive picker starts with the
+detected supported host on a fresh target, or Claude when undetected. Fresh
+unattended installs default to Claude. Upgrades preserve the surviving recorded
+selection in `.harness/.agents`; retired-only selections require an explicit
+replacement before any writes. A version-stamped install without a selection
+file resolves to `claude,opencode`. `--agents=all` selects all five.
+
+```bash
+./harness-install.sh --agents=claude,codex /path/to/your-project
+HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
+./harness-install.sh --agents=host /path/to/your-project
+./harness-install.sh --print-agents /path/to/your-project   # preview, writes nothing
+```
+
+`--agents=host` recognizes the supported host’s session markers; an explicit
+`HARNESS_HOST_AGENT=<key>` can declare it. Ambient retired-host markers are
+ignored. Explicit `gemini` selectors or host declarations fail
+before target mutation. [Migration guidance](../INSTALL.md#retiring-gemini)
+describes how pristine old glue is reclaimed and edited, foreign, or symlinked
+legacy files are preserved with warnings.
+
+**pi.** Selecting `pi` installs `.pi/prompts/sdd-*.md` (invoke `/sdd-next`) and claims the shared
+`.agents/skills/` units (invoke `/skill:sdd-next`). Both load only after the project is
+trusted (`/trust`, or `-a` on a headless `pi -p` run); `/trust` does not reload an open session, so
+run `/reload` (or restart pi) afterwards. Templates are pristine-only: an edited
+or foreign one survives deselection. Role isolation: `.pi/agents/<role>.md` files (for the
+community `pi-subagents` package; pinned, integrity-verified install is E35-F04/F05; see [docs/INSTALL.md](../INSTALL.md)) carry each role's tool allowlist and
+point at `agents/<role>.md`; without that package the Orchestrator runs
+`tools/pi-dispatch.sh <role> <task-file>`, which starts the role as a separate `pi -p` process.
+Role files are pristine-only too.
+
+**Antigravity, Codex, and OpenCode workflows are repository-local.** Selecting
+`antigravity`, `codex`, **or** `opencode` creates the base `/sdd-*` / `$sdd-*` skill units
+in `.agents/skills/` (including `/sdd-report`, plus `/sdd-pr-loop` when enabled). All three hosts read the same unit
+(ADR-0003), so there is one `SKILL.md` per command whose host-neutral adapter names both
+invocations and maps accompanying text to `$ARGUMENTS`, with `agents/openai.yaml` disabling
+implicit invocation.
+The `sdd-fix-parallel` body additionally stops an OpenCode invocation unless
+`.harness/.opencode-parallel` reads `supported` (a no-op on Codex). Seven native roles are
+registered in `.codex/agents/`, plus gated `pr-fixer`; inherited or unpinned models omit
+`model`. Last-written stamps protect edited or foreign units and role files, and the units
+are reclaimed only when the last claimant is deselected. Current installation creates no
+global Codex prompts; uncertain legacy global prompt ownership is preserved. See
+[installation](../INSTALL.md).
+
+**Shared vs personal config.** The install is meant to be *committed and shared* — one
+`CLAUDE.md`, the `.harness/` body, the `.claude/` glue. Per-developer state stays local:
+the installer append-seeds the project-root `.gitignore` with `.claude/settings.local.json`
+and friends, and personal model/prompt preferences belong in your user-global
+`~/.claude/CLAUDE.md`. So yes — the same `CLAUDE.md` for the whole team is the intended
+setup. See `docs/CONFIG-LAYERING.md`.
+
+**Cross-repo products (umbrella).** One invocation can cascade the harness across an
+umbrella directory of sibling repos (`--umbrella`), and `--shared-repo` makes the umbrella
+root its own git repo — a **shared spec repository** that versions `.harness/` (specs,
+task state) for the team while git-ignoring the product repos cloned into it. Both opt-in;
+single-repo use is unaffected. See `docs/UMBRELLA.md`.
+
+## Adapting to a real project
+
+Paths below are relative to the installed project root:
+
+1. Rewrite `.harness/specs/product.md` for your product.
+2. Set test/lint/typecheck commands in `.harness/harness.config.yaml`. Put fast
+   project checks in `.harness/init.project.sh`, which survives upgrades and is
+   sourced from the project root. The installer refreshes `.harness/init.sh`.
+3. For a new product, run `/sdd-plan "<idea>"` (whole-project vision, architecture,
+   ADRs, draft epics; plus a repo-topology ADR and an inert `umbrella.manifest.draft.yaml`
+   when the architecture names more than one deployable — presence alone does not engage
+   umbrella mode, and promotion is a later explicit step, E28-F03) → `/sdd-drill <epic-id>`
+   → `/sdd-next`. Add later work with `/sdd-new "<idea>"`, or use
+   `.harness/specs/_templates/`.
+
+The first-run bootstrap (`/sdd-next`) helps adapt the project under the human
+approval gate; see [Bootstrap](../INSTALL.md#bootstrap-first-run) and the
+[greenfield sequence](../INSTALL.md#starting-from-nothing-new-product).
+
+Derived from the *Harnessing Engineering* research (harness-engineering + SDD videos,
+Anthropic's long-running-development post, the Harness Engineering knowledge graph).
+
+### Running the tests
+
+Run `sh tools/run-tests.sh` for the full suite (eight workers by default; the suite count
+grows with every feature, so the runner's summary line is the authority). Umbrella
+coverage lives in 13 independent `tests/test_umbrella_[0-9][0-9]_*.sh` groups,
+with shared helpers under `tests/lib/umbrella/`. Default discovery excludes the
+compatibility aggregate to avoid running these cases twice. The runner parses
+all umbrella groups and helpers before executing even a focused selection.
+
+Use `sh tests/test_umbrella.sh` to run umbrella groups sequentially, or
+`sh tools/run-tests.sh tests/test_umbrella.sh` for the same aggregate under the
+runner's selected strict shell. To measure concurrent umbrella coverage, run
+`sh tools/run-tests.sh --jobs 8 tests/test_umbrella_[0-9][0-9]_*.sh`.
+The cheap plumbing regression is `sh tools/run-tests.sh tests/test_parallel_umbrella.sh`.
+
+For comparable timings, use an existing disk-backed `TMPDIR` outside this repository
+and every other Git work tree, check free disk space, and place a real Python
+interpreter directory before version-manager shims on `PATH`. Keep the shell,
+environment and host load comparable; successful case logs are normally discarded
+by the runner, so preserve them separately when comparing result multisets.

@@ -715,7 +715,7 @@ ANCHORS
   pass R9_workflow_section
 }
 R9_readme_sentence() {
-  _rd="$ROOT/README.md"
+  _rd="$ROOT/docs/agents/README.md"
   slice_doc "$_rd" '## How it works' > "$T/rd.folded"
   [ -s "$T/rd.folded" ] || fail "R9_readme_sentence: setup: could not slice '## How it works' from README.md"
   _b='On demand — suggested once per release — `tools/drift-report.py` compares the living documents (`specs/product.md`, `specs/architecture.md`, the ADRs) with the tree and writes an advisory `progress/drift/<date>.md` naming each backticked repo-rooted path or path:name symbol it recognises that the code lacks, and every file in a requested inventory that no document names, each with the reconciliation choice (doc or code) left to a human (E37-F03).'

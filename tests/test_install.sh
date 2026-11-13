@@ -202,7 +202,7 @@ _SSE_EOF
   # check runs in both directions, editing either side alone also reds: a member removed
   # from the expected list shows up as unexpected-derived, one removed from the derivation
   # shows up as missing. That is what keeps the set from rotting silently.
-  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/harness-update.sh tools/host-frontend.sh tools/opencode-model-helper.sh tools/pi-dispatch.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/sweep-scratch.sh tools/test-drift-check.sh tools/wait-for-codex.sh"
+  _sse_expected=".github/scripts/feedback-labeler.sh harness-install.sh init.sh tools/builder-role.sh tools/change-size.sh tools/docs-move-check.sh tools/fix-worktree.sh tools/harness-owned-paths.sh tools/harness-report.sh tools/harness-update.sh tools/host-frontend.sh tools/opencode-model-helper.sh tools/pi-dispatch.sh tools/pr-gate.sh tools/pr-round-trend.sh tools/run-tests.sh tools/sweep-scratch.sh tools/test-drift-check.sh tools/wait-for-codex.sh"
 
   _sse_unexpected=""
   for _sse_f in $_sse_seen; do
@@ -689,6 +689,21 @@ test_drift_report_installed_contract() {
   rm -rf "$_g"
 }
 
+test_docs_for_humans_installed_contract() {
+  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md; do
+    cmp -s "$SRC/$_f" "$T/.harness/$_f" || fail "E39-F01: installed $_f is missing or differs from source"
+  done
+  find "$T/.harness" -name assets | grep -q . && fail "E39-F01: a path named assets was installed under .harness/"
+  for _f in tools/doc-cite-check.py tools/docs-move-check.sh; do
+    [ -x "$T/.harness/$_f" ] || fail "E39-F01: installed $_f missing or not executable"
+    [ -x "$SRC/$_f" ] || fail "E39-F01: source $_f is not executable"
+    cmp -s "$SRC/$_f" "$T/.harness/$_f" || fail "E39-F01: installed $_f differs from source"
+    grep -qF 'chmod +x "$H/'"$_f"'"' "$SRC/harness-install.sh" || fail "E39-F01: installer lacks explicit $_f executable wiring"
+  done
+  grep -qF '| `docs/agents/README.md` |' "$T/.harness/AGENTS.md" || fail "E39-F01: installed AGENTS.md lacks the docs/agents/README.md row"
+  grep -qF '| `docs/CONCEPTS.md` |' "$T/.harness/AGENTS.md" || fail "E39-F01: installed AGENTS.md lacks the docs/CONCEPTS.md row"
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -855,6 +870,7 @@ test_plan_cite_check_installed_contract
 test_readiness_check_installed_contract
 test_paraphrase_back_installed_contract
 test_drift_report_installed_contract
+test_docs_for_humans_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
 test_e99_throughput_helpers_installed_contract
@@ -2104,7 +2120,7 @@ _expected_v="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$SRC/CHANGELOG.md" | 
 [ "$(cat "$SRC/VERSION")" = "$_expected_v" ] \
   || fail "R10: VERSION $(cat "$SRC/VERSION") does not match the newest CHANGELOG entry $_expected_v"
 grep -qF '## [0.49.0]' "$SRC/CHANGELOG.md" || fail "R10: CHANGELOG lacks 0.49.0"
-for _doc in "$SRC/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
+for _doc in "$SRC/docs/agents/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
   grep -qF '$sdd-' "$_doc" || fail "R10: $_doc does not document Codex \$sdd-* skills"
   grep -qF '.agents/skills' "$_doc" || fail "R10: $_doc omits the Codex skill layout"
   grep -qiF 'legacy' "$_doc" || fail "R10: $_doc does not document legacy migration"

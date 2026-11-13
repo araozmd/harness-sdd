@@ -4,6 +4,24 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.110.0] — 2026-11-12
+
+### Added — docs for humans, slice 1 (E39-F01)
+- Brand: the product is **harness-loop** (installed names unchanged: `.harness/`,
+  `harness-install.sh`, `harness.config.yaml`, `/sdd-*`). New `docs/BRAND.md`, `assets/logo.svg`,
+  `assets/logo-wordmark.svg`, `assets/social-preview.png` and the other logo variants
+  (repository-only; not installed).
+- `docs/agents/` — the machine layer. `docs/agents/README.md` announces it, indexes it, states
+  the conventions C1–C8 and carries the README's contract text moved verbatim. Ships with
+  `docs/` to every install.
+- `README.md` rewritten for humans (≤150 lines); new `docs/CONCEPTS.md` and `docs/README.md`.
+- `tools/doc-cite-check.py` — every doc citation in role prompts, entrypoints, installer and
+  tools resolves (path + heading); `tools/docs-move-check.sh` — pre-PR proof that no backticked
+  token vanished from the doc set; it also lists every removed backtick-bearing line it could not
+  find moved (informational, exit 0).
+- `tests/test_docs_for_humans.sh` — the human-doc style lint (budgets, filler, archaeology,
+  diagrams, navigation, brand sites).
+
 ## [0.109.0] — 2026-11-12
 
 ### Added — init.sh update check + consented upgrade (E38-F01)

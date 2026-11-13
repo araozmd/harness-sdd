@@ -4239,6 +4239,8 @@ install_one() {
   chmod +x "$H/tools/readiness-check.py" 2>/dev/null || true   # E37-F01 Reviewer implementation-readiness lint
   chmod +x "$H/tools/drift-report.py" 2>/dev/null || true   # E37-F03 advisory living-doc drift report
   chmod +x "$H/tools/host-frontend.sh" 2>/dev/null || true   # E99-F182 host front-end key for builder-role.sh --frontend
+  chmod +x "$H/tools/doc-cite-check.py" 2>/dev/null || true   # E39-F01 doc-citation lint
+  chmod +x "$H/tools/docs-move-check.sh" 2>/dev/null || true   # E39-F01 pre-PR verbatim-move check
   # NOTE: harness.config.yaml is intentionally NOT copied here — it is seeded once
   # below (project-owned), so upgrades never erase bootstrap-set verification commands.
   ok "harness body installed (.harness/)"
@@ -10717,7 +10719,7 @@ BUILDER_BACKEND_OVERRIDE="${HARNESS_BUILDER_BACKEND:-}"
 #
 # SEEDED FROM NOTHING — there is deliberately NO environment twin, and in particular this
 # is NOT seeded from HARNESS_PR_LOOP_ENABLED. That variable is E18-F01's PER-RUN gate
-# override, documented in harness.config.yaml, docs/INSTALL.md, README.md and the
+# override, documented in harness.config.yaml, docs/INSTALL.md, docs/agents/README.md and the
 # /sdd-pr-loop body as one of five per-run knobs (HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS,
 # …). Making one member of that family persist while the other four stay per-run is an
 # inconsistency no reader can infer from the name, and it turns
