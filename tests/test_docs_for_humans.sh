@@ -1158,7 +1158,7 @@ accuracy_problems() {
   _pin S2 'prints that one line and changes nothing'
   _pin S3 'until you answer .y. twice'
   _pin S4 'product\.md. you never edited, which is refreshed'
-  _pin S5a 'fails until you do'
+  _pin S5a 'fails until the upgrade is committed'
   _pin S5b 'warns and goes on'
   _pin S6a 'immediate subdirectories that are git repositories'
   _pin S6b 'only when you pass it'

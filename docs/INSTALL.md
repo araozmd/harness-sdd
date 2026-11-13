@@ -146,8 +146,7 @@ Switches for the update check:
 | Turn it off for one run | `HARNESS_SKIP_UPDATE_CHECK=1 ./init.sh` |
 | Check a fork | `update.remote: <git URL>` in `harness.config.yaml` |
 
-An installed upgrade is not an upgrade your repository runs until it is committed. Commit it:
-`init.sh` fails until you do. On a project that is not a git work tree it skips the
+Commit the upgrade: `init.sh` fails until the upgrade is committed. On a project that is not a git work tree it skips the
 check; when nothing under `.harness/` is tracked it warns and goes on. To proceed once anyway,
 run `HARNESS_SKIP_DRIFT_CHECK=1 ./init.sh`.
 
