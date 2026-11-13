@@ -62,7 +62,7 @@ honors the `AGENTS.md` portability rule and keeps the role runnable on any CLI.
 
 The lane is a **front-end over an existing primitive, not a new lane**. It **reuses** the
 **existing** `pending + sdd: false → Builder → Reviewer` routing already defined in
-`agents/orchestrator.md` (step-4 table) and `docs/WORKFLOW.md` ("Selective SDD"). You
+`agents/orchestrator.md` (step-4 table) and `docs/agents/WORKFLOW.md` ("Selective SDD"). You
 introduce **no new Orchestrator routing rule**, **no new TaskStore status value**, and
 **no `store/tasks.schema.json` change**. You are a producer/seeder + a hand-off to that
 existing loop; you reuse the existing `autonomous` flag rather than inventing any new

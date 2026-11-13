@@ -22,7 +22,7 @@ role starts with a clean, curated context.
 2. Read `harness.config.yaml` to select the TaskStore and DocStore backends.
 3. Read `progress/lessons.md`, then `agents/orchestrator.md`; assume the
    **Orchestrator** role, read the TaskStore, and route the next actionable task.
-4. Follow [the workflow](docs/WORKFLOW.md), delegating through files on disk.
+4. Follow [the workflow](docs/agents/WORKFLOW.md), delegating through files on disk.
 
 ## Workflow and gates
 
@@ -41,7 +41,7 @@ assists read-only. Role definitions live in `agents/`.
   need and write what you did to `progress/`.
 - The Architect moves a spec from `pending` to `spec-ready` and **pauses**.
   A human or an explicitly autonomous task must authorize `in-progress` before
-  the Builder writes code. See [human gates](docs/WORKFLOW.md).
+  the Builder writes code. See [human gates](docs/agents/WORKFLOW.md).
 - Only an **independent Reviewer** may verify completion: tests pass via
   `init.sh` and configured verification, and behavior matches the approved spec.
   An implementer's claim is never a `done` verdict.
@@ -100,6 +100,7 @@ live in `progress/`; append the durable changelog to `progress/history.md`.
 |---|---|
 | `docs/RATIONALE.md` | Why the harness exists; the two-layer deletion ledger |
 | `docs/WORKFLOW.md` | State transitions and human gates |
+| `docs/agents/WORKFLOW.md` | The exact workflow contract: the routing table, the gates, parking and landing evidence, the PR loop, Builder escalation |
 | `docs/SPEC-FORMAT.md` | EARS, four-file specs, and traceability |
 | `docs/CONCEPTS.md` | The method in plain language: the loop, specs, gates, code over prose, the review principle |
 | `docs/agents/README.md` | The machine layer: exact contracts moved verbatim from the human docs, plus the docs conventions |

@@ -37,7 +37,7 @@ next, and delegate to the specialist agents.
    this *planning* gate). Features of `planned` epics are treated exactly like
    features of `pending` epics (the epic-level alias — see `store/local.md`);
    `pending`, `planned`, `in-progress`, and `done` epics impose no new gate.
-4. **Route by status** (see the state machine in `docs/WORKFLOW.md`):
+4. **Route by status** (see the state machine in `docs/agents/WORKFLOW.md`):
 
    | Status | Action |
    |---|---|
@@ -585,7 +585,7 @@ before the merge and the check will (correctly) reject you. Where the check is i
 the object is not here, no default branch can be determined, the remote cannot be asked —
 the record degrades to `verified: "unchecked"` with a warning and the write proceeds; only
 two situations refuse, and both are provably-wrong claims. The full decision table is in
-`store/local.md` (`set_status`) and `docs/WORKFLOW.md`.
+`store/local.md` (`set_status`) and `docs/agents/WORKFLOW.md`.
 
 ### Which Builder — ask the tool, do not decide (E17-F03)
 

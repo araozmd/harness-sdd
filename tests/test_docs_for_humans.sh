@@ -1626,6 +1626,49 @@ F03_R5_no_over_claims() {
   [ -z "$(wf_over_claims "$T/f35b/m.md")" ] || fail "F03 R5: the over-claim check flags text inside a fence"
   pass "F03_R5_no_over_claims"
 }
+
+# F03_R7 — agent-facing citations name the counterpart. wf_agent_problems <root> lets a mirror be scanned.
+WF_ROW_A='| `docs/WORKFLOW.md` | State transitions and human gates |'
+WF_ROW_B='| `docs/agents/WORKFLOW.md` | The exact workflow contract: the routing table, the gates, parking and landing evidence, the PR loop, Builder escalation |'
+WF_EMITTER='3. Find the next actionable feature and route it by status per `.harness/docs/agents/WORKFLOW.md`:'
+wf_agent_problems() {
+  for _f in agents/orchestrator.md agents/fixer.md; do
+    grep -qF 'docs/WORKFLOW.md' "$1/$_f" && echo "$_f still cites docs/WORKFLOW.md"
+  done
+  [ "$(grep -cF 'docs/WORKFLOW.md' "$1/AGENTS.md")" -eq 1 ] || echo "AGENTS.md does not hold exactly one docs/WORKFLOW.md line"
+  [ "$(grep -F 'docs/WORKFLOW.md' "$1/AGENTS.md")" = "$WF_ROW_A" ] || echo "AGENTS.md: the one docs/WORKFLOW.md line is not the reference row"
+  [ "$(grep -A1 -F -x -- "$WF_ROW_A" "$1/AGENTS.md" | sed -n '2p')" = "$WF_ROW_B" ] || echo "AGENTS.md: the reference row is not followed by the docs/agents/WORKFLOW.md row"
+  grep -qF '[the workflow](docs/agents/WORKFLOW.md)' "$1/AGENTS.md" || echo "AGENTS.md step 4 does not link docs/agents/WORKFLOW.md"
+  grep -qF '[human gates](docs/agents/WORKFLOW.md)' "$1/AGENTS.md" || echo "AGENTS.md gate sentence does not link docs/agents/WORKFLOW.md"
+  grep -qxF -- "$WF_EMITTER" "$1/harness-install.sh" || echo "harness-install.sh: the sdd-next emitter line is not the counterpart citation"
+  for _f in .claude/commands/sdd-next.md .opencode/command/sdd-next.md .agents/skills/sdd-next/SKILL.md; do
+    grep -qF 'docs/agents/WORKFLOW.md' "$1/$_f" || echo "$_f does not cite docs/agents/WORKFLOW.md"
+  done
+  return 0
+}
+F03_R7_agent_citations() {
+  _bad="$(wf_agent_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F03 R7: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _w() { rm -rf "$T/f37"; mkdir -p "$T/f37/agents" "$T/f37/.claude/commands" "$T/f37/.opencode/command" "$T/f37/.agents/skills/sdd-next"
+         cp "$ROOT/AGENTS.md" "$ROOT/harness-install.sh" "$T/f37/"; cp "$ROOT/agents/orchestrator.md" "$ROOT/agents/fixer.md" "$T/f37/agents/"
+         cp "$ROOT/.claude/commands/sdd-next.md" "$T/f37/.claude/commands/"; cp "$ROOT/.opencode/command/sdd-next.md" "$T/f37/.opencode/command/"
+         cp "$ROOT/.agents/skills/sdd-next/SKILL.md" "$T/f37/.agents/skills/sdd-next/"; }
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#g' "$T/f37/agents/fixer.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/agents/fixer.md"
+  wf_agent_problems "$T/f37" | grep -qF 'agents/fixer.md still cites' || fail "F03 R7: the check misses a reverted agents/fixer.md citation"
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#g' "$T/f37/agents/orchestrator.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/agents/orchestrator.md"
+  wf_agent_problems "$T/f37" | grep -qF 'agents/orchestrator.md still cites' || fail "F03 R7: the check misses a reverted agents/orchestrator.md citation"
+  _w; grep -vF -x -- "$WF_ROW_B" "$T/f37/AGENTS.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/AGENTS.md"
+  wf_agent_problems "$T/f37" | grep -qF 'is not followed by' || fail "F03 R7: the check misses a deleted AGENTS.md reference row"
+  _w; sed 's#\[the workflow\](docs/agents/WORKFLOW\.md)#[the workflow](docs/WORKFLOW.md)#' "$T/f37/AGENTS.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/AGENTS.md"
+  wf_agent_problems "$T/f37" | grep -qF 'AGENTS.md' || fail "F03 R7: the check misses a reverted AGENTS.md step 4 link"
+  _w; sed 's#\[human gates\](docs/agents/WORKFLOW\.md)#[human gates](docs/WORKFLOW.md)#' "$T/f37/AGENTS.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/AGENTS.md"
+  wf_agent_problems "$T/f37" | grep -qF 'AGENTS.md' || fail "F03 R7: the check misses a reverted AGENTS.md gate-sentence link"
+  _w; sed 's#`.harness/docs/agents/WORKFLOW\.md`#`.harness/docs/WORKFLOW.md`#' "$T/f37/harness-install.sh" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/harness-install.sh"
+  wf_agent_problems "$T/f37" | grep -qF 'harness-install.sh' || fail "F03 R7: the check misses a reverted emitter line"
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#' "$T/f37/.opencode/command/sdd-next.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/.opencode/command/sdd-next.md"
+  wf_agent_problems "$T/f37" | grep -qF '.opencode/command/sdd-next.md' || fail "F03 R7: the check misses a stale generated body"
+  pass "F03_R7_agent_citations"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1660,6 +1703,7 @@ row F03_R2_human_shape
 row F03_R3_state_diagram
 row F03_R4_pr_loop_diagram
 row F03_R5_accuracy_sentences; row F03_R5_no_over_claims
+row F03_R7_agent_citations
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
