@@ -1,34 +1,24 @@
-# harness-loop
+<h1 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo-wordmark-dark.svg"><img src="assets/logo-wordmark.svg" alt="harness-loop" width="420"></picture></h1>
 
-<p align="center">
-  <picture>
-    <source media="(max-width: 480px) and (prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <source media="(max-width: 480px)" srcset="assets/logo.svg">
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-wordmark-dark.svg">
-    <img src="assets/logo-wordmark.svg" alt="harness-loop" width="360">
-  </picture>
-</p>
-
-harness-loop — autonomous agents, safely: every change specced, gated and reviewed before it merges.
+<p align="center">Autonomous agents, safely: every change specced, gated and reviewed before it merges.</p>
 
 harness-loop is a portable agent harness for spec-driven development. It runs in Claude Code, Codex, OpenCode, Antigravity and pi. Roles keep their state in repository files, so you can change the model or the CLI without losing the project's intent or history. Read [why the harness exists](docs/RATIONALE.md) for the bet in full. The exact contracts live in [docs/agents/README.md](docs/agents/README.md).
 
 ## How it works
+
+<p align="center"><img src="assets/hero.svg" alt="A spec is written and approved at the first gate, built one requirement at a time, then reviewed at the second gate before it merges" width="720"></p>
 
 Every change follows one loop with two gates. An Architect writes the spec, you approve it, a Builder implements it one requirement at a time, and an independent Reviewer verifies it before the PR merges.
 
 ```mermaid
 flowchart LR
     idea([idea]) --> spec[Architect writes the spec]
-    spec --> gate1{you approve}
-    gate1 --> build[Builder: red/green per requirement]
-    build --> review[Reviewer verifies]
+    spec -->|spec-ready| gate1{you approve}
+    gate1 -->|in-progress| build[Builder: red/green per requirement]
+    build -->|in-review| review[Reviewer verifies]
     review -->|rejects| build
     review -->|approves| merge([PR merges])
-    spec -. spec-ready .-> gate1
-    build -. in-progress .-> review
-    review -. in-review .-> merge
-    merge -. done .-> idea
+    merge -->|done| idea
 ```
 
 A spec lists its requirements and the tests that prove them. When the project has an architecture, each spec cites the architecture decisions (ADRs) it touches. Read [CONCEPTS.md](docs/CONCEPTS.md) for the full method.

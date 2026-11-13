@@ -1,12 +1,14 @@
 # harness-loop — brand
 
+![harness-loop](https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/logo-wordmark.svg)
+
 **Name.** harness-loop
 
-**Tagline.** harness-loop — autonomous agents, safely: every change specced, gated and reviewed before it merges.
+**Tagline.** Autonomous agents, safely: every change specced, gated and reviewed before it merges.
 
 Installed names do not change: `.harness/`, `harness-install.sh`, `harness.config.yaml` and the `/sdd-*` commands keep their names.
 
-The logo files live in the repository `assets/` directory. They are not installed, so this page names them in code spans instead of linking them. The repository README links `assets/brand-sheet.png`, which shows every variant below on its background.
+The logo files live in the repository `assets/` directory, which is not installed. The images on this page load from the canonical repository by absolute URL, so they show once the files are on `main`; the file names below are code spans.
 
 ## Positioning
 
@@ -29,6 +31,8 @@ Write the way the docs are written. Be plain, short and direct. Say what a thing
 | Mist | `#E9E4FF` | wordmark text on dark backgrounds |
 
 ## Logo
+
+![Every logo variant on its background](https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/brand-sheet.png)
 
 The mark is a triangle drawn as a loop: three nodes joined by arcs, one arc in coral. The wordmark sets `harness-loop` beside the mark (horizontal) or under it (stacked). Pick the variant by the background it sits on.
 
@@ -57,4 +61,4 @@ Rules for every variant:
 
 ## Where the name appears
 
-The README title, the wordmark files and this page. The tagline is authored here and copied into the README.
+The README heading, the wordmark files and this page. The tagline is authored here and copied into the README.

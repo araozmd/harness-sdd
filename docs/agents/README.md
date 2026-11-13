@@ -43,9 +43,13 @@ enforce the parts that can be checked.
   every file in `docs/agents/`; every relative link under `README.md` and `docs/` resolves.
 - **C7 Shipping** — `docs/` ships to every install, so `docs/agents/` ships with it. `assets/`
   and the repository README do not ship, so no file under `docs/` links or embeds anything
-  under `assets/`, and a doc under `docs/` links only files that ship (`docs/`, `agents/`,
-  `AGENTS.md`, `tools/`, `store/`, `specs/_templates/`, `init.sh`).
-- **C8 Brand** — the name `harness-loop` appears in the README title, the wordmark and
+  under `assets/` by a relative path, and a doc under `docs/` links only files that ship
+  (`docs/`, `agents/`, `AGENTS.md`, `tools/`, `store/`, `specs/_templates/`, `init.sh`).
+  The one exception is `docs/BRAND.md`, which may embed art by an absolute canonical URL
+  (`https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/…` or
+  `https://github.com/araozmd/harness-loop/blob/main/assets/…`); those resolve in an
+  installed target once the file is on `main`.
+- **C8 Brand** — the name `harness-loop` appears in the README heading (the wordmark alt text), the wordmark and
   `docs/BRAND.md`; the tagline is authored in `docs/BRAND.md` and copied into the README.
   Installed names never change.
 
