@@ -131,7 +131,7 @@ head_paths() {
     git ls-tree -r --name-only "$head"
   else
     git ls-files -c -o --exclude-standard | sort -u | while IFS= read -r _p; do
-      [ -f "$_p" ] && printf '%s\n' "$_p"
+      if [ -f "$_p" ]; then printf '%s\n' "$_p"; fi
     done
   fi
 }

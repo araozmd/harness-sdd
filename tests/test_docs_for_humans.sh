@@ -864,6 +864,14 @@ R8_move_exit3_not_a_repo() {
   [ -s "$T/merr" ] || fail "R8: no reason on stderr for an unresolvable ref"
   pass "R8_move_exit3_not_a_repo"
 }
+R8_move_deleted_last_path() {
+  mkrepo r8h; cd "$R"
+  printf 'x\n' > README.md; printf 'z\n' > zzz.txt; git add -A; git commit -q -m more
+  rm zzz.txt; cd "$ROOT"
+  run_move "$R" HEAD
+  [ "$rc" -eq 0 ] || fail "R8: a deleted last-sorted tracked path exited $rc, expected 0"
+  pass "R8_move_deleted_last_path"
+}
 R8_summary_last_line() {
   mkrepo r8g; cd "$R"
   printf '# Workflow\n\nPlain.\n' > docs/WORKFLOW.md; cd "$ROOT"
@@ -890,7 +898,7 @@ row R9_relative_links_resolve; row R9_counterpart_links; row R9_index_complete; 
 row R7_cite_fixture_findings; row R7_cite_ignores_external_and_fenced; row R7_cite_slug_and_prefix_match
 row R7_cite_exit2_usage; row R7_cite_help
 row R8_move_clean_exit0; row R8_move_vanished_token_exit1; row R8_move_dropped_line_informational
-row R8_move_link_retarget_counts_as_moved; row R8_move_exit2_usage; row R8_move_exit3_not_a_repo; row R8_summary_last_line
+row R8_move_link_retarget_counts_as_moved; row R8_move_exit2_usage; row R8_move_exit3_not_a_repo; row R8_move_deleted_last_path; row R8_summary_last_line
 row R10_agents_md_rows; row R10_repo_citations_resolve
 row R12_version_minor_and_changelog
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
