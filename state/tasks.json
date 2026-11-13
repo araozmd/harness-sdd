@@ -2379,7 +2379,7 @@
         {
           "id": "E39-F02",
           "title": "INSTALL split: docs/agents/INSTALL.md + human INSTALL (single-repo vs umbrella and upgrade-flow diagrams); re-point suites, installer hints, init.sh",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
