@@ -689,6 +689,21 @@ test_drift_report_installed_contract() {
   rm -rf "$_g"
 }
 
+test_docs_for_humans_installed_contract() {
+  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md; do
+    cmp -s "$SRC/$_f" "$T/.harness/$_f" || fail "E39-F01: installed $_f is missing or differs from source"
+  done
+  find "$T/.harness" -name assets | grep -q . && fail "E39-F01: a path named assets was installed under .harness/"
+  for _f in tools/doc-cite-check.py tools/docs-move-check.sh; do
+    [ -x "$T/.harness/$_f" ] || fail "E39-F01: installed $_f missing or not executable"
+    [ -x "$SRC/$_f" ] || fail "E39-F01: source $_f is not executable"
+    cmp -s "$SRC/$_f" "$T/.harness/$_f" || fail "E39-F01: installed $_f differs from source"
+    grep -qF 'chmod +x "$H/'"$_f"'"' "$SRC/harness-install.sh" || fail "E39-F01: installer lacks explicit $_f executable wiring"
+  done
+  grep -qF '| `docs/agents/README.md` |' "$T/.harness/AGENTS.md" || fail "E39-F01: installed AGENTS.md lacks the docs/agents/README.md row"
+  grep -qF '| `docs/CONCEPTS.md` |' "$T/.harness/AGENTS.md" || fail "E39-F01: installed AGENTS.md lacks the docs/CONCEPTS.md row"
+}
+
 test_dependency_diagnostics_installed_contract() {
   [ -x "$T/.harness/tools/task-diagnostics.py" ] ||
     fail "E16-F01: installed task-diagnostics.py missing or not executable"
@@ -855,6 +870,7 @@ test_plan_cite_check_installed_contract
 test_readiness_check_installed_contract
 test_paraphrase_back_installed_contract
 test_drift_report_installed_contract
+test_docs_for_humans_installed_contract
 test_next_task_installed_contract
 test_rationale_docs_installed_contract
 test_e99_throughput_helpers_installed_contract
