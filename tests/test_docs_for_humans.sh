@@ -1528,6 +1528,40 @@ F03_R3_state_diagram() {
   wf_state_problems "$T/f33/m.md" | grep -qF 'done: Reviewer approves' || fail "F03 R3: the state-diagram check misses the old 'done: Reviewer approves' label"
   pass "F03_R3_state_diagram"
 }
+
+# F03_R4 — the PR review loop diagram.
+WF_LOOP_TOKENS='@codex review
+wait-for-codex.sh
+P0
+nit
+blocking_severities
+pr-fixer
+max_rounds
+needs-human
+non-Codex
+required CI
+auto_merge
+merge_strategy'
+WF_LOOP_PROSE='/sdd-pr-loop
+pr_loop.enabled
+max_rounds
+needs-human'
+F03_R4_pr_loop_diagram() {
+  _bad="$(diagram_problems "$ROOT/$WF_H" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")"
+  [ -z "$_bad" ] || fail "F03 R4: $(printf '%s' "$_bad" | tr '\n' ';')"
+  rm -rf "$T/f34"; mkdir -p "$T/f34"
+  _m() { sed "$2" "$ROOT/$WF_H" > "$T/f34/m.md"
+         cmp -s "$ROOT/$WF_H" "$T/f34/m.md" && fail "F03 R4: setup: the mutant $1 did not apply"
+         [ -n "$(diagram_problems "$T/f34/m.md" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")" ] || fail "F03 R4: the diagram check misses the mutant $1"; }
+  _m needs-human-node 's/needs-human — the loop labels the PR and stops/the loop labels the PR and stops/'
+  _m graph 's/^flowchart TB$/graph TB/'
+  _m prose-enabled 's/`pr_loop\.enabled`/the enabled flag/g'
+  _m prose-maxrounds 's/`max_rounds`/the round cap/g;s/before max_rounds/before the cap/'
+  # a second mermaid block in the section
+  awk '/^## The PR review loop$/ { print; print ""; print "```mermaid"; print "flowchart LR"; print "  a --> b"; print "```"; next } { print }' "$ROOT/$WF_H" > "$T/f34/m.md"
+  [ -n "$(diagram_problems "$T/f34/m.md" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")" ] || fail "F03 R4: the diagram check misses a second mermaid block"
+  pass "F03_R4_pr_loop_diagram"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1560,6 +1594,7 @@ row F03_R1_counterpart_announcement; row F03_R1_counterpart_headings_in_order; r
 row F03_R6_suites_cite_counterpart
 row F03_R2_human_shape
 row F03_R3_state_diagram
+row F03_R4_pr_loop_diagram
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
