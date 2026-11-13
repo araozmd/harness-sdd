@@ -1158,7 +1158,7 @@ accuracy_problems() {
   _pin S2 'prints that one line and changes nothing'
   _pin S3 'until you answer .y. twice'
   _pin S4 'product\.md. you never edited, which is refreshed'
-  _pin S5a 'fails until the upgrade is committed'
+  _pin S5a 'fails until you do'
   _pin S5b 'warns and goes on'
   _pin S6a 'immediate subdirectories that are git repositories'
   _pin S6b 'only when you pass it'
@@ -1167,7 +1167,7 @@ accuracy_problems() {
 over_claims() {
   _t="$(unfenced "$1" | folded)"
   for _o in 'uninstall' 'upgrades itself' 'upgrades automatically' 'automatically upgrade' \
-            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' 'E00-F01'; do
+            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' 'E00-F01' 'cannot prove it wrote'; do
     printf '%s' "$_t" | grep -qiF -- "$_o" && echo "$_o"
   done
   return 0
@@ -1195,7 +1195,7 @@ F02_R5_no_over_claims() {
   ! names_uninstall "$ROOT/docs/README.md" || fail "F02 R5: docs/README.md still claims an uninstall"
   rm -rf "$T/f5b"; mkdir -p "$T/f5b"
   for _m in 'The harness upgrades itself.' 'UNINSTALL' 'It upgrades automatically.' 'Then automatically upgrade.' \
-            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' '(E00-F01)'; do
+            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' '(E00-F01)' 'the installer cannot prove it wrote are kept'; do
     { cat "$ROOT/$INSTALL_H"; printf '\n%s\n' "$_m"; } > "$T/f5b/m.md"
     [ -n "$(over_claims "$T/f5b/m.md")" ] || fail "F02 R5: the over-claim check misses '$_m'"
   done

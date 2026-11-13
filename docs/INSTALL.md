@@ -30,7 +30,7 @@ and each has a flag for scripted installs: `--agents=`, `--builder-backend=` and
 What lands in your project:
 
 - The harness body under `.harness/`. The files that are yours inside it (config, specs, task
-  state, progress) are seeded once and kept on upgrade.
+  state, progress) are seeded once and kept on upgrade (see Upgrade for the exceptions).
 - A marked pointer block in `AGENTS.md`, and in `CLAUDE.md` when Claude is selected. Anything
   you wrote outside the block is kept.
 - Commands and role files only for the front-ends you selected.
@@ -104,7 +104,7 @@ the harness remote, and when it is newer than yours it prints one line:
 ```
 
 Away from a terminal the check prints that one line and changes nothing: the gate's exit code is
-the same as without it. At a terminal it also asks `Install now? [y/N]`. Anything but `y` is
+the same as without it. At a terminal it also asks `Install now? [y/N]`. Anything but `y` or `Y` is
 remembered for that version, so the line keeps printing and the question stops until a newer
 version appears. The remote is read with a short time limit and, by default, at most once a day. Any
 failure prints nothing.
@@ -146,8 +146,8 @@ Switches for the update check:
 | Turn it off for one run | `HARNESS_SKIP_UPDATE_CHECK=1 ./init.sh` |
 | Check a fork | `update.remote: <git URL>` in `harness.config.yaml` |
 
-An installed upgrade is not an upgrade your repository runs until it is committed. `init.sh`
-fails until the upgrade is committed. On a project that is not a git work tree it skips the
+An installed upgrade is not an upgrade your repository runs until it is committed. Commit it:
+`init.sh` fails until you do. On a project that is not a git work tree it skips the
 check; when nothing under `.harness/` is tracked it warns and goes on. To proceed once anyway,
 run `HARNESS_SKIP_DRIFT_CHECK=1 ./init.sh`.
 
@@ -179,7 +179,7 @@ The rest is in [UMBRELLA.md](UMBRELLA.md).
 
 | Whose | Files | On upgrade |
 |---|---|---|
-| The harness's | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}` and the generated front-end glue | Refreshed. Generated glue is regenerated subject to ownership checks; edited files the installer cannot prove it wrote are kept, with a warning. |
+| The harness's | `.harness/{AGENTS.md,agents,docs,store,tools,specs/_templates,init.sh}` and the generated front-end glue | Refreshed. Claude role and command files are always rewritten, so edits there are lost. Edited Codex roles, Codex and pi units and `opencode.json` are kept with a warning. |
 | Yours | `.harness/{harness.config.yaml,init.project.sh,specs/product.md,specs/glossary.md,specs/epics,state/tasks.json,progress}` | Kept. The config gains any new default keys. |
 | Local only | `.harness/{telemetry.jsonl,workers.json}` | Ignored by git. |
 
