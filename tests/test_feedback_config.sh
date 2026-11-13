@@ -488,7 +488,9 @@ test_repo_rename_migration() {
   sh "$INSTALL" "$_e" >/dev/null 2>&1 || fail "F183 scope: seed install failed"
   _ecfg="$_e/.harness/harness.config.yaml"
   printf '\nsomething_else:\n  repo: %s\n' "$_old" >> "$_ecfg"
-  sh "$INSTALL" "$_e" >/dev/null 2>&1 || fail "F183 scope: upgrade failed"
+  sh "$INSTALL" "$_e" >"$T/f183-scope.out" 2>/dev/null || fail "F183 scope: upgrade failed"
+  ! grep -q 'feedback.repo: repointed' "$T/f183-scope.out" \
+    || fail "F183 scope: a false 'repointed' line was printed though feedback.repo was already new (a later section's repo: line was matched)"
   grep -qxF "  repo: $_old" "$_ecfg" || fail "F183 scope: a repo: line outside feedback: was rewritten"
   grep -qxF "  repo: $_new" "$_ecfg" || fail "F183 scope: the fresh feedback.repo default is missing"
   pass "an upgrade repoints feedback.repo only when it is the old shipped default, once and idempotently, and never a custom value or a line outside feedback: (E99-F183) [test_repo_rename_migration]"

@@ -813,7 +813,9 @@ R_default_remote_is_harness_loop() {
   printf 'update:\n  remote: https://example.test/x.git\n' > "$_hd/harness.config.yaml"
   _got="$(HARNESS_DIR="$_hd" HARNESS_UPDATE_REMOTE= sh -c '. "$1"; hu_remote' sh "$_fns")"
   [ "$_got" = "https://example.test/x.git" ] || fail "F183 control: a configured update.remote did not win over the default (got '$_got')"
-  pass "the default update remote is araozmd/harness-loop; a configured remote still wins (E99-F183) [R_default_remote_is_harness_loop]"
+  _got="$(HARNESS_DIR="$_hd" HARNESS_UPDATE_REMOTE=https://env.test/y.git sh -c '. "$1"; hu_remote' sh "$_fns")"
+  [ "$_got" = "https://env.test/y.git" ] || fail "F183 control: HARNESS_UPDATE_REMOTE did not win over the configured update.remote (got '$_got')"
+  pass "the default update remote is araozmd/harness-loop; a configured remote and the env override still win (E99-F183) [R_default_remote_is_harness_loop]"
 }
 
 R1_notice_when_newer
