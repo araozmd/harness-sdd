@@ -88,7 +88,7 @@ if [ "${1:-}" = "redact" ]; then
 fi
 
 # ── defaults ─────────────────────────────────────────────────────────────────────────────
-DEFAULT_REPO="github.com/araozmd/harness-sdd"
+DEFAULT_REPO="github.com/araozmd/harness-loop"
 CFG="$H/harness.config.yaml"
 
 _trigger=""; _symptom=""; _role=""; _phase=""; _command=""; _exit_code=""

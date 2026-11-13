@@ -422,7 +422,7 @@ URLs, foreign paths, controls and marker syntax; they cannot establish confident
 or factual truth for arbitrary prose. Missing or unsafe details stay local with field
 diagnostics and can be completed later using the same token. Detailed findings use a
 canonical digest for exact duplicate identity. Configuration lives under `feedback:` in `harness.config.yaml`
-(`enabled: true`, `max_per_session: 3`, `repo: github.com/araozmd/harness-sdd`).
+(`enabled: true`, `max_per_session: 3`, `repo: github.com/araozmd/harness-loop`).
 
 ### Source-only feedback triage
 

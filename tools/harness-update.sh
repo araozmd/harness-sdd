@@ -59,7 +59,7 @@ hu_cfg_update_value() {
 hu_remote() {
   _hr="${HARNESS_UPDATE_REMOTE:-}"
   [ -n "$_hr" ] || _hr="$(hu_cfg_update_value remote)"
-  [ -n "$_hr" ] || _hr="https://github.com/araozmd/harness-sdd.git"
+  [ -n "$_hr" ] || _hr="https://github.com/araozmd/harness-loop.git"
   printf '%s' "$_hr"
 }
 

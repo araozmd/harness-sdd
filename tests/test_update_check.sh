@@ -798,6 +798,24 @@ R10_coordinator_cascades() {
   pass "coordinator => '--umbrella <dir>', every child stamped, thin stays thin, per-repo proofs, installer exit 3 = success (R10) [R10_coordinator_cascades]"
 }
 
+# E99-F183 — the default remote names the renamed repo. hu_remote is extracted from the tool
+# and run against a config with no update.remote and no env override, so the value printed can
+# only come from the shipped fallback (a custom config remote and the env override are the
+# positive controls: they differ in exactly that one input and must win over it).
+R_default_remote_is_harness_loop() {
+  _hd="$T/f183"; mkdir -p "$_hd"; : > "$_hd/harness.config.yaml"
+  _fns="$T/f183.fns"
+  awk '/^hu_cfg_update_value\(\)/{k=1} /^hu_remote\(\)/{k=1} k{print} k&&/^}/{k=0}' "$SRC/tools/harness-update.sh" > "$_fns"
+  grep -q '^hu_remote()' "$_fns" || fail "F183: could not extract hu_remote from tools/harness-update.sh"
+  _got="$(HARNESS_DIR="$_hd" HARNESS_UPDATE_REMOTE= sh -c '. "$1"; hu_remote' sh "$_fns")"
+  [ "$_got" = "https://github.com/araozmd/harness-loop.git" ] \
+    || fail "F183: the default update remote is '$_got', expected https://github.com/araozmd/harness-loop.git"
+  printf 'update:\n  remote: https://example.test/x.git\n' > "$_hd/harness.config.yaml"
+  _got="$(HARNESS_DIR="$_hd" HARNESS_UPDATE_REMOTE= sh -c '. "$1"; hu_remote' sh "$_fns")"
+  [ "$_got" = "https://example.test/x.git" ] || fail "F183 control: a configured update.remote did not win over the default (got '$_got')"
+  pass "the default update remote is araozmd/harness-loop; a configured remote still wins (E99-F183) [R_default_remote_is_harness_loop]"
+}
+
 R1_notice_when_newer
 R2_silent_skips_table
 R4_same_older_junk_silent
@@ -810,4 +828,5 @@ R7_consented_upgrade_runs_installer
 R8_config_preserved_proof
 R9_entrypoints_preserved_proof
 R10_coordinator_cascades
+R_default_remote_is_harness_loop
 echo "all update-check cases passed"

@@ -521,7 +521,7 @@ EOF
 # tag's own harness-install.sh, then a check that this file's values and the prose in
 # CLAUDE.md / AGENTS.md survived). Never blocks the gate: bounded to 3 s, cached 24 h, silent
 # offline. `check: false` switches it off for good (per run: HARNESS_SKIP_UPDATE_CHECK=1).
-# `remote` is the git URL to read tags from; empty ⇒ https://github.com/araozmd/harness-sdd.git.
+# `remote` is the git URL to read tags from; empty ⇒ https://github.com/araozmd/harness-loop.git.
 # A fork sets its own here. Skipped in an umbrella child — the coordinator's upgrade cascades.
 update:
   check: true
@@ -649,9 +649,30 @@ EOF
 # governs sessions rooted there — no inheritance from the coordinator.
 feedback:
   enabled: true
-  repo: github.com/araozmd/harness-sdd
+  repo: github.com/araozmd/harness-loop
   max_per_session: 3
 EOF
+  fi
+
+  # --- feedback.repo: repoint the OLD shipped default (E99-F183) ---
+  # The repo was renamed harness-sdd -> harness-loop. `feedback.repo` is seeded once and then
+  # project-owned, so rewrite it ONLY when the line inside the top-level `feedback:` section is
+  # byte-identical to the old shipped default; a customized value (or an already-new one) is
+  # never touched, so a second run finds nothing to do. One info line per rewrite.
+  _mc_old='  repo: github.com/araozmd/harness-sdd'
+  _mc_new='  repo: github.com/araozmd/harness-loop'
+  if awk -v old="$_mc_old" '
+       /^feedback:([[:space:]]|$)/ { f=1; next }
+       f && /^[^[:space:]#]/ { f=0 }
+       f && $0 == old { found=1; exit }
+       END { exit !found }' "$_cfg"; then
+    awk -v old="$_mc_old" -v new="$_mc_new" '
+      /^feedback:([[:space:]]|$)/ { f=1; print; next }
+      f && /^[^[:space:]#]/ { f=0 }
+      f && !done && $0 == old { print new; done=1; next }
+      { print }
+    ' "$_cfg" > "$_cfg.mctmp" && cat "$_cfg.mctmp" > "$_cfg" && rm -f "$_cfg.mctmp"
+    info "feedback.repo: repointed github.com/araozmd/harness-sdd -> github.com/araozmd/harness-loop in $_cfg (the repo was renamed; custom values are left alone)"
   fi
 }
 
@@ -7343,7 +7364,7 @@ Read agents/orchestrator.md, including Source-only feedback triage.
 Run ./init.sh first and halt on any non-zero exit. This workflow exists only in
 this harness source checkout; refuse an installed target without the source helper.
 Read harness.config.yaml and resolve feedback.repo: missing/empty uses
-github.com/araozmd/harness-sdd; OWNER/REPO adds github.com; HOST/OWNER/REPO is explicit.
+github.com/araozmd/harness-loop; OWNER/REPO adds github.com; HOST/OWNER/REPO is explicit.
 Match F01: strip trailing comments/whitespace, do not unquote, require two or three
 nonempty [A-Za-z0-9._-]+ components. Malformed configuration stops without reads.
 Never infer this repository from the current remote.

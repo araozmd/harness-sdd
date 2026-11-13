@@ -120,7 +120,7 @@ test_seed_template_block() {
     || fail "R1: seed template's feedback: block header is not a column-0 'feedback:' line"
   grep -qxF '  enabled: true' "$T/tpl-block.txt" \
     || fail "R1: seed template feedback.enabled is not 'true'"
-  grep -qxF '  repo: github.com/araozmd/harness-sdd' "$T/tpl-block.txt" \
+  grep -qxF '  repo: github.com/araozmd/harness-loop' "$T/tpl-block.txt" \
     || fail "R1: seed template feedback.repo is not the shipped default"
   grep -qxF '  max_per_session: 3' "$T/tpl-block.txt" \
     || fail "R1: seed template feedback.max_per_session is not 3"
@@ -139,7 +139,7 @@ test_fresh_install_seeds_block() {
   feedback_block "$_t/.harness/harness.config.yaml" > "$T/r2-block.txt"
   [ -s "$T/r2-block.txt" ] || fail "R2: fresh install did not seed a feedback: block"
   grep -qxF '  enabled: true' "$T/r2-block.txt" || fail "R2: fresh-seeded feedback.enabled is not 'true'"
-  grep -qxF '  repo: github.com/araozmd/harness-sdd' "$T/r2-block.txt" \
+  grep -qxF '  repo: github.com/araozmd/harness-loop' "$T/r2-block.txt" \
     || fail "R2: fresh-seeded feedback.repo is not the shipped default"
   grep -qxF '  max_per_session: 3' "$T/r2-block.txt" \
     || fail "R2: fresh-seeded feedback.max_per_session is not 3"
@@ -235,7 +235,7 @@ test_notice_on_seed() {
   _fout="$T/r5-fresh.out"
   sh "$INSTALL" "$_f" >"$_fout" 2>/dev/null || fail "R5 fresh: install failed"
   _fcfg="$_f/.harness/harness.config.yaml"
-  notice_lines "$_fout" "github.com/araozmd/harness-sdd" "$_fcfg" > "$T/r5-fresh-notice.txt"
+  notice_lines "$_fout" "github.com/araozmd/harness-loop" "$_fcfg" > "$T/r5-fresh-notice.txt"
   [ "$(wc -l < "$T/r5-fresh-notice.txt")" -eq 1 ] \
     || fail "R5 fresh: expected exactly 1 stdout line carrying the repo, 'feedback.enabled: false', and the config path together, got $(wc -l < "$T/r5-fresh-notice.txt")"
 
@@ -246,7 +246,7 @@ test_notice_on_seed() {
   strip_feedback_block "$_mcfg"
   _mout="$T/r5-migrate.out"
   sh "$INSTALL" "$_m" >"$_mout" 2>/dev/null || fail "R5 migrate: install failed"
-  notice_lines "$_mout" "github.com/araozmd/harness-sdd" "$_mcfg" > "$T/r5-migrate-notice.txt"
+  notice_lines "$_mout" "github.com/araozmd/harness-loop" "$_mcfg" > "$T/r5-migrate-notice.txt"
   [ "$(wc -l < "$T/r5-migrate-notice.txt")" -eq 1 ] \
     || fail "R5 migrate: expected exactly 1 stdout line carrying the repo, 'feedback.enabled: false', and the config path together, got $(wc -l < "$T/r5-migrate-notice.txt")"
 
@@ -261,7 +261,7 @@ test_no_notice_when_present() {
   grep -Eq '^feedback:' "$_rcfg" || fail "R6: setup failed — no feedback: block present after seed"
   _rout="$T/r6.out"
   sh "$INSTALL" "$_r" >"$_rout" 2>/dev/null || fail "R6: second install failed"
-  notice_lines "$_rout" "github.com/araozmd/harness-sdd" "$_rcfg" > "$T/r6-notice.txt"
+  notice_lines "$_rout" "github.com/araozmd/harness-loop" "$_rcfg" > "$T/r6-notice.txt"
   [ ! -s "$T/r6-notice.txt" ] \
     || fail "R6: re-run on a config that already carries the feedback: block printed a notice: $(cat "$T/r6-notice.txt")"
   ! grep -qF 'feedback.enabled: false' "$_rout" \
@@ -280,7 +280,7 @@ test_no_notice_when_present() {
     || fail "R6 flow-form: setup failed — no column-0 feedback: line present after fixture write"
   _rfout="$T/r6-flow.out"
   sh "$INSTALL" "$_rf" >"$_rfout" 2>/dev/null || fail "R6 flow-form: second install failed"
-  notice_lines "$_rfout" "github.com/araozmd/harness-sdd" "$_rfcfg" > "$T/r6-flow-notice.txt"
+  notice_lines "$_rfout" "github.com/araozmd/harness-loop" "$_rfcfg" > "$T/r6-flow-notice.txt"
   [ ! -s "$T/r6-flow-notice.txt" ] \
     || fail "R6 flow-form: re-run on a config carrying the one-line flow-form feedback: { enabled: false } printed a notice: $(cat "$T/r6-flow-notice.txt")"
   ! grep -qF 'feedback.enabled: false' "$_rfout" \
@@ -334,12 +334,12 @@ test_cascade_per_target_seed_and_notice() {
   for _t in "$_u" "$_u/child-a"; do
     _cfg="$_t/.harness/harness.config.yaml"
     grep -Eq '^feedback:' "$_cfg" || fail "R8: $_t was not seeded a feedback: block"
-    notice_lines "$_out" "github.com/araozmd/harness-sdd" "$_cfg" > "$T/r8-notice-$(basename "$_t" | tr -c 'A-Za-z0-9' _).txt"
+    notice_lines "$_out" "github.com/araozmd/harness-loop" "$_cfg" > "$T/r8-notice-$(basename "$_t" | tr -c 'A-Za-z0-9' _).txt"
     [ "$(wc -l < "$T/r8-notice-$(basename "$_t" | tr -c 'A-Za-z0-9' _).txt")" -eq 1 ] \
       || fail "R8: expected exactly 1 notice line naming $_cfg"
   done
 
-  notice_lines "$_out" "github.com/araozmd/harness-sdd" "$_u/child-b/.harness/harness.config.yaml" > "$T/r8-notice-child-b.txt"
+  notice_lines "$_out" "github.com/araozmd/harness-loop" "$_u/child-b/.harness/harness.config.yaml" > "$T/r8-notice-child-b.txt"
   [ ! -s "$T/r8-notice-child-b.txt" ] \
     || fail "R8: child-b already carried a feedback: block but still got a notice line"
 
@@ -448,6 +448,52 @@ test_version_and_changelog() {
   pass "VERSION matches the newest entry and CHANGELOG's [0.85.0] section names the block, its default-on enabled: true, the default repo, the notice, and the opt-out (R11) [test_version_and_changelog]"
 }
 
+# ── E99-F183: the repo rename. An UPGRADE rewrites feedback.repo only when it is the OLD
+# shipped default, byte for byte; custom and already-new values are never touched.
+test_repo_rename_migration() {
+  _old='github.com/araozmd/harness-sdd'; _new='github.com/araozmd/harness-loop'
+  # (a) old default -> rewritten, exactly one info line, nothing else in the file changes.
+  _a="$T/f183-old"; mkdir -p "$_a"
+  sh "$INSTALL" "$_a" >/dev/null 2>&1 || fail "F183 old: seed install failed"
+  _acfg="$_a/.harness/harness.config.yaml"
+  sed "s#^  repo: .*#  repo: $_old#" "$_acfg" > "$T/f183-old.cfg" && cat "$T/f183-old.cfg" > "$_acfg"
+  grep -qxF "  repo: $_old" "$_acfg" || fail "F183 old: fixture setup failed"
+  _aout="$T/f183-old.out"
+  sh "$INSTALL" "$_a" >"$_aout" 2>/dev/null || fail "F183 old: upgrade failed"
+  grep -qxF "  repo: $_new" "$_acfg" \
+    || fail "F183 old: an upgrade left the OLD shipped default feedback.repo in place (got: $(grep "^  repo:" "$_acfg"))"
+  ! grep -qxF "  repo: $_old" "$_acfg" || fail "F183 old: the old default survived the upgrade"
+  [ "$(grep -c 'feedback.repo: repointed' "$_aout")" = 1 ] \
+    || fail "F183 old: expected exactly one 'feedback.repo: repointed' info line, got $(grep -c 'feedback.repo: repointed' "$_aout")"
+  # (b) idempotent: an immediate re-run changes nothing and prints no rewrite line.
+  cp "$_acfg" "$T/f183-old.after"
+  sh "$INSTALL" "$_a" >"$_aout" 2>/dev/null || fail "F183 idempotent: re-run failed"
+  cmp -s "$T/f183-old.after" "$_acfg" || fail "F183 idempotent: the second upgrade changed the config"
+  ! grep -q 'feedback.repo: repointed' "$_aout" || fail "F183 idempotent: the second upgrade printed a rewrite line"
+  # (c) a CUSTOM value (a fork, a longer name sharing the old prefix, a quoted old value)
+  # survives untouched and silently.
+  for _c in 'github.com/acme/our-fork' "$_old-fork" "\"$_old\"" "ghe.corp/araozmd/harness-sdd"; do
+    _d="$T/f183-custom"; rm -rf "$_d"; mkdir -p "$_d"
+    sh "$INSTALL" "$_d" >/dev/null 2>&1 || fail "F183 custom: seed install failed"
+    _dcfg="$_d/.harness/harness.config.yaml"
+    sed "s#^  repo: .*#  repo: $_c#" "$_dcfg" > "$T/f183-c.cfg" && cat "$T/f183-c.cfg" > "$_dcfg"
+    cp "$_dcfg" "$T/f183-c.before"
+    sh "$INSTALL" "$_d" >"$T/f183-c.out" 2>/dev/null || fail "F183 custom: upgrade failed"
+    cmp -s "$T/f183-c.before" "$_dcfg" \
+      || fail "F183 custom: a customized feedback.repo ($_c) was rewritten: $(diff "$T/f183-c.before" "$_dcfg" | head -n 4)"
+    ! grep -q 'feedback.repo: repointed' "$T/f183-c.out" || fail "F183 custom: a rewrite line was printed for the untouched value $_c"
+  done
+  # (d) an old-default-looking `repo:` line OUTSIDE the feedback: section is not ours to touch.
+  _e="$T/f183-other"; mkdir -p "$_e"
+  sh "$INSTALL" "$_e" >/dev/null 2>&1 || fail "F183 scope: seed install failed"
+  _ecfg="$_e/.harness/harness.config.yaml"
+  printf '\nsomething_else:\n  repo: %s\n' "$_old" >> "$_ecfg"
+  sh "$INSTALL" "$_e" >/dev/null 2>&1 || fail "F183 scope: upgrade failed"
+  grep -qxF "  repo: $_old" "$_ecfg" || fail "F183 scope: a repo: line outside feedback: was rewritten"
+  grep -qxF "  repo: $_new" "$_ecfg" || fail "F183 scope: the fresh feedback.repo default is missing"
+  pass "an upgrade repoints feedback.repo only when it is the old shipped default, once and idempotently, and never a custom value or a line outside feedback: (E99-F183) [test_repo_rename_migration]"
+}
+
 # ── non-functional: suite itself is +x, POSIX sh (E32-F01 tests.md) ───────────────────
 test_suite_is_executable() {
   [ -x "$SRC/tests/test_feedback_config.sh" ] \
@@ -467,6 +513,7 @@ test_self_mode_silent_and_config_untouched
 test_cascade_per_target_seed_and_notice
 test_install_doc_contract
 test_umbrella_resolution_docs
+test_repo_rename_migration
 test_version_and_changelog
 test_suite_is_executable
 
