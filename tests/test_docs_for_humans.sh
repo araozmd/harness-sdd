@@ -195,17 +195,21 @@ budget_ok() { [ "$(nlines "$1")" -le "$2" ]; }
 
 R3_h1_brand_token() {
   _l1="$(sed -n '1p' "$README")"
-  printf '%s\n' "$_l1" | grep -qE '^# [A-Za-z0-9._-]+$' || fail "R3: README line 1 is not a single-token H1 (got: $_l1)"
-  [ "$_l1" = "# harness-loop" ] || fail "R3: README line 1 is not '# harness-loop' (got: $_l1)"
+  printf '%s\n' "$_l1" | grep -qE '^<h1 align="center">.*</h1>$' || fail "R3: README line 1 is not the centered HTML <h1> (got: $_l1)"
+  printf '%s\n' "$_l1" | grep -qF 'src="assets/logo-wordmark.svg"' || fail "R3: the README <h1> does not embed assets/logo-wordmark.svg"
+  _alt="$(printf '%s\n' "$_l1" | sed -n 's/.*<img [^>]*alt="\([^"]*\)".*/\1/p')"
+  [ "$_alt" = "harness-loop" ] || fail "R3: the README <h1> image alt is not exactly 'harness-loop' (got: $_alt)"
+  [ "$(grep -c '<h1' "$README")" -eq 1 ] || fail "R3: README must hold exactly one <h1>"
+  grep -q '^# ' "$README" && fail "R3: README also carries a Markdown H1; the wordmark is the heading"
   pass "R3_h1_brand_token"
 }
 R3_logo_and_tagline() {
-  sed -n '1,12p' "$README" | grep -qF 'assets/logo.svg' || fail "R3: README does not reference assets/logo.svg within its first 12 lines"
+  sed -n '1,12p' "$README" | grep -qF 'assets/logo' || fail "R3: README does not reference assets/logo* within its first 12 lines"
   sed -n '1,15p' "$README" | grep -qF 'docs/agents/README.md' || fail "R3: README does not link docs/agents/README.md within its first 15 lines"
   [ -f "$ROOT/docs/BRAND.md" ] || fail "R3: docs/BRAND.md does not exist (the tagline source)"
   _tag="$(sed -n 's/^\*\*Tagline\.\*\* //p' "$ROOT/docs/BRAND.md")"
   [ -n "$_tag" ] || fail "R3: docs/BRAND.md has no '**Tagline.** ' line"
-  grep -qxF -- "$_tag" "$README" || fail "R3: no README line equals the BRAND.md tagline"
+  sed -n '2,8p' "$README" | grep -qxF "<p align=\"center\">$_tag</p>" || fail "R3: no centered README line within lines 2-8 wraps the BRAND.md tagline byte for byte"
   pass "R3_logo_and_tagline"
 }
 R3_how_it_works_diagram() {
@@ -217,6 +221,13 @@ R3_how_it_works_diagram() {
   for _w in spec-ready in-progress in-review done approve Reviewer; do
     printf '%s\n' "$_d" | grep -qF -- "$_w" || fail "R3: the How it works diagram does not name '$_w'"
   done
+  for _e in '-->|spec-ready|' '-->|in-progress|' '-->|in-review|' '-->|done|'; do
+    printf '%s\n' "$_d" | grep -qF -- "$_e" || fail "R3: the diagram does not label a solid edge '$_e'"
+  done
+  printf '%s\n' "$_d" | grep -qF -- '-.' && fail "R3: the diagram still has dotted edges"
+  _hero="$(printf '%s\n' "$_s" | grep -n 'assets/hero.svg' | head -n 1 | cut -d: -f1)"
+  _fence="$(printf '%s\n' "$_s" | grep -n 'mermaid' | head -n 1 | cut -d: -f1)"
+  [ -n "$_hero" ] && [ "$_hero" -lt "$_fence" ] || fail "R3: assets/hero.svg is not embedded in ## How it works above the diagram"
   pass "R3_how_it_works_diagram"
 }
 R3_quick_start_three_steps() {
@@ -303,6 +314,12 @@ R11_brand_doc_shape() {
     grep -qF "\`$_a\`" "$BRAND" || fail "R11: BRAND.md does not name \`$_a\` in a code span"
   done
   pass "R11_brand_doc_shape"
+}
+R11_brand_embeds_art() {
+  _u='https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/'
+  sed -n '1,6p' "$BRAND" | grep -qF "](${_u}logo-wordmark.svg)" || fail "R11: BRAND.md does not embed the light wordmark within its first 6 lines"
+  slice "$BRAND" "## Logo" | sed -n '1,3p' | grep -qF "](${_u}brand-sheet.png)" || fail "R11: BRAND.md does not embed brand-sheet.png at the top of ## Logo"
+  pass "R11_brand_embeds_art"
 }
 R11_brand_installed_names_sentence() {
   grep -qxF 'Installed names do not change: `.harness/`, `harness-install.sh`, `harness.config.yaml` and the `/sdd-*` commands keep their names.' "$BRAND" ||
@@ -466,22 +483,33 @@ link_targets() {
     while (match(line, /\]\([^)]*\)/)) { print substr(line, RSTART + 2, RLENGTH - 3); line = substr(line, RSTART + RLENGTH) }
   }'
 }
-# links_into_assets <root> — print each docs/ link target that resolves under <root>/assets/.
+# links_into_assets <root> — print each docs/ link target that reaches assets/: a relative
+# target that resolves under <root>/assets/, or an absolute one that names /assets/ unless it
+# sits in docs/BRAND.md and starts with a canonical prefix.
 links_into_assets() {
   find "$1/docs" -name '*.md' | sort | while IFS= read -r _f; do
     link_targets "$_f" | while IFS= read -r _t; do
-      case "$_t" in ""|\#*|http://*|https://*|mailto:*) continue ;; esac
+      case "$_t" in ""|\#*|mailto:*) continue ;; esac
       printf '%s\t%s\n' "$_f" "${_t%%#*}"
     done
   done | python3 -I -c '
 import os, sys
 root = sys.argv[1]
 assets = os.path.join(root, "assets")
+ok = ("https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/",
+      "https://github.com/araozmd/harness-loop/blob/main/assets/")
 for line in sys.stdin:
     f, t = line.rstrip("\n").split("\t")
+    rel = os.path.relpath(f, root)
+    if t.startswith(("http://", "https://")):
+        if "/assets/" in t and not (rel == os.path.join("docs", "BRAND.md") and t.startswith(ok)):
+            print(rel + " -> " + t)
+        continue
     p = os.path.normpath(os.path.join(os.path.dirname(f), t))
     if p == assets or p.startswith(assets + os.sep):
-        print(os.path.relpath(f, root) + " -> " + t)' "$1"
+        print(rel + " -> " + t)' "$1"
+  # HTML attributes are not Markdown links; no doc may point one at a relative assets/ path
+  grep -rEn '(src|href)="(\.\./|\./)*assets/' "$1/docs" 2>/dev/null || true
 }
 R2_no_assets_links_under_docs() {
   _bad="$(links_into_assets "$ROOT")"
@@ -492,6 +520,18 @@ R2_no_assets_links_under_docs() {
   rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
   printf '\n[sheet](agents/../../assets/brand-sheet.png)\n' >> "$T/r2/docs/README.md"
   [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: the assets-link check misses a link that reaches assets/ through a .. segment"
+  _canon='https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/logo.svg'
+  rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
+  printf '\n![x](%s)\n' "$_canon" >> "$T/r2/docs/BRAND.md"
+  [ -z "$(links_into_assets "$T/r2")" ] || fail "R2: a canonical absolute URL in docs/BRAND.md was flagged"
+  printf '\n![x](%s)\n' "$_canon" >> "$T/r2/docs/README.md"
+  [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: a canonical absolute assets URL outside docs/BRAND.md was not flagged"
+  rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
+  printf '\n![x](https://example.com/assets/logo.svg)\n' >> "$T/r2/docs/BRAND.md"
+  [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: a non-canonical absolute assets URL in docs/BRAND.md was not flagged"
+  rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
+  printf '\n<img src="../assets/logo.svg">\n' >> "$T/r2/docs/BRAND.md"
+  [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: a relative HTML img into assets/ was not flagged"
   pass "R2_no_assets_links_under_docs"
 }
 
@@ -805,7 +845,7 @@ row R3_h1_brand_token; row R3_logo_and_tagline; row R3_how_it_works_diagram
 row R3_quick_start_three_steps; row R3_sections_and_links; row R3_kept_tokens; row R3_budget_150
 row R5_concepts_sections; row R5_concepts_state_diagram; row R5_concepts_review_names_both_mechanisms
 row R5_concepts_links; row R5_budget_220
-row R11_brand_doc_shape; row R11_brand_installed_names_sentence; row R11_palette_tokens
+row R11_brand_doc_shape; row R11_brand_embeds_art; row R11_brand_installed_names_sentence; row R11_palette_tokens
 row R11_svgs_parse_and_wordmark_names_brand; row R11_social_preview_1280x640; row R11_budget_90
 row R6_budget; row R6_filler_phrases; row R6_archaeology; row R6_diagram_present_and_typed
 row R2_no_assets_links_under_docs
