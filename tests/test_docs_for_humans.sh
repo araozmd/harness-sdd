@@ -1212,6 +1212,71 @@ F02_R7_no_stale_citations() {
   pass "F02_R7_no_stale_citations"
 }
 
+# F02_R8 — anchors resolve. anchor_problems <root> prints "<file> -> <target>" for every relative
+# <path>.md#<fragment> / #<fragment> link (inline or reference definition, outside fences) under
+# README.md and docs/**/*.md whose fragment is not the GitHub slug of a heading of the target.
+anchor_problems() {
+  { echo "$1/README.md"; find "$1/docs" -name '*.md' | sort; } > "$T/anchor.files"
+  : > "$T/anchor.links"; : > "$T/anchor.heads"
+  while IFS= read -r _f; do
+    [ -f "$_f" ] || continue
+    link_targets "$_f" | while IFS= read -r _t; do
+      case "$_t" in *"#"*) ;; *) continue ;; esac
+      case "$_t" in http://*|https://*|mailto:*) continue ;; esac
+      printf '%s\t%s\n' "$_f" "$_t"
+    done >> "$T/anchor.links"
+    unfenced "$_f" | grep -E '^#{1,6} ' | while IFS= read -r _h; do printf '%s\t%s\n' "$_f" "$_h"; done >> "$T/anchor.heads" || true
+  done < "$T/anchor.files"
+  # a target outside the scan set (an agents/*.md role prompt) still needs its headings indexed
+  python3 -I -c '
+import os, sys
+seen = set()
+for line in open(sys.argv[1], encoding="utf-8"):
+    f, t = line.rstrip("\n").split("\t", 1)
+    path = t.split("#", 1)[0]
+    if path:
+        seen.add(os.path.normpath(os.path.join(os.path.dirname(f), path)))
+for p in sorted(seen):
+    if os.path.isfile(p): print(p)' "$T/anchor.links" | while IFS= read -r _g; do
+    grep -qxF "$_g" "$T/anchor.files" && continue
+    unfenced "$_g" | grep -E '^#{1,6} ' | while IFS= read -r _h; do printf '%s\t%s\n' "$_g" "$_h"; done >> "$T/anchor.heads" || true
+  done
+  python3 -I - "$1" "$T/anchor.links" "$T/anchor.heads" <<'PY'
+import os, re, sys
+root, links, heads = sys.argv[1:4]
+def slug(h):
+    h = re.sub(r'^#+\s*', '', h).strip().lower()
+    return re.sub(r'[^a-z0-9 _-]', '', h).replace(' ', '-')
+slugs = {}
+for line in open(heads, encoding='utf-8'):
+    f, h = line.rstrip('\n').split('\t', 1)
+    slugs.setdefault(os.path.normpath(f), set()).add(slug(h))
+for line in open(links, encoding='utf-8'):
+    f, t = line.rstrip('\n').split('\t', 1)
+    path, frag = t.split('#', 1)
+    tgt = os.path.normpath(os.path.join(os.path.dirname(f), path)) if path else os.path.normpath(f)
+    if not os.path.isfile(tgt):
+        continue
+    if frag not in slugs.get(tgt, set()):
+        print(os.path.relpath(f, root) + ' -> ' + t)
+PY
+}
+F02_R8_anchors_resolve() {
+  _bad="$(anchor_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F02 R8: unresolved anchors: $(printf '%s' "$_bad" | tr '\n' ';')"
+  mirror m8; printf '\n[x](docs/INSTALL.md#no-such)\n' >> "$T/m8/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'README.md -> docs/INSTALL.md#no-such' || fail "F02 R8: the anchor check misses a stale fragment in README.md"
+  mirror m8; printf '\n[x](INSTALL.md#nope)\n' >> "$T/m8/docs/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'docs/README.md -> INSTALL.md#nope' || fail "F02 R8: the anchor check misses a stale fragment in docs/README.md"
+  mirror m8; printf '\n[x](#nowhere)\n' >> "$T/m8/docs/agents/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'docs/agents/README.md -> #nowhere' || fail "F02 R8: the anchor check misses a stale fragment in docs/agents/README.md"
+  mirror m8; printf '\n[x][r]\n\n[r]: INSTALL.md#nope-ref\n' >> "$T/m8/docs/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'docs/README.md -> INSTALL.md#nope-ref' || fail "F02 R8: the anchor check misses a stale reference-style definition"
+  mirror m8; printf '\n[x](INSTALL.md#bootstrap-first-run) [y](agents/INSTALL.md#layout--ownership)\n\n```md\n[z](INSTALL.md#fenced-nope)\n```\n' >> "$T/m8/docs/README.md"
+  [ -z "$(anchor_problems "$T/m8")" ] || fail "F02 R8: the anchor check flags a valid link, the & slug rule or a fenced link: $(anchor_problems "$T/m8")"
+  pass "F02_R8_anchors_resolve"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1237,6 +1302,7 @@ row F02_R10_registry_and_index
 row F02_R2_human_shape; row F02_R3_install_diagram; row F02_R4_upgrade_diagram
 row F02_R5_accuracy_sentences; row F02_R5_no_over_claims
 row F02_R7_no_stale_citations
+row F02_R8_anchors_resolve
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
