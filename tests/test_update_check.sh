@@ -130,6 +130,7 @@ sub=""
 for a in "\$@"; do case "\$a" in ls-remote|clone|fetch) sub=\$a; break ;; esac; done
 case "$1:\$sub" in
   hang:ls-remote) sleep 37; exit 1 ;;
+  hang-term:ls-remote) trap '' TERM; while :; do sleep 39; done ;;
   fail-fetch:clone|fail-fetch:fetch) echo "shim: refusing \$sub" >&2; exit 128 ;;
 esac
 exec "$REAL_GIT" "\$@"
@@ -350,6 +351,14 @@ R3_failure_silent_bounded_cached() {
   [ "$GATE_SECS" -ge "$_floor" ] || fail "R3 C8 control: the gate ended in ${GATE_SECS}s, below max(3s timeout, baseline ${_base}s + 1s) — the shim did not hang"
   ps -ax -o command 2>/dev/null | grep -q '[s]leep 37' && fail "R3 C8: an orphan 'sleep 37' outlived the gate"
   [ -n "$(rec "$T/r3-hang" checked)" ] && [ -z "$(rec "$T/r3-hang" latest)" ] || fail "R3 C8: the abandoned attempt was not cached as a failure"
+  # C8c — a git that IGNORES SIGTERM is escalated to SIGKILL: bounded (timeout + <=1s grace),
+  # exit 0, silent, no orphan
+  mk_target "$T/r3-hang-term"
+  SHIM_MODE=hang-term run_gate "$T/r3-hang-term" "" HARNESS_UPDATE_REMOTE="$(remote_url newer)" HARNESS_UPDATE_TIMEOUT=1
+  [ "$GATE_RC" = 0 ] || fail "R3 C8c: a SIGTERM-ignoring git changed the exit code: $GATE_OUT"
+  [ "$(bell_n)" = 0 ] || fail "R3 C8c: printed a notice though the remote never answered"
+  [ "$GATE_SECS" -le $((_base + 1 + 1 + 1)) ] || fail "R3 C8c: the gate took ${GATE_SECS}s, bound is baseline ${_base}s + 1s timeout + 1s grace + 1s margin (SIGTERM was never escalated)"
+  ps -ax -o command 2>/dev/null | grep -q '[s]leep 39' && fail "R3 C8c: an orphan 'sleep 39' outlived the gate"
   # C3b — an ssh remote is asked with BatchMode=yes (no host-key / passphrase prompt on /dev/tty),
   # appended to the ssh command GIT ITSELF would pick — never a bare `ssh` that overrides the
   # user's own. The whole precedence table ($GIT_SSH_COMMAND > core.sshCommand > $GIT_SSH > ssh)

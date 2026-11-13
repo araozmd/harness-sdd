@@ -64,7 +64,7 @@
 |---|---|---|---|---|
 | R1 | newer tag ⇒ exactly one `🔔 harness v$NEXT available (installed v$CUR)` line, exit code and other lines unchanged | `tests/test_update_check.sh::R1_notice_when_newer` (C10) | behavioral | ⬜ |
 | R2 | source layout, env opt-out, config opt-out, umbrella child, no git ⇒ no contact, no line, output identical to a disabled run; positive control = same fixture without the skip reason prints the notice | `tests/test_update_check.sh::R2_silent_skips_table` (C1–C5 + controls) | behavioral | ⬜ |
-| R3 | failing remote and hanging remote ⇒ no line, exit unchanged, gate ends within `HARNESS_UPDATE_TIMEOUT`+gate time, failure cached (second run makes no `ls-remote` call) | `tests/test_update_check.sh::R3_failure_silent_bounded_cached` (C7, C8, C8b) | behavioral | ⬜ |
+| R3 | failing remote and hanging remote ⇒ no line, exit unchanged, gate ends within `HARNESS_UPDATE_TIMEOUT`+gate time, failure cached (second run makes no `ls-remote` call) | `tests/test_update_check.sh::R3_failure_silent_bounded_cached` (C7, C8, C8b, C8c) | behavioral | ⬜ |
 | R4 | same / older / junk-only tags ⇒ no line; `newer+junk` still reports `v$NEXT`, never `9.9.9` | `tests/test_update_check.sh::R4_same_older_junk_silent` (C9, C9b, C9c, C9d) | behavioral | ⬜ |
 | R5 | record written at `<target>/.harness/progress/update-check/last`; fresh record ⇒ no `ls-remote` call yet the notice prints from it; stale (`HARNESS_UPDATE_TTL=0`) ⇒ one call and a rewritten record; dir is git-ignored (`git check-ignore`) | `tests/test_update_check.sh::R5_cache_ttl` (C4b, C6, C6b) | behavioral | ⬜ |
 | R6 | interactive + newer ⇒ prompt after notice; `n`/empty ⇒ `declined=v$NEXT` recorded, gate continues rc 0; re-run ⇒ notice, no prompt; a higher tag ⇒ prompts again; non-interactive with `y` on stdin ⇒ no prompt, `y` not consumed (no upgrade, stamp unchanged) | `tests/test_update_check.sh::R6_prompt_only_interactive` (C11, C12, C12b, C13, C21, C22) | behavioral | ⬜ |
@@ -96,6 +96,7 @@ set; `coord` = manifest present. `cache` values: `-` absent, `F+` fresh with `la
 | C8 | inst | none | - | hang (shim, `TIMEOUT=3`) | n | – | 1 (killed) | no | no | 0 | upper bound `GATE_SECS` ≤ baseline gate time + 3 s + 1 s margin; lower bound (control: the shim really hung) `GATE_SECS` ≥ max(3, baseline + 1); no orphan `sleep` after exit; the abandoned attempt cached as a failure |
 | C3b | inst | ssh remote | – | fake ssh programs on PATH (no network), `TTL=0` each run; global config a per-cell file, system config off | n | – | – | no | no | 0 | the ssh program GIT would pick is the one invoked, with `-o BatchMode=yes` appended and the user's own arguments kept — see the C3b precedence table below |
 | C8b | inst | none | after C7 | fail | n | – | 0 | no | no | 0 | failure cached: second run within TTL makes no call |
+| C8c | inst | none | - | hang-term (shim ignores SIGTERM, `TIMEOUT=1`) | n | – | 1 (killed) | no | no | 0 | SIGTERM escalated to SIGKILL after a ≤ 1 s grace: `GATE_SECS` ≤ baseline + 1 s + 1 s grace + 1 s margin; no orphan `sleep` after exit; silent |
 | C9 | inst | none | - | same | n | – | 1 | no | no | 0 | – |
 | C9b | inst | none | - | older | n | – | 1 | no | no | 0 | – |
 | C9c | inst | none | - | junk | n | – | 1 | no | no | 0 | no `9.9.9` anywhere in output |

@@ -94,11 +94,16 @@ hu_rec_write() { # <checked> <latest> <declined-or-empty>
 # hu_kill_tree <pid> — the process and everything below it, children first (a parent killed
 # first would orphan them out of reach). `ps -A -o pid= -o ppid=` is POSIX and is on macOS and
 # Linux alike; job control (`set -m`) is NOT used because dash ignores it without a terminal.
-hu_kill_tree() {
-  for _kc in $(ps -A -o pid= -o ppid= 2>/dev/null | awk -v p="$1" '$2 == p { print $1 }'); do
-    hu_kill_tree "$_kc"
+hu_kill_tree() { # <pid> [signal, default TERM]
+  _ks="${2:-TERM}"
+  # KILL the parent FIRST: a TERM-ignoring parent could otherwise respawn a child after its
+  # children were killed. The child list is read before any signal is sent.
+  _kcs="$(ps -A -o pid= -o ppid= 2>/dev/null | awk -v p="$1" '$2 == p { print $1 }')"
+  [ "$_ks" != KILL ] || kill -KILL "$1" 2>/dev/null
+  for _kc in $_kcs; do
+    hu_kill_tree "$_kc" "$_ks"
   done
-  kill -TERM "$1" 2>/dev/null
+  [ "$_ks" = KILL ] || kill -"$_ks" "$1" 2>/dev/null
   return 0
 }
 
@@ -136,6 +141,13 @@ hu_ls_remote() {
     while kill -0 "$_lpid" 2>/dev/null; do
       if [ "$(date +%s)" -ge "$_ldl" ]; then
         hu_kill_tree "$_lpid"
+        # Bounded grace (<= 1 s wall clock, on top of the timeout), then SIGKILL: a git that
+        # ignores SIGTERM must not turn `wait` into an unbounded block.
+        _lgl=$(( $(date +%s) + 1 ))
+        while kill -0 "$_lpid" 2>/dev/null && [ "$(date +%s)" -lt "$_lgl" ]; do
+          sleep 0.1 2>/dev/null || sleep 1
+        done
+        if kill -0 "$_lpid" 2>/dev/null; then hu_kill_tree "$_lpid" KILL; fi
         wait "$_lpid" 2>/dev/null
         return 1
       fi
