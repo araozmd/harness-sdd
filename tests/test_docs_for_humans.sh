@@ -1562,6 +1562,70 @@ F03_R4_pr_loop_diagram() {
   [ -n "$(diagram_problems "$T/f34/m.md" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")" ] || fail "F03 R4: the diagram check misses a second mermaid block"
   pass "F03_R4_pr_loop_diagram"
 }
+
+# F03_R5 — the human sentences are true (one- or two-token pins on the doc folded outside fences)
+# and the known over-claims are absent. wf_accuracy_problems / wf_over_claims take a file so mutants are checked.
+wf_accuracy_problems() {
+  _t="$(unfenced "$1" | folded)"
+  _pin() { printf '%s' "$_t" | grep -qE -- "$2" || echo "$1 missing"; }
+  _pin S1a 'pauses at .spec-ready.'
+  _pin S1b 'only for low-risk work'
+  _pin S2 'skips the approval gate, not the planning gate'
+  _pin S3 'never on the approval'
+  _pin S4 'repeats until green'
+  _pin S5 'the same instructions at a heavier model tier'
+  _pin S6a 'second yes'
+  _pin S6b 'off entirely'
+  _pin S7 'parks it at the human gate'
+  _pin S8a 'non-Codex participant'
+  _pin S8b 'needs-human'
+  _pin S9a 'installed only while'
+  _pin S9b 'seeds .false.'
+  _pin S10 'stops after the green summary'
+}
+wf_over_claims() {
+  _t="$(unfenced "$1" | folded)"
+  for _o in 'nothing is built until' 'always pauses' 'never skips' 'fails closed' 'done: Reviewer approves' \
+            'Reviewer approves → done' 'merges automatically' 'E99-F130'; do
+    printf '%s' "$_t" | grep -qiF -- "$_o" && echo "$_o"
+  done
+  return 0
+}
+F03_R5_accuracy_sentences() {
+  _bad="$(wf_accuracy_problems "$ROOT/$WF_H")"
+  [ -z "$_bad" ] || fail "F03 R5: docs/WORKFLOW.md lacks pinned sentence(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  rm -rf "$T/f35"; mkdir -p "$T/f35"
+  _m() { sed "$2" "$ROOT/$WF_H" > "$T/f35/m.md"
+         cmp -s "$ROOT/$WF_H" "$T/f35/m.md" && fail "F03 R5: setup: the mutant for $1 did not apply"
+         wf_accuracy_problems "$T/f35/m.md" | grep -qF "$1 missing" || fail "F03 R5: the pin $1 survives its mutant"; }
+  _m S1b 's/ — use it only for low-risk work//'
+  _m S2 's/skips the approval gate, not the planning gate/skips the approval gate and the planning gate/'
+  _m S3 's/ — never on the approval;/;/'
+  _m S4 's/repeats until green/repeats/'
+  _m S5 's/is the same instructions at a heavier model tier/runs on a stronger model/'
+  _m S6b 's/ turns escalation off entirely,/ turns escalation down,/'
+  _m S6a 's/Both routes need a second yes from/Both routes need a nod from/'
+  _m S7 's/parks it at the human gate/pauses it/'
+  _m S8a 's/a non-Codex participant/another participant/'
+  _m S9b 's/seeds `false`/seeds `true`/'
+  _m S9a 's/is installed only while/is installed while/'
+  _m S10 's/the loop stops after the green summary/the loop continues/'
+  _m S1a 's/the Orchestrator pauses at `spec-ready`/the Orchestrator waits/'
+  pass "F03_R5_accuracy_sentences"
+}
+F03_R5_no_over_claims() {
+  _bad="$(wf_over_claims "$ROOT/$WF_H")"
+  [ -z "$_bad" ] || fail "F03 R5: docs/WORKFLOW.md contains the over-claim(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  rm -rf "$T/f35b"; mkdir -p "$T/f35b"
+  for _m in 'Nothing is built until a human approves.' 'The loop MERGES AUTOMATICALLY.' 'The gate always pauses.' 'It never skips the gate.' \
+            'The gate fails closed.' 'in_review --> done: Reviewer approves' 'Reviewer approves → done' '(E99-F130)'; do
+    { cat "$ROOT/$WF_H"; printf '\n%s\n' "$_m"; } > "$T/f35b/m.md"
+    [ -n "$(wf_over_claims "$T/f35b/m.md")" ] || fail "F03 R5: the over-claim check misses '$_m'"
+  done
+  { cat "$ROOT/$WF_H"; printf '\n```text\nNothing is built until x. always pauses never skips fails closed done: Reviewer approves merges automatically E99-F130\n```\n'; } > "$T/f35b/m.md"
+  [ -z "$(wf_over_claims "$T/f35b/m.md")" ] || fail "F03 R5: the over-claim check flags text inside a fence"
+  pass "F03_R5_no_over_claims"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1595,6 +1659,7 @@ row F03_R6_suites_cite_counterpart
 row F03_R2_human_shape
 row F03_R3_state_diagram
 row F03_R4_pr_loop_diagram
+row F03_R5_accuracy_sentences; row F03_R5_no_over_claims
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"

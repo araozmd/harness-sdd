@@ -5,7 +5,7 @@ time: the Architect writes the spec, the Builder writes the code, the Reviewer c
 gates frame the story, a human approval before code is written and an independent review before
 anything merges, and each has exceptions that this page names.
 
-Exact contracts — the routing table, every reason code, every exit code — are in [agents/WORKFLOW.md](agents/WORKFLOW.md).
+Exact contracts — the routing table, the reason codes and the PR loop's exit codes — are in [agents/WORKFLOW.md](agents/WORKFLOW.md).
 
 ## From idea to task
 
@@ -141,11 +141,11 @@ Each link opens the section of the exact contract that decides the topic.
 
 - [Intake](agents/WORKFLOW.md#intake--the-step-before-pending-sdd-new) — how an idea becomes a `pending` row.
 - [Epic lifecycle](agents/WORKFLOW.md#epic-lifecycle) — `draft` to `done`, and the planning gate.
-- [State machine](agents/WORKFLOW.md#state-machine) — every transition and its guard.
+- [State machine](agents/WORKFLOW.md#state-machine) — the transitions and their guards.
 - [The human gate](agents/WORKFLOW.md#the-human-in-the-loop-gate) — what the approval pause covers.
 - [Selective SDD](agents/WORKFLOW.md#selective-sdd-the-sdd-flag) — the `sdd` flag and the fix lanes.
 - [Which Builder runs](agents/WORKFLOW.md#which-builder-runs--deterministic-escalation) — the escalation rule.
-- [The PR review loop](agents/WORKFLOW.md#the-pr-review-loop-sdd-pr-loop) — every step and exit code.
+- [The PR review loop](agents/WORKFLOW.md#the-pr-review-loop-sdd-pr-loop) — the steps and the exit codes.
 - [Parking a feature](agents/WORKFLOW.md#parking-a-feature-parked) — parks, owner gates and landing evidence.
 - [Diagnosing blocked selection](agents/WORKFLOW.md#diagnosing-blocked-selection) — the reason codes in full.
 - [Running in waves](agents/WORKFLOW.md#running-in-waves-and-across-machines) — parallel work and several machines.
