@@ -690,7 +690,7 @@ test_drift_report_installed_contract() {
 }
 
 test_docs_for_humans_installed_contract() {
-  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md docs/INSTALL.md docs/agents/INSTALL.md; do
+  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md docs/INSTALL.md docs/agents/INSTALL.md docs/WORKFLOW.md docs/agents/WORKFLOW.md; do
     cmp -s "$SRC/$_f" "$T/.harness/$_f" || fail "E39-F01: installed $_f is missing or differs from source"
   done
   find "$T/.harness" -name assets | grep -q . && fail "E39-F01: a path named assets was installed under .harness/"
