@@ -4,6 +4,20 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.110.1] — 2026-11-13
+
+### Fixed — repoint the shipped URL defaults to `araozmd/harness-loop` (E99-F183)
+- The GitHub repo was renamed `araozmd/harness-sdd` → `araozmd/harness-loop`. Two defaults still
+  named the old repo and worked only while GitHub's redirect held: the update check's default
+  remote (`tools/harness-update.sh`) and the feedback reporter's default repo
+  (`tools/harness-report.sh`), plus the `feedback.repo` seed, the `update.remote` comment, the
+  `/sdd-triage` example slug and the docs examples.
+- Upgrade migration: `migrate_config` rewrites an existing install's `feedback.repo` ONLY when it
+  is byte-identical to the old shipped default `github.com/araozmd/harness-sdd`, with one info
+  line; a customized value (a fork, a GHE host) and an already-new value are never touched.
+  `update.remote` seeds empty, so there is nothing to migrate there.
+- Historical PR citations (`araozmd/harness-sdd#141`, `#96`, …) are unchanged.
+
 ## [0.110.0] — 2026-11-12
 
 ### Added — docs for humans, slice 1 (E39-F01)

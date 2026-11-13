@@ -11,7 +11,7 @@ Read agents/orchestrator.md, including Source-only feedback triage.
 Run ./init.sh first and halt on any non-zero exit. This workflow exists only in
 this harness source checkout; refuse an installed target without the source helper.
 Read harness.config.yaml and resolve feedback.repo: missing/empty uses
-github.com/araozmd/harness-sdd; OWNER/REPO adds github.com; HOST/OWNER/REPO is explicit.
+github.com/araozmd/harness-loop; OWNER/REPO adds github.com; HOST/OWNER/REPO is explicit.
 Match F01: strip trailing comments/whitespace, do not unquote, require two or three
 nonempty [A-Za-z0-9._-]+ components. Malformed configuration stops without reads.
 Never infer this repository from the current remote.

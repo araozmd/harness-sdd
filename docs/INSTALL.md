@@ -557,7 +557,7 @@ block yet, both seed:
 ```yaml
 feedback:
   enabled: true
-  repo: github.com/araozmd/harness-sdd
+  repo: github.com/araozmd/harness-loop
   max_per_session: 3
 ```
 
@@ -917,7 +917,7 @@ remote is contacted at most once a day. That directory is already ignored by ver
 |---|---|
 | Turn the check off for good | `update.check: false` in `harness.config.yaml` |
 | Turn it off for one run | `HARNESS_SKIP_UPDATE_CHECK=1 ./init.sh` (silent, on purpose: a forgotten opt-out costs a notice, not safety) |
-| Check a fork | `update.remote: <git URL>` in `harness.config.yaml`, or `HARNESS_UPDATE_REMOTE=<git URL>` for one run. Empty means `https://github.com/araozmd/harness-sdd.git` |
+| Check a fork | `update.remote: <git URL>` in `harness.config.yaml`, or `HARNESS_UPDATE_REMOTE=<git URL>` for one run. Empty means `https://github.com/araozmd/harness-loop.git` |
 | Never checked | the harness source repo itself (no `.harness-version`), an umbrella child (the coordinator's upgrade cascades), a machine without `git` |
 
 **Answering `y`** fetches that tag into `.harness/progress/update-check/repo/` and shows a

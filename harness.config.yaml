@@ -367,7 +367,7 @@ change_size:
 # tag's own harness-install.sh, then a check that this file's values and the prose in
 # CLAUDE.md / AGENTS.md survived). Never blocks the gate: bounded to 3 s, cached 24 h, silent
 # offline. `check: false` switches it off for good (per run: HARNESS_SKIP_UPDATE_CHECK=1).
-# `remote` is the git URL to read tags from; empty ⇒ https://github.com/araozmd/harness-sdd.git.
+# `remote` is the git URL to read tags from; empty ⇒ https://github.com/araozmd/harness-loop.git.
 # A fork sets its own here. Skipped in an umbrella child — the coordinator's upgrade cascades.
 update:
   check: true
@@ -443,5 +443,5 @@ workers:
 # governs sessions rooted there — no inheritance from the coordinator.
 feedback:
   enabled: true
-  repo: github.com/araozmd/harness-sdd
+  repo: github.com/araozmd/harness-loop
   max_per_session: 3

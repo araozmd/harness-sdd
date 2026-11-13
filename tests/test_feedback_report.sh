@@ -94,7 +94,7 @@ make_fixture() { # make_fixture [enabled] [repo] [max_per_session] [installed-ve
   {
     printf 'feedback:\n'
     printf '  enabled: %s\n' "${1-true}"
-    printf '  repo: %s\n' "${2-github.com/araozmd/harness-sdd}"
+    printf '  repo: %s\n' "${2-github.com/araozmd/harness-loop}"
     printf '  max_per_session: %s\n' "${3-3}"
   } > "$_fx/.harness/harness.config.yaml"
   git -C "$_fx" init -q 2>/dev/null || true
@@ -180,7 +180,7 @@ present() { grep -qF -- "$1" "$2" 2>/dev/null || fail "$3"; }
 
 # ── R1 ────────────────────────────────────────────────────────────────────────────────────
 test_marker_grammar() {
-  _fx="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx"
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --command run-tests.sh --exit-code 1 \
@@ -203,7 +203,7 @@ test_marker_grammar() {
 
   # A non-semver installed version must file NOTHING upstream — a marker that violates its
   # own grammar is never emitted — and still write the local report.
-  _fx2="$(make_fixture true github.com/araozmd/harness-sdd 3 0.86.0-rc1)"
+  _fx2="$(make_fixture true github.com/araozmd/harness-loop 3 0.86.0-rc1)"
   use_fx "$_fx2"
   run_ok "$_fx2" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --session-id s-version
@@ -217,7 +217,7 @@ test_marker_grammar() {
 
 # ── R2 ────────────────────────────────────────────────────────────────────────────────────
 test_disabled_is_silent() {
-  _fx="$(make_fixture false github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx="$(make_fixture false github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx"
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --session-id s-off
@@ -228,7 +228,7 @@ test_disabled_is_silent() {
 
   # Positive control: the SAME path with enabled: true must file. Without this the two
   # negatives above would pass even if the whole report path were broken.
-  _fx2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx2="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx2"
   run_ok "$_fx2" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --session-id s-on
@@ -270,7 +270,7 @@ test_repo_resolution() {
   use_fx "$_fx3"
   run_ok "$_fx3" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --session-id s-c
-  [ "$(argv_value --repo)" = "araozmd/harness-sdd" ] \
+  [ "$(argv_value --repo)" = "araozmd/harness-loop" ] \
     || fail "R3: an empty repo did not resolve to the shipped default owner/repo (got: $(argv_value --repo))"
   [ "$(argv_value --hostname)" = "github.com" ] \
     || fail "R3: an empty repo did not resolve the default host github.com (got: $(argv_value --hostname))"
@@ -293,7 +293,7 @@ test_repo_resolution() {
 test_field_allowlist_rejects() {
   _reject_case() { # <desc> <args...>
     _d="$1"; shift
-    _f="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+    _f="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
     use_fx "$_f"
     run_ok "$_f" "$@" --session-id s-r4 --file tools/run-tests.sh
     [ "$(create_count)" = "0" ] \
@@ -303,7 +303,7 @@ test_field_allowlist_rejects() {
   }
   _create_case() { # <desc> <args...> — the positive control that proves the predicate is live
     _d="$1"; shift
-    _f="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+    _f="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
     use_fx "$_f"
     run_ok "$_f" "$@" --session-id s-r4 --file tools/run-tests.sh
     [ "$(create_count)" = "1" ] \
@@ -349,7 +349,7 @@ test_field_allowlist_rejects() {
 
   # ── `--command` SHIPPEDNESS (R4; closes F1 and F5) ─────────────────────────────────────
   # A shipped sdd-* unit present in the body creates...
-  _f="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _f="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   mkdir -p "$_f/.claude/commands"
   printf 'shipped command body\n' > "$_f/.claude/commands/sdd-next.md"
   use_fx "$_f"
@@ -358,7 +358,7 @@ test_field_allowlist_rejects() {
   [ "$(create_count)" = "1" ] \
     || fail "R4: a shipped, present sdd-next unit did NOT create — the sdd-* positive control is dead"
   # ...a project-authored sdd-* unit at the SAME project-writable path is rejected (F1)...
-  _f2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _f2="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   mkdir -p "$_f2/.claude/commands"
   printf 'project-authored\n' > "$_f2/.claude/commands/sdd-ACME-SECRET-777.md"
   use_fx "$_f2"
@@ -369,7 +369,7 @@ test_field_allowlist_rejects() {
   [ "$(report_count "$_f2")" -ge 1 ] \
     || fail "R4/F1: the rejected project-authored command wrote no local report"
   # ...a shipped NAME that is not present in this body is rejected (present means present)...
-  _f3="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _f3="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_f3"
   run_ok "$_f3" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
     --command sdd-next --session-id s-r4
@@ -378,7 +378,7 @@ test_field_allowlist_rejects() {
   # ...and a marker-injecting name is rejected by the charset guard (F5). Two vectors:
   # (a) an sdd-* name carrying ':' at the project-writable path, (b) a ':'-bearing name
   # placed under tools/ — the latter is rejected ONLY by the charset guard, so it pins it.
-  _f4="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _f4="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   mkdir -p "$_f4/.claude/commands"
   printf 'project-authored\n' > "$_f4/.claude/commands/sdd-harness-feedback:evil.md"
   use_fx "$_f4"
@@ -386,7 +386,7 @@ test_field_allowlist_rejects() {
     --command 'sdd-harness-feedback:evil' --session-id s-r4
   [ "$(create_count)" = "0" ] \
     || fail "R4/F5: a project sdd-* name carrying ':' was accepted; it could forge a second marker token in the body"
-  _f5="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _f5="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   printf 'marker-shaped tool name\n' > "$_f5/.harness/tools/harness-feedback:evil"
   use_fx "$_f5"
   run_ok "$_f5" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
@@ -396,7 +396,7 @@ test_field_allowlist_rejects() {
   # (c) embedded NEWLINE (F5 round-3 bypass): the old LINE-BASED grep matched the first
   # line and, with a tools/ file of that exact newline-bearing name present, the presence
   # arm accepted it — the `Command:` line then forged a second marker token.
-  _f6="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _f6="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   _nl_cmd="sneaky
 harness-feedback:evil"
   printf 'x\n' > "$_f6/.harness/tools/$_nl_cmd"
@@ -439,7 +439,7 @@ test_shipped_command_set_converges() {
 
 # ── R5 ────────────────────────────────────────────────────────────────────────────────────
 test_harness_owned_file_filter() {
-  _fx="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   mkdir -p "$_fx/src"
   printf 'secret project code\n' > "$_fx/src/secret-app.py"
   use_fx "$_fx"
@@ -463,7 +463,7 @@ test_harness_owned_file_filter() {
     && fail "R5: a .. escape reached the title"
 
   # No accepted file at all: no upstream issue, local report.
-  _fx2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx2="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   mkdir -p "$_fx2/src"
   printf 'secret project code\n' > "$_fx2/src/secret-app.py"
   use_fx "$_fx2"
@@ -478,7 +478,7 @@ test_harness_owned_file_filter() {
 
 # ── R6 ────────────────────────────────────────────────────────────────────────────────────
 test_title_format() {
-  _fx="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx"
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --command run-tests.sh --exit-code 1 \
@@ -489,7 +489,7 @@ test_title_format() {
 
   # A second trigger/symptom/file combination proves the variables are the accepted ones,
   # not a hard-coded fixture.
-  _fx2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx2="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx2"
   run_ok "$_fx2" --trigger workaround --symptom doc-conflict \
     --file tools/change-size.sh --session-id s-title2
@@ -501,7 +501,7 @@ test_title_format() {
 
 # ── R7 ────────────────────────────────────────────────────────────────────────────────────
 test_body_allowlisted_no_freeform() {
-  _fx="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   _notes="$T/notes-r7.txt"
   printf 'agent observed the board write fail\nZEBRAFISH-NOTE-90817\n' > "$_notes"
   use_fx "$_fx"
@@ -598,7 +598,7 @@ test_duplicate_skips_create() {
   # (a) CONTROL: an issue whose title merely mentions the words — here it EMBEDS the fixed
   # title inside a longer title — must NOT suppress a distinct report. An inexact
   # matcher (substring, prefix, case-folded) would wrongly turn this red.
-  _fx="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx"
   SH_LIST_JSON='[{"number":9,"title":"Re: [harness-feedback] harness-malfunction tool-failure in tools/run-tests.sh (possible duplicate?)"}]'
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure \
@@ -612,7 +612,7 @@ test_duplicate_skips_create() {
 
   _exact_title="$(argv_value --title)"
   # (b) an EXACT title match means no create and no comment; the local copy is still written.
-  _fx2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx2="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx2"
   SH_LIST_JSON="[{\"number\":8,\"title\":\"$_exact_title\"}]"
   run_ok "$_fx2" --trigger harness-malfunction --symptom tool-failure \
@@ -630,7 +630,7 @@ test_duplicate_skips_create() {
 
 # ── R10 ───────────────────────────────────────────────────────────────────────────────────
 test_session_cap() {
-  _fx="$(make_fixture true github.com/araozmd/harness-sdd 2 9.9.9)"
+  _fx="$(make_fixture true github.com/araozmd/harness-loop 2 9.9.9)"
   use_fx "$_fx"
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh --session-id S1
   [ "$(create_count)" = "1" ] || fail "R10: first call under the cap did not create"
@@ -646,7 +646,7 @@ test_session_cap() {
     || fail "R10: the ledger did not reset for the new token (got: $(cat "$_fx/.harness/progress/feedback/.session-count"))"
 
   # Missing token: no create, local outcome no-session.
-  _fx2="$(make_fixture true github.com/araozmd/harness-sdd 2 9.9.9)"
+  _fx2="$(make_fixture true github.com/araozmd/harness-loop 2 9.9.9)"
   use_fx "$_fx2"
   run_ok "$_fx2" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh
   [ "$(create_count)" = "0" ] || fail "R10: a missing session token created an issue; it must fail closed"
@@ -654,7 +654,7 @@ test_session_cap() {
     "R10: a missing session token did not record outcome no-session"
 
   # Invalid token (a space and a bang fail [A-Za-z0-9._-]{1,64}).
-  _fx3="$(make_fixture true github.com/araozmd/harness-sdd 2 9.9.9)"
+  _fx3="$(make_fixture true github.com/araozmd/harness-loop 2 9.9.9)"
   use_fx "$_fx3"
   run_ok "$_fx3" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh \
     --session-id 'bad token!'
@@ -663,14 +663,14 @@ test_session_cap() {
     "R10: an invalid session token did not record outcome no-session"
 
   # max_per_session: 0 files nothing upstream.
-  _fx4="$(make_fixture true github.com/araozmd/harness-sdd 0 9.9.9)"
+  _fx4="$(make_fixture true github.com/araozmd/harness-loop 0 9.9.9)"
   use_fx "$_fx4"
   run_ok "$_fx4" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh --session-id S0
   [ "$(create_count)" = "0" ] || fail "R10: max_per_session=0 created an issue"
   [ "$(report_count "$_fx4")" -ge 1 ] || fail "R10: max_per_session=0 wrote no local report"
 
   # The env-var form of the token works too (the interface names it).
-  _fx5="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx5="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx5"
   export HARNESS_FEEDBACK_SESSION_ID=env-session
   run_ok "$_fx5" --trigger harness-malfunction --symptom tool-failure --file tools/run-tests.sh
@@ -686,7 +686,7 @@ test_local_copy_and_fallback() {
   printf 'verbatim notes line ZEBRAFISH-R11\n' > "$_notes"
 
   # Positive control: a filed report AND a local copy with the structured fields + notes.
-  _fx="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx"
   run_ok "$_fx" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --role builder --phase builder --notes-file "$_notes" --session-id s-r11
@@ -700,7 +700,7 @@ test_local_copy_and_fallback() {
   present 'ZEBRAFISH-R11' "$_rep" "R11: the free-form notes are not in the local copy verbatim"
 
   # gh missing entirely: local copy only, exit 0.
-  _fx2="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx2="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx2"
   run_nogh "$_fx2" --trigger harness-malfunction --symptom tool-failure \
     --file tools/run-tests.sh --session-id s-nogh
@@ -709,7 +709,7 @@ test_local_copy_and_fallback() {
     "R11: a missing gh did not record outcome fallback"
 
   # gh present but unauthenticated on the resolved host: local copy only, no create, exit 0.
-  _fx3="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx3="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx3"
   SH_AUTH_RC=1
   run_ok "$_fx3" --trigger harness-malfunction --symptom tool-failure \
@@ -719,7 +719,7 @@ test_local_copy_and_fallback() {
     "R11: an unauthenticated gh did not record outcome fallback"
 
   # gh present and authenticated but the create call fails: local copy only, exit 0.
-  _fx4="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx4="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx4"
   SH_CREATE_RC=1
   run_ok "$_fx4" --trigger harness-malfunction --symptom tool-failure \
@@ -731,7 +731,7 @@ test_local_copy_and_fallback() {
   # gh present and authenticated but the DUPLICATE-SEARCH call fails: local copy only, no
   # create, exit 0. The duplicate search is what gates filing, so a failed search must not
   # let the tool fall through to create (F2's M41 survivor).
-  _fx5="$(make_fixture true github.com/araozmd/harness-sdd 3 9.9.9)"
+  _fx5="$(make_fixture true github.com/araozmd/harness-loop 3 9.9.9)"
   use_fx "$_fx5"
   SH_LIST_RC=1
   run_ok "$_fx5" --trigger harness-malfunction --symptom tool-failure \
