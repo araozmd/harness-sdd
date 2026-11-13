@@ -4,6 +4,18 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.112.0] — 2026-11-13
+
+### Changed — docs for humans, slice 3: WORKFLOW split (E39-F03)
+- `docs/WORKFLOW.md` rewritten for humans (under 300 lines): the feature state machine with
+  the gate, its autonomous skip, the rejection loop and Builder escalation (diagram), and the
+  PR review loop from trigger to merge or `needs-human` (diagram).
+- `docs/agents/WORKFLOW.md` — the 0.111 WORKFLOW moved verbatim (every section, headings
+  byte-identical, link targets retargeted). 31 suites, `AGENTS.md`, the Orchestrator and Fixer
+  prompts, the `/sdd-next` command emitter and the sibling-doc pointers re-point by path only.
+- `tests/test_docs_for_humans.sh` — the shape and diagram helpers take their lists as
+  arguments; the slice-2 title-pointer row reads the counterpart.
+
 ## [0.111.0] — 2026-11-13
 
 ### Changed — docs for humans, slice 2: INSTALL split (E39-F02)
