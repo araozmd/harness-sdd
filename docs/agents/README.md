@@ -12,6 +12,7 @@ Each file is the machine counterpart of one human doc. Humans start at
 | Human doc | Machine counterpart | What moved |
 |---|---|---|
 | `README.md` | `docs/agents/README.md` | Every section of the 0.109 README except the title, the loop diagram, quick start, the short CLI table and the documentation links |
+| `docs/INSTALL.md` | `docs/agents/INSTALL.md` | The whole 0.110 INSTALL: prerequisites, install and layout, skill units, pi, Gemini retirement, the new-product and bootstrap sequences, the PR-loop gate, host detection, the three questions, feedback, worker roster, upgrade and the update check, umbrella mode, model routing, self mode, config migration, layout and ownership |
 
 ## Conventions
 

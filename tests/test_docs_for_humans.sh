@@ -11,6 +11,8 @@
 # literal; never git-diff a DO-NOT-TOUCH file against main. Exit codes are asserted as
 # `rc -eq N`, never a shell-dependent code.
 #
+# E39-F02 registers docs/INSTALL.md and adds the F02_R* rows (anchor lint, scan-set plants).
+#
 # Registry: HUMAN_DOCS lists <path>:<line-budget>:<diagram yes|no>. A later slice appends an
 # entry; an override above the default 300 carries a `# why:` comment on the line above it.
 
@@ -27,7 +29,7 @@ trap 'rm -rf "$T"' EXIT
 trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
 
-HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no"
+HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no docs/INSTALL.md:300:yes"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; echo "$1" >> "$T/passed"; }
@@ -979,6 +981,15 @@ F02_R6_suites_cite_counterpart() {
   pass "F02_R6_suites_cite_counterpart"
 }
 
+# F02_R10 — the registry entry, the budget it carries and the index row pairing the two paths.
+F02_R10_registry_and_index() {
+  printf '%s\n' "$HUMAN_DOCS" | tr ' ' '\n' | grep -qxF 'docs/INSTALL.md:300:yes' ||
+    fail "F02 R10: HUMAN_DOCS lacks the entry docs/INSTALL.md:300:yes"
+  index_rows "$AGENTS_README" | awk '$1 == "docs/INSTALL.md" && $2 == "docs/agents/INSTALL.md" { f = 1 } END { exit !f }' ||
+    fail "F02 R10: ## Index has no row pairing docs/INSTALL.md with docs/agents/INSTALL.md"
+  pass "F02_R10_registry_and_index"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1000,6 +1011,7 @@ row R10_agents_md_rows; row R10_repo_citations_resolve
 row R12_version_minor_and_changelog
 row F02_R1_counterpart_announcement; row F02_R1_counterpart_headings_in_order; row F02_R1_counterpart_retargets
 row F02_R6_suites_cite_counterpart
+row F02_R10_registry_and_index
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
