@@ -12,6 +12,7 @@
 # `rc -eq N`, never a shell-dependent code.
 #
 # E39-F02 registers docs/INSTALL.md and adds the F02_R* rows (anchor lint, scan-set plants).
+# E39-F03 registers docs/WORKFLOW.md and adds the F03_R* rows (WORKFLOW split).
 #
 # Registry: HUMAN_DOCS lists <path>:<line-budget>:<diagram yes|no>. A later slice appends an
 # entry; an override above the default 300 carries a `# why:` comment on the line above it.
@@ -1331,6 +1332,74 @@ F02_R11_version_and_changelog() {
   pass "F02_R11_version_and_changelog"
 }
 
+
+# ---------------------------------------------------------------- E39-F03 — WORKFLOW split
+# Rows named F03_R<n>_<slug>; <n> is the E39-F03 spec's R-id. Rows that read a doc take a root or a
+# file so a mutant copy under $T can be scanned; none reads VERSION as a literal or diffs main.
+WF_H="docs/WORKFLOW.md"
+WF_A="docs/agents/WORKFLOW.md"
+
+F03_R1_counterpart_announcement() {
+  [ -f "$ROOT/$WF_A" ] || fail "F03 R1: docs/agents/WORKFLOW.md does not exist"
+  [ "$(sed -n '1p' "$ROOT/$WF_A")" = "# The Workflow" ] ||
+    fail "F03 R1: line 1 of docs/agents/WORKFLOW.md is not the base H1"
+  _first="$(sed -n '2,$p' "$ROOT/$WF_A" | grep -v '^[[:space:]]*$' | sed -n '1p')"
+  [ "$_first" = '> For agents — exact contracts; the human guide is [docs/WORKFLOW.md](../WORKFLOW.md).' ] ||
+    fail "F03 R1: the first non-empty line after the H1 is not the announcement (got: $_first)"
+  pass "F03_R1_counterpart_announcement"
+}
+F03_R1_counterpart_headings_in_order() {
+  _got="$(unfenced "$ROOT/$WF_A" | grep '^#')"
+  _expect='# The Workflow
+## Host invocation and clean role contexts
+## Intake — the step before `pending` (`/sdd-new`)
+### Deterministic selection with a portable fallback
+## Whole-project inception (`/sdd-plan`)
+## Per-epic drill-down (`/sdd-drill`)
+## Change-size discipline (`change_size:`)
+### The pre-PR check (`tools/change-size.sh`)
+### The test-drift check (`tools/test-drift-check.sh`)
+## Observable slices and the walking skeleton (ADR-0008)
+## Architecture-aligned specs (the Architect cites ADRs)
+## Stage and NFRs (ADR-0009)
+## Doc-critic checkpoints
+## Drift check on epic rollup
+## Living-doc drift report (E37-F03)
+## Epic lifecycle
+## State machine
+## Ownership & scoped selection (`owner` + `/sdd-next --mine`)
+## Running in waves and across machines
+### Fanning out a wave (`/sdd-next --wave`)
+## Diagnosing blocked selection
+## Parking a feature (`parked`)
+### Blocked on the owner (`parked.gate: "owner"`)
+### `done` needs a landing record (`landed`)
+## The human-in-the-loop gate
+## Selective SDD (the `sdd` flag)
+### Lightweight fix lane (`/sdd-fix`)
+### Bounded parallel fix lane (`/sdd-fix-parallel`)
+## The PR review loop (`/sdd-pr-loop`)
+## Between approval and merge — `awaiting-merge` (E99-F130)
+## Stacked-PR lane — DEPRECATED (E21-F07)
+## Reporting harness defects (`/sdd-report`)
+### Filing discipline
+## Source-only feedback triage
+## Context hygiene
+## One run, end to end (example)
+### Which Builder runs — deterministic escalation'
+  [ "$_got" = "$_expect" ] || fail "F03 R1: the headings of docs/agents/WORKFLOW.md are not the 37 base headings in base order"
+  pass "F03_R1_counterpart_headings_in_order"
+}
+F03_R1_counterpart_retargets() {
+  _t="$(link_targets "$ROOT/$WF_A")"
+  printf '%s\n' "$_t" | grep -qE '^\.\./agents/|^\.\./store/|^\.\./specs/|^agents/' && fail "F03 R1: a relative link target was not retargeted from docs/agents/"
+  printf '%s\n' "$_t" | grep -qxF '../INSTALL.md' || fail "F03 R1: the INSTALL.md target is not ../INSTALL.md"
+  printf '%s\n' "$_t" | grep -qxF 'INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled' || fail "F03 R1: the pr-loop opt-in target is not INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled"
+  _bad="$(for _x in $(printf '%s\n' "$_t" | grep -vE '^(#|https?:|mailto:)' | sed 's/#.*//' | sort -u); do
+            [ -e "$ROOT/docs/agents/$_x" ] || echo "$_x"; done)"
+  [ -z "$_bad" ] || fail "F03 R1: counterpart link targets do not resolve from docs/agents/: $_bad"
+  pass "F03_R1_counterpart_retargets"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1358,6 +1427,8 @@ row F02_R5_accuracy_sentences; row F02_R5_no_over_claims
 row F02_R7_no_stale_citations
 row F02_R8_anchors_resolve
 row F02_R11_version_and_changelog
+# ---- E39-F03
+row F03_R1_counterpart_announcement; row F03_R1_counterpart_headings_in_order; row F03_R1_counterpart_retargets
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
