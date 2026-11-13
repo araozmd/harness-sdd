@@ -228,7 +228,21 @@ R3_how_it_works_diagram() {
   _hero="$(printf '%s\n' "$_s" | grep -n 'assets/hero.svg' | head -n 1 | cut -d: -f1)"
   _fence="$(printf '%s\n' "$_s" | grep -n 'mermaid' | head -n 1 | cut -d: -f1)"
   [ -n "$_hero" ] && [ "$_hero" -lt "$_fence" ] || fail "R3: assets/hero.svg is not embedded in ## How it works above the diagram"
+  _hl="$(printf '%s\n' "$_s" | sed -n "${_hero}p")"
+  printf '%s\n' "$_hl" | grep -qE '<picture><source media="\(prefers-color-scheme: dark\)" srcset="assets/hero-dark\.svg"><img src="assets/hero\.svg"' ||
+    fail "R3: the hero is not a <picture> with a dark source assets/hero-dark.svg and the assets/hero.svg fallback"
+  [ -f "$ROOT/assets/hero-dark.svg" ] || fail "R3: assets/hero-dark.svg does not exist"
   pass "R3_how_it_works_diagram"
+}
+R3_gate_exceptions() {
+  _s="$(slice "$README" "## How it works" | folded)"
+  printf '%s' "$_s" | grep -qE 'independent Reviewer before it merges' || fail "R3: How it works does not say the Reviewer gate covers every change"
+  printf '%s' "$_s" | grep -qE 'skip your approval: a task marked autonomous' || fail "R3: How it works does not state the autonomous exception to the human gate"
+  printf '%s' "$_s" | grep -qE '`/sdd-fix` fix[^.]{0,80}instead of a spec[^.]{0,40}Builder' || fail "R3: How it works does not state that a /sdd-fix fix has no spec"
+  printf '%s' "$_s" | grep -qE 'Every change follows one loop with two gates' && fail "R3: How it works still claims every change has both gates"
+  _c="$(slice "$README" "## Supported CLIs" | folded)"
+  printf '%s' "$_c" | grep -qF '`$sdd-report` in Codex' || fail "R3: the CLI section does not say Codex reports with \$sdd-report"
+  pass "R3_gate_exceptions"
 }
 R3_quick_start_three_steps() {
   _s="$(slice "$README" "## Quick start")"
@@ -288,6 +302,16 @@ R5_concepts_review_names_both_mechanisms() {
   printf '%s' "$_s" | grep -qiE 'drift report.{0,12}drift-report\.py|drift-report\.py.{0,200}drift report|Drift report' ||
     fail "R5: the review section does not name the drift report"
   pass "R5_concepts_review_names_both_mechanisms"
+}
+R5_concepts_gates_exceptions() {
+  _g="$(slice "$CONCEPTS" "## Gates" | folded)"
+  printf '%s' "$_g" | grep -qE 'approves the spec before anything is built, unless the task is marked `autonomous`' || fail "R5: Gate 1 does not carry the autonomous exception"
+  printf '%s' "$_g" | grep -qE '`/sdd-fix`[^.]{0,60}no spec[^.]{0,80}Builder' || fail "R5: the Gates section does not say /sdd-fix has no spec"
+  printf '%s' "$_g" | grep -qE 'must approve every change before its PR merges' || fail "R5: Gate 2 does not cover every change"
+  printf '%s' "$_g" | grep -qF 'Nothing is built until a human approves' && fail "R5: the absolute gate-1 claim is back"
+  printf '%s' "$_g" | grep -qF 'The Reviewer never approves on a check that did not run.' || fail "R5: the narrowed fail-closed sentence is missing"
+  printf '%s' "$_g" | grep -qF 'fails closed' && fail "R5: the broad 'fails closed' claim is back"
+  pass "R5_concepts_gates_exceptions"
 }
 R5_concepts_links() {
   for _l in RATIONALE.md ABLATION.md SPEC-FORMAT.md WORKFLOW.md agents/README.md; do
@@ -481,6 +505,10 @@ link_targets() {
   unfenced "$1" | awk '{
     line = $0
     while (match(line, /\]\([^)]*\)/)) { print substr(line, RSTART + 2, RLENGTH - 3); line = substr(line, RSTART + RLENGTH) }
+    # reference definitions: [label]: target  (a leading <...> is stripped)
+    if (match($0, /^ {0,3}\[[^]]+\]:[ \t]*[^ \t]+/)) {
+      d = substr($0, RSTART, RLENGTH); sub(/^ {0,3}\[[^]]+\]:[ \t]*/, "", d); gsub(/^<|>$/, "", d); print d
+    }
   }'
 }
 # links_into_assets <root> — print each docs/ link target that reaches assets/: a relative
@@ -532,6 +560,12 @@ R2_no_assets_links_under_docs() {
   rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
   printf '\n<img src="../assets/logo.svg">\n' >> "$T/r2/docs/BRAND.md"
   [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: a relative HTML img into assets/ was not flagged"
+  rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
+  printf '\n![logo][l]\n\n[l]: ../assets/logo.svg\n' >> "$T/r2/docs/CONCEPTS.md"
+  [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: a reference-style definition into assets/ was not flagged"
+  rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
+  printf '\n![logo][l]\n\n[l]: <../assets/logo.svg> "t"\n' >> "$T/r2/docs/CONCEPTS.md"
+  [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: an angle-bracket reference definition into assets/ was not flagged"
   pass "R2_no_assets_links_under_docs"
 }
 
@@ -555,7 +589,10 @@ R9_relative_links_resolve() {
   [ -z "$_bad" ] || fail "R9: unresolved relative links: $_bad"
   mirror m9
   printf '\n[x](../nowhere.md)\n' >> "$T/m9/docs/README.md"
-  [ -n "$(broken_links "$T/m9")" ] || fail "R9: the link check misses a broken link"
+  broken_links "$T/m9" | grep -F "docs/README.md -> ../nowhere.md" >/dev/null || fail "R9: the link check misses a broken link"
+  mirror m9r
+  printf '\n[x][r]\n\n[r]: ../nowhere.md\n' >> "$T/m9r/docs/README.md"
+  broken_links "$T/m9r" | grep -F "docs/README.md -> ../nowhere.md" >/dev/null || fail "R9: the link check misses a broken reference-style definition"
   pass "R9_relative_links_resolve"
 }
 # counterpart_problems <root> — human docs with a counterpart that do not link it early.
@@ -842,9 +879,9 @@ if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
 row R4_moved_headings_in_order; row R4_pinned_sentences_present
 row R3_h1_brand_token; row R3_logo_and_tagline; row R3_how_it_works_diagram
-row R3_quick_start_three_steps; row R3_sections_and_links; row R3_kept_tokens; row R3_budget_150
+row R3_gate_exceptions; row R3_quick_start_three_steps; row R3_sections_and_links; row R3_kept_tokens; row R3_budget_150
 row R5_concepts_sections; row R5_concepts_state_diagram; row R5_concepts_review_names_both_mechanisms
-row R5_concepts_links; row R5_budget_220
+row R5_concepts_gates_exceptions; row R5_concepts_links; row R5_budget_220
 row R11_brand_doc_shape; row R11_brand_embeds_art; row R11_brand_installed_names_sentence; row R11_palette_tokens
 row R11_svgs_parse_and_wordmark_names_brand; row R11_social_preview_1280x640; row R11_budget_90
 row R6_budget; row R6_filler_phrases; row R6_archaeology; row R6_diagram_present_and_typed
