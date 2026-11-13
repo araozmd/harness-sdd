@@ -990,6 +990,149 @@ F02_R10_registry_and_index() {
   pass "F02_R10_registry_and_index"
 }
 
+# F02_R2 — the human INSTALL's shape. <file> lets a mutant copy under $T be checked.
+HUMAN_INSTALL_ANCHORS='agents/INSTALL.md#pi
+agents/INSTALL.md#retiring-gemini
+agents/INSTALL.md#host-detection----agentshost-opt-in
+agents/INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled
+agents/INSTALL.md#harness-feedback-feedback--on-by-default
+agents/INSTALL.md#worker-roster-workersroster--opt-in-local-only
+agents/INSTALL.md#per-role-model-routing-models--opt-in
+agents/INSTALL.md#self-mode----self-harness-developers-only
+agents/INSTALL.md#config-migration-on-upgrade-non-destructive
+agents/INSTALL.md#layout--ownership'
+install_shape_problems() {
+  _f="$1"
+  [ "$(nlines "$_f")" -le 300 ] || echo "exceeds 300 lines"
+  sed -n '1p' "$_f" | grep -qE '^# ' || echo "line 1 is not a Markdown H1"
+  sed -n '1,15p' "$_f" | grep -qF '](agents/INSTALL.md)' || echo "no counterpart link within the first 15 lines"
+  _h="$(unfenced "$_f" | grep '^## ')"
+  _want='## Prerequisites
+## Install
+## Choose your front-ends
+## Bootstrap (first run)
+## Upgrade
+## Umbrella (many repositories)
+## Ownership
+## Further reading'
+  [ "$_h" = "$_want" ] || echo "the ## headings are not the eight pinned ones in order"
+  _fr="$(slice "$_f" "## Further reading")"
+  while IFS= read -r _a; do
+    printf '%s\n' "$_fr" | grep -qF "]($_a)" || echo "## Further reading does not link $_a"
+  done <<EOA
+$HUMAN_INSTALL_ANCHORS
+EOA
+  link_targets "$_f" | while IFS= read -r _t; do
+    case "$_t" in ""|\#*|http://*|https://*|mailto:*) continue ;; esac
+    _p="${_t%%#*}"
+    _r="$(cd "$(dirname "$_f")" && python3 -I -c 'import os, sys; print(os.path.relpath(os.path.normpath(os.path.join(os.getcwd(), sys.argv[1])), sys.argv[2]))' "$_p" "$DOCS_DIR" 2>/dev/null)"
+    case "$_r" in ..|../*) echo "link $_t leaves docs/" ;; esac
+    [ -e "$(dirname "$_f")/$_p" ] || echo "link $_t does not resolve"
+  done
+}
+DOCS_DIR="$ROOT/docs"
+F02_R2_human_shape() {
+  [ -f "$ROOT/$INSTALL_H" ] || fail "F02 R2: docs/INSTALL.md does not exist"
+  _bad="$(install_shape_problems "$ROOT/$INSTALL_H")"
+  [ -z "$_bad" ] || fail "F02 R2: docs/INSTALL.md: $(printf '%s' "$_bad" | tr '\n' ';')"
+  # mutants on private copies: each must be reported
+  rm -rf "$T/f2"; mkdir -p "$T/f2/docs"; DOCS_DIR="$T/f2/docs"
+  sed 's/^## Ownership$/## What is yours/' "$ROOT/$INSTALL_H" > "$T/f2/docs/a.md"
+  [ -n "$(install_shape_problems "$T/f2/docs/a.md")" ] || fail "F02 R2: the shape check misses a renamed ## heading"
+  grep -vF '#worker-roster-workersroster--opt-in-local-only' "$ROOT/$INSTALL_H" > "$T/f2/docs/b.md"
+  [ -n "$(install_shape_problems "$T/f2/docs/b.md")" ] || fail "F02 R2: the shape check misses a dropped further-reading anchor"
+  { cat "$ROOT/$INSTALL_H"; printf '\n[x](../AGENTS.md)\n'; } > "$T/f2/docs/c.md"
+  cp "$ROOT/AGENTS.md" "$T/f2/AGENTS.md"
+  install_shape_problems "$T/f2/docs/c.md" | grep -qF 'leaves docs/' || fail "F02 R2: the shape check misses a link that leaves docs/"
+  { printf '# Installing\n'; for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do echo; done; sed -n '2,$p' "$ROOT/$INSTALL_H" | grep -vF '](agents/INSTALL.md)'; printf '\n[agents](agents/INSTALL.md)\n'; } > "$T/f2/docs/d.md"
+  install_shape_problems "$T/f2/docs/d.md" | grep -qF 'first 15 lines' || fail "F02 R2: the shape check misses a counterpart link past line 15"
+  DOCS_DIR="$ROOT/docs"
+  pass "F02_R2_human_shape"
+}
+# section_diagram <doc> <heading> — the mermaid text of one section, behind a @@COUNT line.
+section_diagram() {
+  _s="$(slice "$1" "$2")"
+  _n="$(printf '%s\n' "$_s" | grep -cE '^ {0,3}(```|~~~)[ 	]*mermaid[ 	]*$' || true)"
+  echo "@@COUNT $_n"
+  printf '%s\n' "$_s" | mermaid_blocks
+}
+# diagram_problems <doc> <heading> <tokens, one per line> <prose tokens, one per line>
+diagram_problems() {
+  _d="$(section_diagram "$1" "$2")"
+  [ "$(printf '%s\n' "$_d" | sed -n '1p')" = "@@COUNT 1" ] || echo "$2 does not hold exactly one mermaid block"
+  printf '%s\n' "$_d" | sed -n '3p' | sed 's/^[[:space:]]*//' | grep -qE '^flowchart( |$)' || echo "the $2 diagram is not a flowchart"
+  while IFS= read -r _w; do
+    [ -n "$_w" ] || continue
+    printf '%s\n' "$_d" | grep -qF -- "$_w" || echo "the $2 diagram does not name '$_w'"
+  done <<EOT
+$3
+EOT
+  _p="$(slice "$1" "$2" | awk "$FENCE_AWK"'fence_delim($0) { next } !fence' | folded)"
+  while IFS= read -r _w; do
+    [ -n "$_w" ] || continue
+    printf '%s' "$_p" | grep -qF -- "$_w" || echo "the $2 prose does not carry '$_w'"
+  done <<EOT
+$4
+EOT
+}
+INSTALL_DIAGRAM_TOKENS='harness-install.sh
+.harness/
+AGENTS.md
+--umbrella
+umbrella.manifest.yaml
+--thin
+coordinator
+child'
+F02_R3_install_diagram() {
+  _bad="$(diagram_problems "$ROOT/$INSTALL_H" "## Install" "$INSTALL_DIAGRAM_TOKENS" '--agents=
+--builder-backend=
+--pr-loop=')"
+  [ -z "$_bad" ] || fail "F02 R3: $(printf '%s' "$_bad" | tr '\n' ';')"
+  [ "$(section_diagram "$ROOT/$INSTALL_H" "## Install" | grep -c 'subgraph ')" -eq 2 ] || fail "F02 R3: the Install diagram does not hold exactly two subgraphs"
+  # mutants on private copies
+  _m() { rm -rf "$T/f3"; mkdir -p "$T/f3"; sed "$1" "$ROOT/$INSTALL_H" > "$T/f3/m.md"
+         cmp -s "$ROOT/$INSTALL_H" "$T/f3/m.md" && fail "F02 R3: setup: the mutant '$1' did not apply"
+         _bm="$(diagram_problems "$T/f3/m.md" "## Install" "$INSTALL_DIAGRAM_TOKENS" '--agents=
+--builder-backend=
+--pr-loop=')"
+         [ -n "$_bm" ] || [ "$(section_diagram "$T/f3/m.md" "## Install" | grep -c 'subgraph ')" -ne 2 ] || fail "F02 R3: the diagram check misses the mutant '$1'"; }
+  _m '/--thin, only when you pass it/d'
+  _m 's/^flowchart TB$/graph TB/;t'
+  _m 's/`--pr-loop=`/the third flag/'
+  _m '/subgraph many/d'
+  pass "F02_R3_install_diagram"
+}
+UPGRADE_DIAGRAM_TOKENS='init.sh
+Install now? [y/N]
+Proceed with the upgrade? [y/N]
+upgrade-backup
+harness-install.sh
+preserved
+commit
+exit 2
+exit 3
+exit 4'
+UPGRADE_PROSE_TOKENS='git pull
+./harness-install.sh
+update.check: false
+HARNESS_SKIP_UPDATE_CHECK=1
+update.remote'
+F02_R4_upgrade_diagram() {
+  _bad="$(diagram_problems "$ROOT/$INSTALL_H" "## Upgrade" "$UPGRADE_DIAGRAM_TOKENS" "$UPGRADE_PROSE_TOKENS")"
+  [ -z "$_bad" ] || fail "F02 R4: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _m() { rm -rf "$T/f4"; mkdir -p "$T/f4"; sed "$1" "$ROOT/$INSTALL_H" > "$T/f4/m.md"
+         cmp -s "$ROOT/$INSTALL_H" "$T/f4/m.md" && fail "F02 R4: setup: the mutant '$1' did not apply"
+         [ -n "$(diagram_problems "$T/f4/m.md" "## Upgrade" "$UPGRADE_DIAGRAM_TOKENS" "$UPGRADE_PROSE_TOKENS")" ] || fail "F02 R4: the diagram check misses the mutant '$1'"; }
+  _m '/exit 4/d'
+  _m 's/Proceed with the upgrade? \[y\/N\]/Proceed? [y\/N]/'
+  _m 's/update\.remote/update.fork/g'
+  # a second mermaid block in the section
+  rm -rf "$T/f4"; mkdir -p "$T/f4"
+  awk '/^## Upgrade$/ { print; print ""; print "```mermaid"; print "flowchart LR"; print "  a --> b"; print "```"; next } { print }' "$ROOT/$INSTALL_H" > "$T/f4/m.md"
+  [ -n "$(diagram_problems "$T/f4/m.md" "## Upgrade" "$UPGRADE_DIAGRAM_TOKENS" "$UPGRADE_PROSE_TOKENS")" ] || fail "F02 R4: the diagram check misses a second mermaid block"
+  pass "F02_R4_upgrade_diagram"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1012,6 +1155,7 @@ row R12_version_minor_and_changelog
 row F02_R1_counterpart_announcement; row F02_R1_counterpart_headings_in_order; row F02_R1_counterpart_retargets
 row F02_R6_suites_cite_counterpart
 row F02_R10_registry_and_index
+row F02_R2_human_shape; row F02_R3_install_diagram; row F02_R4_upgrade_diagram
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
