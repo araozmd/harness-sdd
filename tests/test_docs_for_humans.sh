@@ -1293,6 +1293,44 @@ F02_R8_anchors_resolve() {
   pass "F02_R8_anchors_resolve"
 }
 
+# F02_R11 — release: a CHANGELOG heading equals the runtime VERSION, and the section naming E39-F02,
+# docs/agents/INSTALL.md and docs/INSTALL.md sits one MINOR (patch 0) above the section below it.
+f02_changelog_problem() {
+  _v="$(awk '
+    function flush() {
+      if (sec != "" && f == "" && body ~ /E39-F02/ && body ~ /docs\/agents\/INSTALL\.md/ && body ~ /docs\/INSTALL\.md/) f = sec
+      else if (f != "" && o == "" && sec != "") o = sec
+    }
+    /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ { flush(); v = $2; gsub(/[][]/, "", v); sec = v; body = ""; next }
+    { body = body "\n" $0 }
+    END { flush(); print f; print o }' "$1")"
+  _f="$(printf '%s\n' "$_v" | sed -n '1p')"; _o="$(printf '%s\n' "$_v" | sed -n '2p')"
+  [ -n "$_f" ] || { echo "no section names E39-F02, docs/agents/INSTALL.md and docs/INSTALL.md"; return 0; }
+  [ -n "$_o" ] || { echo "the section $_f has no older section below it"; return 0; }
+  IFS=. read -r _fa _fb _fc <<EOV
+$_f
+EOV
+  IFS=. read -r _oa _ob _oc <<EOV
+$_o
+EOV
+  [ "$_fa" -eq "$_oa" ] && [ "$_fb" -eq $((_ob + 1)) ] && [ "$_fc" -eq 0 ] || echo "$_f is not one MINOR above $_o with patch 0"
+  return 0
+}
+F02_R11_version_and_changelog() {
+  _cur="$(cat "$ROOT/VERSION")"
+  grep -qF "## [$_cur]" "$ROOT/CHANGELOG.md" || fail "F02 R11: CHANGELOG has no '## [$_cur]' section for the runtime VERSION"
+  _p="$(f02_changelog_problem "$ROOT/CHANGELOG.md")"
+  [ -z "$_p" ] || fail "F02 R11: $_p"
+  sed 's#docs/agents/INSTALL\.md#docs/agents/GONE.md#g' "$ROOT/CHANGELOG.md" > "$T/f11a.md"
+  [ -n "$(f02_changelog_problem "$T/f11a.md")" ] || fail "F02 R11: the changelog check misses a section without docs/agents/INSTALL.md"
+  _fv="$(awk '/^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ { v = $2; gsub(/[][]/, "", v); sec = v } /E39-F02/ { print sec; exit }' "$ROOT/CHANGELOG.md")"
+  [ -n "$_fv" ] || fail "F02 R11: no CHANGELOG section names E39-F02"
+  sed "s/^## \[$_fv\]/## [${_fv%.*}.1]/" "$ROOT/CHANGELOG.md" > "$T/f11b.md"
+  grep -qF "## [${_fv%.*}.1]" "$T/f11b.md" || fail "F02 R11: setup: the PATCH mutant did not apply"
+  [ -n "$(f02_changelog_problem "$T/f11b.md")" ] || fail "F02 R11: the changelog check misses a PATCH-step E39-F02 section"
+  pass "F02_R11_version_and_changelog"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1319,6 +1357,7 @@ row F02_R2_human_shape; row F02_R3_install_diagram; row F02_R4_upgrade_diagram
 row F02_R5_accuracy_sentences; row F02_R5_no_over_claims
 row F02_R7_no_stale_citations
 row F02_R8_anchors_resolve
+row F02_R11_version_and_changelog
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
