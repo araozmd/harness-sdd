@@ -550,6 +550,13 @@ R2_no_assets_links_under_docs() {
   rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
   printf '\n[sheet](agents/../../assets/brand-sheet.png)\n' >> "$T/r2/docs/README.md"
   [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: the assets-link check misses a link that reaches assets/ through a .. segment"
+  # one defect per scan-set member: a top-level doc and a nested docs/agents doc
+  rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
+  printf '\n![logo](../assets/logo.svg)\n' >> "$T/r2/docs/README.md"
+  printf '\n![logo](../../assets/logo.svg)\n' >> "$T/r2/docs/agents/README.md"
+  _got="$(links_into_assets "$T/r2")"
+  printf '%s\n' "$_got" | grep -qF 'docs/README.md -> ' || fail "R2: the assets-link check does not scan the docs/ top level"
+  printf '%s\n' "$_got" | grep -qF 'docs/agents/README.md -> ' || fail "R2: the assets-link check does not recurse into docs/agents/"
   _canon='https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/logo.svg'
   rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
   printf '\n![x](%s)\n' "$_canon" >> "$T/r2/docs/BRAND.md"
@@ -592,6 +599,15 @@ R9_relative_links_resolve() {
   mirror m9
   printf '\n[x](../nowhere.md)\n' >> "$T/m9/docs/README.md"
   broken_links "$T/m9" | grep -F "docs/README.md -> ../nowhere.md" >/dev/null || fail "R9: the link check misses a broken link"
+  # one defect per scan-set member: the root README, a top-level doc, a nested docs/agents doc
+  mirror m9s
+  printf '\n[x](nowhere-root.md)\n' >> "$T/m9s/README.md"
+  printf '\n[x](nowhere-top.md)\n' >> "$T/m9s/docs/README.md"
+  printf '\n[x](nowhere-nested.md)\n' >> "$T/m9s/docs/agents/README.md"
+  _got="$(broken_links "$T/m9s")"
+  printf '%s\n' "$_got" | grep -qxF 'README.md -> nowhere-root.md' || fail "R9: the link check does not scan the root README.md"
+  printf '%s\n' "$_got" | grep -qxF 'docs/README.md -> nowhere-top.md' || fail "R9: the link check does not scan the docs/ top level"
+  printf '%s\n' "$_got" | grep -qxF 'docs/agents/README.md -> nowhere-nested.md' || fail "R9: the link check does not recurse into docs/agents/"
   mirror m9r
   printf '\n[x][r]\n\n[r]: ../nowhere.md\n' >> "$T/m9r/docs/README.md"
   broken_links "$T/m9r" | grep -F "docs/README.md -> ../nowhere.md" >/dev/null || fail "R9: the link check misses a broken reference-style definition"
