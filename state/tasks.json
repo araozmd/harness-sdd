@@ -2347,17 +2347,18 @@
         {
           "id": "E39-F01",
           "title": "Docs split + README rewrite: docs/agents/ machine layer, Mermaid diagrams, logo, concise human guides (README + all docs/)",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "d7f0c7aa23bada50f68485472bd6704bdcdf8c71",
+            "ref": "d7f0c7aa23bada50f68485472bd6704bdcdf8c71",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E39-docs-for-humans/F01-docs-split-and-readme/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (330)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E39-F01 done --evidence <merge-ref>`",
-            "pr": "330"
-          }
+          "spec_path": "specs/epics/E39-docs-for-humans/F01-docs-split-and-readme/"
         },
         {
           "id": "E39-F02",
