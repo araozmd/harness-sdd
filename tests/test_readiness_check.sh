@@ -1214,7 +1214,7 @@ has R11_workflow_paragraph "$T/wf.sec" 'the Reviewer rejects on exit 1 (check 9;
 has R11_workflow_paragraph "$T/wf.sec" 'and `init.sh` sweeps every in-flight feature warn-only at session start (section 2e).'
 pass "R11_workflow_paragraph"
 
-span "$ROOT/README.md" '## How it works' '## Quick start' "$T/rm.sec"
+span "$ROOT/docs/agents/README.md" '## How it works' '## Quick start' "$T/rm.sec"
 has R11_readme_sentence "$T/rm.sec" 'Three deterministic spec lints gate a feature before the Builder sees it — `tools/tasks-pair-check.py` (red/green pair shape, ADR-0008), `tools/plan-cite-check.py` (every plan row cites an R-id or an ADR, ADR-0009) and `tools/readiness-check.py` (every backticked repo-rooted path and symbol it recognises in the plan, tasks and tests resolves or is declared created — an unrecognised token is ignored, never flagged, E37-F01); each exits 0/1/2 and the Reviewer rejects on exit 1.'
 folded "$T/rm.sec" | grep -qF 'every path and symbol the plan, tasks and tests name' \
   && fail "R11_readme_sentence: the README claims every path the files name is checked; the tool checks the ones it recognises"

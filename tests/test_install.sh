@@ -2104,7 +2104,7 @@ _expected_v="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$SRC/CHANGELOG.md" | 
 [ "$(cat "$SRC/VERSION")" = "$_expected_v" ] \
   || fail "R10: VERSION $(cat "$SRC/VERSION") does not match the newest CHANGELOG entry $_expected_v"
 grep -qF '## [0.49.0]' "$SRC/CHANGELOG.md" || fail "R10: CHANGELOG lacks 0.49.0"
-for _doc in "$SRC/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
+for _doc in "$SRC/docs/agents/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
   grep -qF '$sdd-' "$_doc" || fail "R10: $_doc does not document Codex \$sdd-* skills"
   grep -qF '.agents/skills' "$_doc" || fail "R10: $_doc omits the Codex skill layout"
   grep -qiF 'legacy' "$_doc" || fail "R10: $_doc does not document legacy migration"
