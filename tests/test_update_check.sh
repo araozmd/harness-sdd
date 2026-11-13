@@ -738,8 +738,8 @@ R10_coordinator_cascades() {
   _c="$T/coord"
   mkdir -p "$_c"
   # N5: a third child is keyed `root` — the label the target itself uses — to pin that the two get
-  # distinct preservation snapshots (the child is relabelled `repo-root`)
-  for _ch in api web root; do
+  # distinct preservation snapshots; a fourth is keyed `repo-root` (the old remap's target)
+  for _ch in api web root repo-root; do
     mkdir -p "$_c/$_ch"
     git -C "$_c/$_ch" init -q .
     git -C "$_c/$_ch" config user.email "test@harness.local"
@@ -759,22 +759,28 @@ R10_coordinator_cascades() {
   sed 's|^  test_command: ""|  test_command: "make child-root"|' "$_c/root/.harness/harness.config.yaml" > "$T/rootchild.yaml"
   cat "$T/rootchild.yaml" > "$_c/root/.harness/harness.config.yaml"
   grep -q 'test_command: "make child-root"' "$_c/root/.harness/harness.config.yaml" || fail "R10 precondition: the root-child override did not apply"
+  sed 's|^  test_command: ""|  test_command: "make child-repo-root"|' "$_c/repo-root/.harness/harness.config.yaml" > "$T/rrchild.yaml"
+  cat "$T/rrchild.yaml" > "$_c/repo-root/.harness/harness.config.yaml"
+  cp "$_c/repo-root/.harness/harness.config.yaml" "$T/rrchild.cfg.orig"
   cp "$_c/.harness/harness.config.yaml" "$T/coord.cfg.orig"
   cp "$_c/root/.harness/harness.config.yaml" "$T/rootchild.cfg.orig"
   cmp -s "$T/coord.cfg.orig" "$T/rootchild.cfg.orig" && fail "R10 precondition: the coordinator and the root-keyed child configs are identical — N5 would prove nothing"
-  for _ch in api web root; do head -n 1 "$_c/$_ch/.harness/AGENTS.md" | grep -qxF '<!-- harness:umbrella-stub -->' || fail "R10 precondition: $_ch is not thin"; done
-  for _r in "$_c/api" "$_c/web" "$_c/root"; do git -C "$_r" add -A && git -C "$_r" commit -q -m "land the harness"; done
+  for _ch in api web root repo-root; do head -n 1 "$_c/$_ch/.harness/AGENTS.md" | grep -qxF '<!-- harness:umbrella-stub -->' || fail "R10 precondition: $_ch is not thin"; done
+  for _r in "$_c/api" "$_c/web" "$_c/root" "$_c/repo-root"; do git -C "$_r" add -A && git -C "$_r" commit -q -m "land the harness"; done
   [ "$(stamp "$_c")" = "$CUR" ] && [ "$(stamp "$_c/api")" = "$CUR" ] || fail "R10 precondition: stamps are not $CUR"
   _udir="$(cd "$_c" && pwd)"
   : > "$T/argv"
   run_gate "$_c" "y\ny\n" HARNESS_UPDATE_REMOTE="$_u" HARNESS_UPDATE_ASSUME_TTY=1 E38_ARGV_LOG="$T/argv"
-  # C19c (N5) — the child keyed `root` is proved and snapshotted as `repo-root`, apart from the target.
-  # Checked BEFORE the rc: a shared snapshot dir makes the coordinator's proof fail (rc 4), and the
-  # first failure must name the collision, not the exit code.
-  printf '%s\n' "$GATE_OUT" | grep -qxF "✅ preserved repo-root harness.config.yaml" || fail "R10 C19c: no repo-root config proof for the child keyed 'root': $GATE_OUT"
+  # C19c (N5) — every manifest child snapshots under preservation/child-<key>/, apart from the target's
+  # preservation/root/ and from each other (children keyed `root` and `repo-root` must not collide).
+  # Checked BEFORE the rc: a shared snapshot dir makes a proof fail (rc 4), and the first failure
+  # must name the collision, not the exit code.
   _pv="$_c/.harness/progress/upgrade-backup/$CUR/preservation"
-  cmp -s "$T/coord.cfg.orig" "$_pv/root/harness.config.yaml" || fail "R10 C19c: preservation/root/ does not hold the COORDINATOR's config (a child keyed 'root' shared its snapshot dir)"
-  cmp -s "$T/rootchild.cfg.orig" "$_pv/repo-root/harness.config.yaml" || fail "R10 C19c: preservation/repo-root/ does not hold the root-keyed child's config"
+  cmp -s "$T/coord.cfg.orig" "$_pv/root/harness.config.yaml" || fail "R10 C19c: preservation/root/ does not hold the COORDINATOR's config"
+  cmp -s "$T/rootchild.cfg.orig" "$_pv/child-root/harness.config.yaml" || fail "R10 C19c: preservation/child-root/ does not hold the root-keyed child's config"
+  cmp -s "$T/rrchild.cfg.orig" "$_pv/child-repo-root/harness.config.yaml" || fail "R10 C19c: preservation/child-repo-root/ does not hold the repo-root-keyed child's config"
+  printf '%s\n' "$GATE_OUT" | grep -qxF "✅ preserved repo-root harness.config.yaml" || fail "R10 C19c: no config proof for the child keyed 'repo-root': $GATE_OUT"
+  printf '%s\n' "$GATE_OUT" | grep -q '^❌ changed' && fail "R10 C19c: a false preservation violation: $GATE_OUT"
   [ "$GATE_RC" = 3 ] || fail "R10 C19: want rc 3, got $GATE_RC: $GATE_OUT"
   grep -qxF -- "--umbrella $_udir" "$T/argv" || fail "R10 C19: the installer was not invoked as '--umbrella $_udir' (argv: $(cat "$T/argv"))"
   [ "$(stamp "$_c")" = "$NEXT" ] && [ "$(stamp "$_c/api")" = "$NEXT" ] && [ "$(stamp "$_c/web")" = "$NEXT" ] \

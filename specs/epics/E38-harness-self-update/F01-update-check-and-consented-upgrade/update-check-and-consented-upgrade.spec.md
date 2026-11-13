@@ -95,7 +95,7 @@ silently). Both are stated signals, not a feeling.
   Children's bodies are not previewed in this feature (see Out of scope).
 - **Backups before replacement.** Every listed file is copied, same relative path, to
   `.harness/progress/upgrade-backup/<old-version>/`; the pre-upgrade snapshots used by the
-  preservation proof go to `…/upgrade-backup/<old-version>/preservation/<repo-label>/` (a manifest child keyed `root` is labelled `repo-root`, so it never shares the target's directory).
+  preservation proof go to `…/upgrade-backup/<old-version>/preservation/<dir>/` (`root` for the target, `child-<key>` for every manifest child, so no key shares another repo's directory).
   An existing backup directory is never overwritten.
 - **Self-replacement safety.** The upgrade rewrites `init.sh` and the update tool while they
   are the programs running. `init.sh` therefore `exec`s the tool for the write phase (the

@@ -254,11 +254,11 @@ hu_fetch() {
   return 0
 }
 
-# hu_scope — "label<TAB>repo-root" for the target and, on a coordinator, each manifest child
+# hu_scope — "label<TAB>repo-root<TAB>snapshot-dir" for the target and, on a coordinator, each manifest child
 # that holds a harness.config.yaml. The same minimal YAML read init.sh performs on the
 # manifest: top-level `repos:` → `  <key>:` → `path:`.
 hu_scope() {
-  printf 'root\t%s\n' "$PROJECT_ROOT"
+  printf 'root\t%s\troot\n' "$PROJECT_ROOT"
   [ -n "${HARNESS_UPDATE_UMBRELLA_MANIFEST:-}" ] && [ -f "$HARNESS_UPDATE_UMBRELLA_MANIFEST" ] || return 0
   awk -v base="${HARNESS_UPDATE_UMBRELLA_DIR:-.}" '
     /^repos:[[:space:]]*(#.*)?$/ { r = 1; next }
@@ -269,13 +269,13 @@ hu_scope() {
       sub(/^[[:space:]]+path:[[:space:]]*/, "", p); sub(/[[:space:]]+#.*$/, "", p)
       gsub(/^"|"$|^\047|\047$/, "", p)
       if (p !~ /^\//) p = base "/" p
-      # a child keyed `root` must not share the label (and snapshot directory) of the target itself
-      if (key == "root") key = "repo-root"
       print key "\t" p
       key = ""
     }
   ' "$HARNESS_UPDATE_UMBRELLA_MANIFEST" | while IFS="$HU_TAB" read -r _sl _sp; do
-    [ -f "$_sp/.harness/harness.config.yaml" ] && printf '%s\t%s\n' "$_sl" "$_sp"
+    # separate namespaces by construction: the target is `root`, every child is `child-<key>`,
+    # so no manifest key can collide with another child or with the target
+    [ -f "$_sp/.harness/harness.config.yaml" ] && printf '%s\t%s\tchild-%s\n' "$_sl" "$_sp" "$_sl"
   done
   return 0
 }
@@ -423,10 +423,10 @@ hu_upgrade() {
     mkdir -p "$_ubk/$(dirname "$_cp")" && cp -p "$HARNESS_DIR/$_cp" "$_ubk/$_cp" \
       || hu_fail "cannot back up $_cp to $_ubk — nothing was replaced"
   done < "$HU_DIR/conflicts.txt"
-  while IFS="$HU_TAB" read -r _sl _sp; do
-    mkdir -p "$_ubk/preservation/$_sl"
+  while IFS="$HU_TAB" read -r _sl _sp _sd; do
+    mkdir -p "$_ubk/preservation/$_sd"
     for _sf in .harness/harness.config.yaml CLAUDE.md AGENTS.md; do
-      [ -f "$_sp/$_sf" ] && { cp -p "$_sp/$_sf" "$_ubk/preservation/$_sl/$(basename "$_sf")" \
+      [ -f "$_sp/$_sf" ] && { cp -p "$_sp/$_sf" "$_ubk/preservation/$_sd/$(basename "$_sf")" \
         || hu_fail "cannot snapshot $_sp/$_sf to $_ubk — nothing was replaced"; }
     done
   done < "$HU_DIR/scope.txt"
@@ -457,8 +457,8 @@ hu_upgrade() {
   # 8. the proof — what was promised is verified, not assumed
   echo "── preservation check ──"
   _uviol=0
-  while IFS="$HU_TAB" read -r _sl _sp; do
-    _snap="$_ubk/preservation/$_sl"
+  while IFS="$HU_TAB" read -r _sl _sp _sd; do
+    _snap="$_ubk/preservation/$_sd"
     if [ -f "$_snap/harness.config.yaml" ]; then
       if [ -f "$_sp/.harness/harness.config.yaml" ] && hu_config_preserved "$_snap/harness.config.yaml" "$_sp/.harness/harness.config.yaml"; then
         echo "✅ preserved $_sl harness.config.yaml"

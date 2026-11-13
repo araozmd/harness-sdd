@@ -27,7 +27,7 @@ No database. Three on-disk artifacts, all under `.harness/progress/` (VCS-ignore
 | `progress/update-check/last` | `declined` | `vX.Y.Z` or absent | set when the human answers anything but `y` at R6 **or** at the R11 preview; compared by equality | R6 |
 | `progress/update-check/repo/` | — | git checkout | the fetched tag; reused across runs (fetch is idempotent) | R7 |
 | `progress/upgrade-backup/<old>/` | `<relative body path>` | file copy | one per R11-listed file, same path as under `.harness/` | R12 |
-| `progress/upgrade-backup/<old>/preservation/<label>/` | `harness.config.yaml`, `CLAUDE.md`, `AGENTS.md` | file copy | `<label>` = `root` for the target, else the manifest repo key | R8, R9, R12 |
+| `progress/upgrade-backup/<old>/preservation/<label>/` | `harness.config.yaml`, `CLAUDE.md`, `AGENTS.md` | file copy | `<label>` = `root` for the target, else `child-<manifest repo key>` | R8, R9, R12 |
 | `harness.config.yaml` | `update.check` | `true`/`false` | shipped `true`; `false` ⇒ silent skip | R2 |
 | `harness.config.yaml` | `update.remote` | string | shipped `""` ⇒ default URL; a fork sets its own | R1 |
 
