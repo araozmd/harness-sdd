@@ -2351,7 +2351,13 @@
           "sdd": true,
           "autonomous": true,
           "depends_on": [],
-          "spec_path": "specs/epics/E39-docs-for-humans/F01-docs-split-and-readme/"
+          "spec_path": "specs/epics/E39-docs-for-humans/F01-docs-split-and-readme/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (330)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E39-F01 done --evidence <merge-ref>`",
+            "pr": "330"
+          }
         },
         {
           "id": "E39-F02",
