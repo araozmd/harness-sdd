@@ -1190,6 +1190,28 @@ F02_R5_no_over_claims() {
   pass "F02_R5_no_over_claims"
 }
 
+# F02_R7 — the installer, init.sh and the seed config cite the counterpart; the title pointer in
+# WORKFLOW.md names it. <root> lets a mutant mirror be scanned.
+stale_citations() {
+  for _f in harness-install.sh init.sh harness.config.yaml; do
+    grep -qF 'docs/INSTALL.md' "$1/$_f" && echo "$_f still cites docs/INSTALL.md"
+  done
+  grep -F 'Per-role model routing' "$1/harness-install.sh" | grep -qF 'docs/agents/INSTALL.md' ||
+    echo "harness-install.sh: the § Per-role model routing pointer does not name docs/agents/INSTALL.md"
+  grep -qF 'docs/agents/INSTALL.md' "$1/docs/WORKFLOW.md" || echo "docs/WORKFLOW.md does not name docs/agents/INSTALL.md"
+  return 0
+}
+F02_R7_no_stale_citations() {
+  _bad="$(stale_citations "$ROOT")"
+  [ -z "$_bad" ] || fail "F02 R7: $(printf '%s' "$_bad" | tr '\n' ';')"
+  rm -rf "$T/f7"; mkdir -p "$T/f7/docs"; cp "$ROOT/harness-install.sh" "$ROOT/init.sh" "$ROOT/harness.config.yaml" "$T/f7/"; cp "$ROOT/docs/WORKFLOW.md" "$T/f7/docs/"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/init.sh" > "$T/f7/i.new" && mv "$T/f7/i.new" "$T/f7/init.sh"
+  stale_citations "$T/f7" | grep -qF 'init.sh still cites' || fail "F02 R7: the check misses a reverted init.sh citation"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/docs/WORKFLOW.md" > "$T/f7/w.new" && mv "$T/f7/w.new" "$T/f7/docs/WORKFLOW.md"
+  stale_citations "$T/f7" | grep -qF 'WORKFLOW.md does not name' || fail "F02 R7: the check misses a reverted WORKFLOW.md title pointer"
+  pass "F02_R7_no_stale_citations"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1214,6 +1236,7 @@ row F02_R6_suites_cite_counterpart
 row F02_R10_registry_and_index
 row F02_R2_human_shape; row F02_R3_install_diagram; row F02_R4_upgrade_diagram
 row F02_R5_accuracy_sentences; row F02_R5_no_over_claims
+row F02_R7_no_stale_citations
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"

@@ -59,7 +59,7 @@ enforce the parts that can be checked.
 The [0.78.1 baseline](../BASELINE-0.78.1.md) preserves the historical five-front-end
 inventory and its validation limits. Gemini CLI legacy installer emitters remain retired;
 Antigravity is supported natively via shared `.agents/skills/` units and dynamic subagent dispatch.
-See [upgrade guidance](../INSTALL.md#retiring-gemini)
+See [upgrade guidance](INSTALL.md#retiring-gemini)
 for selection migration and preservation of customized legacy files.
 
 ## How it works
@@ -145,7 +145,7 @@ claude                    # CLAUDE.md → AGENTS.md auto-loads
 # defect?   /sdd-report          # report a harness defect (top-level session role)
 ```
 
-`init.sh` also tells you when a newer harness ships and, at a terminal, offers to install it (preview, backups, and a check that your config values and `CLAUDE.md`/`AGENTS.md` prose survive) — see [`docs/INSTALL.md`](../INSTALL.md#staying-current--the-update-check-e38-f01).
+`init.sh` also tells you when a newer harness ships and, at a terminal, offers to install it (preview, backups, and a check that your config values and `CLAUDE.md`/`AGENTS.md` prose survive) — see [`docs/INSTALL.md`](INSTALL.md#staying-current--the-update-check-e38-f01).
 
 If `./init.sh` prints a `TaskStore dependency-cycle` warning, follow the closed
 feature/slice path to repair `depends_on`; the check is **warn-only** and does not
@@ -168,7 +168,7 @@ architecture and ADRs and seeds draft epics, `/sdd-drill <epic-id>` decomposes o
 `/sdd-plan` also writes a repo-topology ADR and a **`umbrella.manifest.draft.yaml`** that is
 **inert** — its presence does not engage umbrella mode; only a later explicit promotion step
 (E28-F03) does. See
-[Starting from nothing](../INSTALL.md#starting-from-nothing-new-product).
+[Starting from nothing](INSTALL.md#starting-from-nothing-new-product).
 
 For **later work** in an existing project, `/sdd-new` is the front door: it asks a few
 questions, decides whether the idea is a new epic / feature / task, and writes a
@@ -361,7 +361,7 @@ from `.harness/`. Existing per-role models survive regeneration. With inherited
 Codex models, the combined source first line stays `blocked`, while Claude Code sessions
 still escalate on their own `claude=raise` line (E99-F182); explicit Claude-only generation
 keeps an `armed` first line. See
-[self mode and optional models](../INSTALL.md#self-mode----self-harness-developers-only).
+[self mode and optional models](INSTALL.md#self-mode----self-harness-developers-only).
 
 ### Codex PR review loop
 
@@ -506,7 +506,7 @@ HARNESS_AGENTS=claude ./harness-install.sh /path/to/your-project
 `--agents=host` recognizes the supported host’s session markers; an explicit
 `HARNESS_HOST_AGENT=<key>` can declare it. Ambient retired-host markers are
 ignored. Explicit `gemini` selectors or host declarations fail
-before target mutation. [Migration guidance](../INSTALL.md#retiring-gemini)
+before target mutation. [Migration guidance](INSTALL.md#retiring-gemini)
 describes how pristine old glue is reclaimed and edited, foreign, or symlinked
 legacy files are preserved with warnings.
 
@@ -563,8 +563,8 @@ Paths below are relative to the installed project root:
    `.harness/specs/_templates/`.
 
 The first-run bootstrap (`/sdd-next`) helps adapt the project under the human
-approval gate; see [Bootstrap](../INSTALL.md#bootstrap-first-run) and the
-[greenfield sequence](../INSTALL.md#starting-from-nothing-new-product).
+approval gate; see [Bootstrap](INSTALL.md#bootstrap-first-run) and the
+[greenfield sequence](INSTALL.md#starting-from-nothing-new-product).
 
 Derived from the *Harnessing Engineering* research (harness-engineering + SDD videos,
 Anthropic's long-running-development post, the Harness Engineering knowledge graph).

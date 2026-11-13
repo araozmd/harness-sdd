@@ -101,7 +101,7 @@ EOF
       # skipped the warn-only branch — and then `git status` cannot report the ignored body
       # either, so an edited `.harness/agents/builder.md` produced `✅ installed harness
       # matches the commit`. A false CLEAN is the worst output this feature can emit, and it
-      # also contradicted the docs/INSTALL.md promise that an untracked body warns.
+      # also contradicted the docs/agents/INSTALL.md promise that an untracked body warns.
       if [ "$(git -C "$PROJECT_ROOT" ls-files -- "${HARNESS_BODY[@]}" | wc -l | tr -d ' ')" = "0" ]; then
         echo "⚠️  installed harness body (.harness/) is not version-controlled here — cannot verify it matches a commit (warn-only)"
       else

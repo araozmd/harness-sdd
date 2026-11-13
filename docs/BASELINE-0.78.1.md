@@ -35,7 +35,7 @@ regenerates Claude glue only; it does not verify all five integrations.
 An installed project keeps its body under `.harness/`, with selected and enabled
 front-end glue at project root. Edit `.harness/specs/product.md`, configuration,
 and the durable `.harness/init.project.sh` hook for project adaptation. The
-installer refreshes `.harness/init.sh`. See [layout and ownership](INSTALL.md#layout--ownership).
+installer refreshes `.harness/init.sh`. See [layout and ownership](agents/INSTALL.md#layout--ownership).
 
 The default local TaskStore requires Unix Python 3 with stdlib `fcntl`, with no
 third-party Python packages. Node is optional for task selection with a prose
