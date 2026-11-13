@@ -1133,6 +1133,63 @@ F02_R4_upgrade_diagram() {
   pass "F02_R4_upgrade_diagram"
 }
 
+# F02_R5 — the human sentences are true (two-token pins on the doc folded outside fences) and the
+# known over-claims are absent. accuracy_problems/over_claims take a file so mutants are checked.
+accuracy_problems() {
+  _t="$(unfenced "$1" | folded)"
+  _pin() { printf '%s' "$_t" | grep -qE -- "$2" || echo "$1 missing"; }
+  _pin S1 'never runs .git init. for you'
+  _pin S2 'prints that one line and changes nothing'
+  _pin S3 'until you answer .y. twice'
+  _pin S4 'product\.md. you never edited, which is refreshed'
+  _pin S5a 'fails until the upgrade is committed'
+  _pin S5b 'warns and goes on'
+  _pin S6a 'immediate subdirectories that are git repositories'
+  _pin S6b 'only when you pass it'
+  _pin S7 'keep the current value when you press Enter'
+}
+over_claims() {
+  _t="$(unfenced "$1" | folded)"
+  for _o in 'uninstall' 'upgrades itself' 'upgrades automatically' 'automatically upgrade' \
+            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' 'E00-F01'; do
+    printf '%s' "$_t" | grep -qiF -- "$_o" && echo "$_o"
+  done
+  return 0
+}
+F02_R5_accuracy_sentences() {
+  _bad="$(accuracy_problems "$ROOT/$INSTALL_H")"
+  [ -z "$_bad" ] || fail "F02 R5: docs/INSTALL.md lacks pinned sentence(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  rm -rf "$T/f5"; mkdir -p "$T/f5"
+  _m() { sed "$2" "$ROOT/$INSTALL_H" > "$T/f5/m.md"
+         cmp -s "$ROOT/$INSTALL_H" "$T/f5/m.md" && fail "F02 R5: setup: the mutant for $1 did not apply"
+         accuracy_problems "$T/f5/m.md" | grep -qF "$1 missing" || fail "F02 R5: the pin $1 survives its mutant"; }
+  _m S1 's/never runs `git init` for you/runs `git init` for you/'
+  _m S2 's/prints that one line and changes nothing/prints that one line/'
+  _m S3 's/until you answer `y` twice/until you answer `y`/'
+  _m S4 's/, which is refreshed to$/ is refreshed to/;s/^the new stub\.$/the new stub./'
+  _m S5b 's/warns and goes on/warns/'
+  _m S6b 's/only when you pass it/when asked/'
+  _m S7 's/keep the current value when you press Enter/keep the default/'
+  pass "F02_R5_accuracy_sentences"
+}
+F02_R5_no_over_claims() {
+  _bad="$(over_claims "$ROOT/$INSTALL_H")"
+  [ -z "$_bad" ] || fail "F02 R5: docs/INSTALL.md contains the over-claim(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  names_uninstall() { grep -qiF 'uninstall' "$1"; }
+  ! names_uninstall "$ROOT/docs/README.md" || fail "F02 R5: docs/README.md still claims an uninstall"
+  rm -rf "$T/f5b"; mkdir -p "$T/f5b"
+  for _m in 'The harness upgrades itself.' 'UNINSTALL' 'It upgrades automatically.' 'Then automatically upgrade.' \
+            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' '(E00-F01)'; do
+    { cat "$ROOT/$INSTALL_H"; printf '\n%s\n' "$_m"; } > "$T/f5b/m.md"
+    [ -n "$(over_claims "$T/f5b/m.md")" ] || fail "F02 R5: the over-claim check misses '$_m'"
+  done
+  { cat "$ROOT/$INSTALL_H"; printf '\n```text\nThe harness upgrades itself. uninstall E00-F01\n```\n'; } > "$T/f5b/m.md"
+  [ -z "$(over_claims "$T/f5b/m.md")" ] || fail "F02 R5: the over-claim check flags text inside a fence"
+  sed 's/^\(.*Install the harness into a project, choose front-ends, upgrade\)\.\(.*\)$/\1, uninstall.\2/' "$ROOT/docs/README.md" > "$T/f5b/readme.md"
+  names_uninstall "$T/f5b/readme.md" || fail "F02 R5: the docs/README.md uninstall check misses a restored 'uninstall'"
+  pass "F02_R5_no_over_claims"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1156,6 +1213,7 @@ row F02_R1_counterpart_announcement; row F02_R1_counterpart_headings_in_order; r
 row F02_R6_suites_cite_counterpart
 row F02_R10_registry_and_index
 row F02_R2_human_shape; row F02_R3_install_diagram; row F02_R4_upgrade_diagram
+row F02_R5_accuracy_sentences; row F02_R5_no_over_claims
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"

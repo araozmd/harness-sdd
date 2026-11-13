@@ -7,7 +7,7 @@ Start with [CONCEPTS.md](CONCEPTS.md), then install and run.
 | Doc | What it is for |
 |---|---|
 | [CONCEPTS.md](CONCEPTS.md) | The method in plain language: the loop, specs, gates, code over prose, review. |
-| [INSTALL.md](INSTALL.md) | Install the harness into a project, choose front-ends, upgrade, uninstall. |
+| [INSTALL.md](INSTALL.md) | Install the harness into a project, choose front-ends, upgrade. |
 | [WORKFLOW.md](WORKFLOW.md) | How tasks move through the roles, the gates and the PR review loop. |
 | [UMBRELLA.md](UMBRELLA.md) | Run one feature across several repositories. |
 | [SPEC-FORMAT.md](SPEC-FORMAT.md) | The Product, Epic and Feature hierarchy and the four spec files. |
