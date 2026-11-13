@@ -267,13 +267,13 @@ models:
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
   #   codex ALSO derives `model_reasoning_effort` from this SAME tier automatically —
   #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
-  #   docs/INSTALL.md.
+  #   docs/agents/INSTALL.md.
   #   pi       MUST be "provider/id" with NO ":<thinking>" suffix (a bad value warns and
   #            stamps no model:). pi has no floating alias, so an unpinned tier stamps no
   #            `model:`; the role file is still written.
   #   pi ALSO derives `thinking:` from this SAME tier automatically, pin or no pin —
   #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
-  #   docs/INSTALL.md.
+  #   docs/agents/INSTALL.md.
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""

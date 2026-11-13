@@ -70,7 +70,7 @@ See [WORKFLOW.md](WORKFLOW.md).
 For a **new product**, the sequence starts at `/sdd-plan` (whole-project inception: vision,
 architecture, ADRs, draft epics), then `/sdd-drill <epic-id>` and `/sdd-next`; `/sdd-new`
 is the intake for **later work** in an existing project. See
-[installation](INSTALL.md#starting-from-nothing-new-product).
+[installation](agents/INSTALL.md#starting-from-nothing-new-product).
 
 `/sdd-pr-loop` follows the **opt-in PR-policy gate**: it is stamped
 only while `pr_loop.enabled` reads exactly `true`, and a fresh install seeds `false`.
@@ -108,11 +108,11 @@ byte-pristine `sdd-pr-loop` is reclaimed.
 Source `--self` regeneration defaults to Claude + Codex and preserves their
 separate per-role model choices. With inherited Codex models, combined source
 escalation is UNARMED; explicit Claude-only generation retains its prior verdict.
-See [self mode](INSTALL.md#self-mode----self-harness-developers-only).
+See [self mode](agents/INSTALL.md#self-mode----self-harness-developers-only).
 
 Gemini CLI is a retired integration. Its historical records remain;
 upgrades remove only proven pristine old glue and preserve customized files with
-warnings. See [migration](INSTALL.md#retiring-gemini).
+warnings. See [migration](agents/INSTALL.md#retiring-gemini).
 
 ## Where the ideas come from
 

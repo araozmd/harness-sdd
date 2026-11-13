@@ -925,7 +925,7 @@ pass "R11 the amend doc-critic checkpoint reviews only newly written material, a
 
 # ── R12: the derived draft is project-owned, not harness drift ─────────────────
 # test_draft_excluded_from_harness_owned
-# The draft is DERIVED: docs/INSTALL.md commits the planning baseline only AFTER
+# The draft is DERIVED: docs/agents/INSTALL.md commits the planning baseline only AFTER
 # /sdd-drill, so between /sdd-plan and that commit it is untracked — yet tools/
 # harness-owned-paths.sh claims the whole .harness/ tree as body, which hard-failed the
 # mandatory drift gate on a file the Planner just wrote (P1 finding 4043317437). The fix

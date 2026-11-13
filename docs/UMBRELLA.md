@@ -31,7 +31,7 @@ the switch.
 
 ## Installing the umbrella (cascade)
 Stand up the whole umbrella with a single command (see
-[`INSTALL.md`](./INSTALL.md#umbrella-mode-cascade-install)):
+[`INSTALL.md`](./agents/INSTALL.md#umbrella-mode-cascade-install)):
 
 ```bash
 ./harness-install.sh --umbrella /path/to/umbrella-dir

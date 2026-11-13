@@ -659,7 +659,7 @@ test_release_sweep() {
     || fail "R11: the deliberate 0.86.0-rc1 non-semver fixture is gone"
 
   _is="$T/install-feedback.txt"
-  _section '## Harness feedback' "$SRC/docs/INSTALL.md" > "$_is"
+  _section '## Harness feedback' "$SRC/docs/agents/INSTALL.md" > "$_is"
   [ -s "$_is" ] || fail "R11: no '## Harness feedback' section in docs/INSTALL.md"
   if grep -qF 'Reporting stays inert' "$_is"; then
     fail "R11: docs/INSTALL.md still says reporting is inert"

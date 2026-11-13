@@ -2379,13 +2379,19 @@
         {
           "id": "E39-F02",
           "title": "INSTALL split: docs/agents/INSTALL.md + human INSTALL (single-repo vs umbrella and upgrade-flow diagrams); re-point suites, installer hints, init.sh",
-          "status": "pending",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E39-F01"
           ],
-          "spec_path": "specs/epics/E39-docs-for-humans/F02-install-split/"
+          "spec_path": "specs/epics/E39-docs-for-humans/F02-install-split/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (334)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E39-F02 done --evidence <merge-ref>`",
+            "pr": "334"
+          }
         },
         {
           "id": "E39-F03",

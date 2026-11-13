@@ -690,7 +690,7 @@ test_drift_report_installed_contract() {
 }
 
 test_docs_for_humans_installed_contract() {
-  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md; do
+  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md docs/INSTALL.md docs/agents/INSTALL.md; do
     cmp -s "$SRC/$_f" "$T/.harness/$_f" || fail "E39-F01: installed $_f is missing or differs from source"
   done
   find "$T/.harness" -name assets | grep -q . && fail "E39-F01: a path named assets was installed under .harness/"
@@ -2120,7 +2120,7 @@ _expected_v="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$SRC/CHANGELOG.md" | 
 [ "$(cat "$SRC/VERSION")" = "$_expected_v" ] \
   || fail "R10: VERSION $(cat "$SRC/VERSION") does not match the newest CHANGELOG entry $_expected_v"
 grep -qF '## [0.49.0]' "$SRC/CHANGELOG.md" || fail "R10: CHANGELOG lacks 0.49.0"
-for _doc in "$SRC/docs/agents/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/INSTALL.md"; do
+for _doc in "$SRC/docs/agents/README.md" "$SRC/docs/HARNESS.md" "$SRC/docs/agents/INSTALL.md"; do
   grep -qF '$sdd-' "$_doc" || fail "R10: $_doc does not document Codex \$sdd-* skills"
   grep -qF '.agents/skills' "$_doc" || fail "R10: $_doc omits the Codex skill layout"
   grep -qiF 'legacy' "$_doc" || fail "R10: $_doc does not document legacy migration"
@@ -2510,7 +2510,7 @@ test_models_docs_and_manifest() {   # R24
   grep -qF 'claude|codex|opencode' "$_mf" \
     || fail "R24: manifest.txt AGENT SELECTION paragraph still omits codex"
   # The docs must SHIP (the installed copy under .harness/docs/), not just exist in SRC.
-  _mi="$_mt/.harness/docs/INSTALL.md"
+  _mi="$_mt/.harness/docs/agents/INSTALL.md"
   grep -qF 'models:' "$_mi"          || fail "R24: installed docs/INSTALL.md does not document the models: block"
   grep -qF 'reasoning' "$_mi"        || fail "R24: installed docs/INSTALL.md does not document the tier vocabulary"
   grep -qF 'provider/model' "$_mi"   || fail "R24: installed docs/INSTALL.md does not document the opencode value rule"
@@ -3188,7 +3188,7 @@ test_glossary_ownership_documented() {
     && fail "R11: the installer header's BODY bullet (including its continuation line) still names the glossary"
 
   # ── docs/INSTALL.md — Layout & ownership table (site 993) ───────────────────────────────
-  _im11="$(doc_section "$_tg11/.harness/docs/INSTALL.md" 'Layout & ownership')"
+  _im11="$(doc_section "$_tg11/.harness/docs/agents/INSTALL.md" 'Layout & ownership')"
   [ -n "$_im11" ] || fail "R11: could not extract the installed docs/INSTALL.md Layout & ownership table"
   printf '%s\n' "$_im11" | grep '| project-owned |' | grep -qF 'specs/glossary.md' \
     || fail "R11: docs/INSTALL.md's project-owned row does not name specs/glossary.md"
@@ -3201,7 +3201,7 @@ test_glossary_ownership_documented() {
   # ("Templates and `specs/glossary.md` belong to the refreshed harness body.") — pin it by
   # extracting the exact SENTENCE, not the whole `## Install` section, because that section
   # legitimately names the glossary two sentences earlier as project-owned.
-  _im11_install="$(doc_section "$_tg11/.harness/docs/INSTALL.md" 'Install')"
+  _im11_install="$(doc_section "$_tg11/.harness/docs/agents/INSTALL.md" 'Install')"
   [ -n "$_im11_install" ] || fail "R11: could not extract the installed docs/INSTALL.md Install section"
   # Split on '. ' (a PERIOD FOLLOWED BY WHITESPACE) — a real sentence boundary — not on every
   # bare period: this prose is thick with inline code spans like `specs/glossary.md` and
@@ -3225,7 +3225,7 @@ test_glossary_ownership_documented() {
   # Scoped to the PARENTHETICAL enumeration itself, not the whole `### Body layout`
   # subsection: that subsection's very next sentence correctly says the glossary is NOT part
   # of either tier, so a section-wide negative would be satisfied by its own correct prose.
-  _bl11="$(doc_h3_section "$_tg11/.harness/docs/INSTALL.md" 'Body layout')"
+  _bl11="$(doc_h3_section "$_tg11/.harness/docs/agents/INSTALL.md" 'Body layout')"
   [ -n "$_bl11" ] || fail "R11: could not extract the installed docs/INSTALL.md Body layout subsection"
   _bl11_prose="$(printf '%s' "$_bl11" | tr '\n' ' ' | sed -n 's/.*\*\*prose\*\* tier (\([^)]*\)).*/\1/p')"
   [ -n "$_bl11_prose" ] \

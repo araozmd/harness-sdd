@@ -337,13 +337,13 @@ models:
   #   codex    MUST be a bare model id (the provider comes from `model_provider`)
   #   codex ALSO derives `model_reasoning_effort` from this SAME tier automatically —
   #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
-  #   docs/INSTALL.md.
+  #   docs/agents/INSTALL.md.
   #   pi       MUST be "provider/id" with NO ":<thinking>" suffix (a bad value warns and
   #            stamps no model:). pi has no floating alias, so an unpinned tier stamps no
   #            `model:`; the role file is still written.
   #   pi ALSO derives `thinking:` from this SAME tier automatically, pin or no pin —
   #   no separate knob (cheap=low standard=medium reasoning=high frontier=xhigh); see
-  #   docs/INSTALL.md.
+  #   docs/agents/INSTALL.md.
   # pin.opencode.reasoning: ""
   # pin.opencode.standard: ""
   # pin.opencode.cheap: ""
@@ -2065,7 +2065,7 @@ model_alias() {
 # Codex's actual capability axis is reasoning effort, not model identity: a user's global
 # `~/.codex/config.toml` typically sets ONE effort for every role, so the SAME tier that
 # picks a floating `model_alias` on claude ALSO picks a Codex effort here — no separate
-# config key (design note in docs/INSTALL.md § Per-role model routing). `ultra` is a REAL
+# config key (design note in docs/agents/INSTALL.md § Per-role model routing). `ultra` is a REAL
 # Codex value but is deliberately never emitted here: it is supported by exactly two
 # models today and the harness has no model list to check the currently pinned model
 # against ("Ranking is yours" — see `escalation:` above). An unrecognized tier — already
@@ -5180,7 +5180,7 @@ EOF
   # a file that spells the last key `instructions` is rejected at load time with
   # "must define `developer_instructions`" (verified with `codex doctor --json`, CLI
   # 0.145.0) and its model stamp silently never applies. Project-local `.codex/` is only
-  # read when the project is TRUSTED by Codex; see docs/INSTALL.md. It also carries an
+  # read when the project is TRUSTED by Codex; see docs/agents/INSTALL.md. It also carries an
   # optional `model_reasoning_effort`, Codex's own capability axis (E99-F161) — see
   # `resolve_codex_effort` for the tier mapping and the unknown-key hazard it guards.
   gen_codex_agent() {
@@ -10114,7 +10114,7 @@ EOF
     # A local-only `git init` cannot open a PR (Codex round 5, 4041813522), so the step
     # must also name the remote and the per-feature branch discipline. It precedes the
     # constitution edit so that edit stays uncommitted until the planning baseline,
-    # exactly as docs/INSTALL.md's ordered section states (round 7 consistency audit).
+    # exactly as docs/agents/INSTALL.md's ordered section states (round 7 consistency audit).
     # Round 11 (Codex 4042327763): the installer runs in the CALLER's cwd (usually the
     # harness checkout), and it never `cd`s into the target, so a bare `git init` step
     # would initialize the wrong repository. Name the installed target explicitly.
@@ -10740,7 +10740,7 @@ BUILDER_BACKEND_OVERRIDE="${HARNESS_BUILDER_BACKEND:-}"
 #
 # SEEDED FROM NOTHING — there is deliberately NO environment twin, and in particular this
 # is NOT seeded from HARNESS_PR_LOOP_ENABLED. That variable is E18-F01's PER-RUN gate
-# override, documented in harness.config.yaml, docs/INSTALL.md, docs/agents/README.md and the
+# override, documented in harness.config.yaml, docs/agents/INSTALL.md, docs/agents/README.md and the
 # /sdd-pr-loop body as one of five per-run knobs (HARNESS_AUTO_MERGE, HARNESS_MAX_ROUNDS,
 # …). Making one member of that family persist while the other four stay per-run is an
 # inconsistency no reader can infer from the name, and it turns

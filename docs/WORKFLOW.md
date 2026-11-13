@@ -849,7 +849,7 @@ After a feature's local gate is green and its PR is open, `/sdd-pr-loop <pr>` dr
 Codex review cycle to a terminal state. It is installed only while `pr_loop.enabled` is
 `true`, and that gate is **opt-in**: a fresh install seeds `false`, so the command is
 absent until someone turns it on — see
-[INSTALL.md](INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled) for the config block
+[INSTALL.md](agents/INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled) for the config block
 and the `HARNESS_*` env knobs. Where it is **not** installed, drive the same cycle by
 hand: request the review, apply the blocking findings, wait for merge.
 
@@ -1099,7 +1099,7 @@ Notes that matter in practice:
   stamps NO `model` but, since E99-F161, DOES stamp `model_reasoning_effort`, and since
   E99-F163 the verdict compares the whole resolved stamp (`model` plus effort) — so an effort
   difference alone arms without any `model` pin, and a pin is needed only for distinct `model`
-  ids. See `docs/INSTALL.md`'s "Codex reasoning effort" section. On `pi` the same shape
+  ids. See `docs/agents/INSTALL.md`'s "Codex reasoning effort" section. On `pi` the same shape
   holds (E35-F03): a tier alone stamps NO `model` (pi has no floating alias) but DOES stamp a
   `thinking:` level on the role file, so a `thinking` difference alone arms, and a
   `pin.pi.<tier>` (`provider/id`) is needed only for distinct models. A fifth-verdict

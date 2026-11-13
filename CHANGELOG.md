@@ -4,6 +4,20 @@ All notable changes to the harness body are recorded here. Versions follow
 [SemVer](https://semver.org/) and are stamped into every install's
 `.harness/.harness-version` (see `AGENTS.md` → Branch, review, and release lifecycle).
 
+## [0.111.0] — 2026-11-13
+
+### Changed — docs for humans, slice 2: INSTALL split (E39-F02)
+- `docs/INSTALL.md` rewritten for humans (under 300 lines): one repository or an umbrella in one
+  command (diagram), the upgrade flow from the update check to the preservation proof (diagram),
+  and what is yours and what the harness refreshes.
+- `docs/agents/INSTALL.md` — the 0.110 INSTALL moved verbatim (every section, headings
+  byte-identical, link targets retargeted). 18 suites, the installer's, `init.sh`'s and the
+  config's comments and every heading-anchored link re-point by path only.
+- `tests/test_docs_for_humans.sh` — anchor lint (every `file.md#fragment` link under `README.md`
+  and `docs/` resolves to a heading) and per-member scan-set pins for the link and assets rows.
+- Corrected: INSTALL's telemetry pointer now targets `docs/agents/README.md` → Observability;
+  `docs/README.md` no longer claims an uninstall.
+
 ## [0.110.1] — 2026-11-13
 
 ### Fixed — repoint the shipped URL defaults to `araozmd/harness-loop` (E99-F183)

@@ -11,6 +11,8 @@
 # literal; never git-diff a DO-NOT-TOUCH file against main. Exit codes are asserted as
 # `rc -eq N`, never a shell-dependent code.
 #
+# E39-F02 registers docs/INSTALL.md and adds the F02_R* rows (anchor lint, scan-set plants).
+#
 # Registry: HUMAN_DOCS lists <path>:<line-budget>:<diagram yes|no>. A later slice appends an
 # entry; an override above the default 300 carries a `# why:` comment on the line above it.
 
@@ -27,7 +29,7 @@ trap 'rm -rf "$T"' EXIT
 trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
 
-HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no"
+HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no docs/INSTALL.md:300:yes"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; echo "$1" >> "$T/passed"; }
@@ -548,6 +550,13 @@ R2_no_assets_links_under_docs() {
   rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
   printf '\n[sheet](agents/../../assets/brand-sheet.png)\n' >> "$T/r2/docs/README.md"
   [ -n "$(links_into_assets "$T/r2")" ] || fail "R2: the assets-link check misses a link that reaches assets/ through a .. segment"
+  # one defect per scan-set member: a top-level doc and a nested docs/agents doc
+  rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
+  printf '\n![logo](../assets/logo.svg)\n' >> "$T/r2/docs/README.md"
+  printf '\n![logo](../../assets/logo.svg)\n' >> "$T/r2/docs/agents/README.md"
+  _got="$(links_into_assets "$T/r2")"
+  printf '%s\n' "$_got" | grep -qF 'docs/README.md -> ' || fail "R2: the assets-link check does not scan the docs/ top level"
+  printf '%s\n' "$_got" | grep -qF 'docs/agents/README.md -> ' || fail "R2: the assets-link check does not recurse into docs/agents/"
   _canon='https://raw.githubusercontent.com/araozmd/harness-loop/main/assets/logo.svg'
   rm -rf "$T/r2"; mkdir -p "$T/r2"; cp -R "$ROOT/docs" "$T/r2/docs"
   printf '\n![x](%s)\n' "$_canon" >> "$T/r2/docs/BRAND.md"
@@ -590,6 +599,15 @@ R9_relative_links_resolve() {
   mirror m9
   printf '\n[x](../nowhere.md)\n' >> "$T/m9/docs/README.md"
   broken_links "$T/m9" | grep -F "docs/README.md -> ../nowhere.md" >/dev/null || fail "R9: the link check misses a broken link"
+  # one defect per scan-set member: the root README, a top-level doc, a nested docs/agents doc
+  mirror m9s
+  printf '\n[x](nowhere-root.md)\n' >> "$T/m9s/README.md"
+  printf '\n[x](nowhere-top.md)\n' >> "$T/m9s/docs/README.md"
+  printf '\n[x](nowhere-nested.md)\n' >> "$T/m9s/docs/agents/README.md"
+  _got="$(broken_links "$T/m9s")"
+  printf '%s\n' "$_got" | grep -qxF 'README.md -> nowhere-root.md' || fail "R9: the link check does not scan the root README.md"
+  printf '%s\n' "$_got" | grep -qxF 'docs/README.md -> nowhere-top.md' || fail "R9: the link check does not scan the docs/ top level"
+  printf '%s\n' "$_got" | grep -qxF 'docs/agents/README.md -> nowhere-nested.md' || fail "R9: the link check does not recurse into docs/agents/"
   mirror m9r
   printf '\n[x][r]\n\n[r]: ../nowhere.md\n' >> "$T/m9r/docs/README.md"
   broken_links "$T/m9r" | grep -F "docs/README.md -> ../nowhere.md" >/dev/null || fail "R9: the link check misses a broken reference-style definition"
@@ -882,6 +900,437 @@ R8_summary_last_line() {
   pass "R8_summary_last_line"
 }
 
+
+# ---------------------------------------------------------------- E39-F02 — INSTALL split
+# Rows named F02_R<n>_<slug>; <n> is the E39-F02 spec's R-id. Rows that read a doc take a root
+# so a mutant copy under $T can be scanned; none reads VERSION as a literal or diffs main.
+INSTALL_H="docs/INSTALL.md"
+INSTALL_A="docs/agents/INSTALL.md"
+
+F02_R1_counterpart_announcement() {
+  [ -f "$ROOT/$INSTALL_A" ] || fail "F02 R1: docs/agents/INSTALL.md does not exist"
+  [ "$(sed -n '1p' "$ROOT/$INSTALL_A")" = "# Installing the harness into a project" ] ||
+    fail "F02 R1: line 1 of docs/agents/INSTALL.md is not the base H1"
+  _first="$(sed -n '2,$p' "$ROOT/$INSTALL_A" | grep -v '^[[:space:]]*$' | sed -n '1p')"
+  [ "$_first" = '> For agents — exact contracts; the human guide is [docs/INSTALL.md](../INSTALL.md).' ] ||
+    fail "F02 R1: the first non-empty line after the H1 is not the announcement (got: $_first)"
+  pass "F02_R1_counterpart_announcement"
+}
+F02_R1_counterpart_headings_in_order() {
+  _got="$(unfenced "$ROOT/$INSTALL_A" | grep '^#')"
+  _expect='# Installing the harness into a project
+## Prerequisites
+## Install
+### Shared skill units and legacy prompt migration
+### pi
+### Retiring Gemini
+## Starting from nothing (new product)
+## Bootstrap (first run)
+### `/sdd-pr-loop` (opt-in, gated on `pr_loop.enabled`)
+## Host detection — `--agents=host` (opt-in)
+### Which markers are trusted
+### Declaring the host yourself — `HARNESS_HOST_AGENT`
+### What happens when the host is undetected
+### The fresh-install default
+### Seeing what it would do — `--print-agents`
+### Changing the selection later
+## OpenCode parallel-fix support (`/sdd-fix-parallel`)
+## Harness feedback (`feedback:`) — on by default
+## Worker roster (`workers.roster`) — opt-in, local-only
+## The second question — `execution.builder.backend`
+### Scripted installs — `--builder-backend=` / `HARNESS_BUILDER_BACKEND`
+### Choosing `delegate` before wiring `delegate_cmd`
+## The third question — `pr_loop.enabled`
+### Scripted installs — `--pr-loop=`
+### `HARNESS_PR_LOOP_ENABLED` is per-run, and is never persisted
+### No install-time preflight
+### Changing either answer later
+## Upgrade
+### Commit the upgrade — `init.sh` now checks that you did
+### Staying current — the update check (E38-F01)
+## Umbrella mode (cascade install)
+### Promoting a single install to a coordinator
+### Shared spec repository (`--shared-repo`)
+### Body layout — `--thin` and `--standalone`
+## Per-role model routing (`models:`) — opt-in
+### `builder-heavy` — the escalation tier
+### What each tier stamps
+### pi model and thinking (E35-F03)
+### Codex reasoning effort — `model_reasoning_effort` (E99-F161)
+### Pinning an exact model — `models.pin.<front-end>.<tier>`
+### Where the values land
+### Supported OpenCode versions
+### OpenCode model helper
+## Self mode — `--self` (harness developers only)
+### Optional Codex Builder/heavy model choices
+## Config migration on upgrade (non-destructive)
+## Layout & ownership
+## Fallback: AI-driven adoption'
+  [ "$_got" = "$_expect" ] || fail "F02 R1: the headings of docs/agents/INSTALL.md are not the 48 base headings in base order"
+  pass "F02_R1_counterpart_headings_in_order"
+}
+F02_R1_counterpart_retargets() {
+  _t="$(link_targets "$ROOT/$INSTALL_A")"
+  printf '%s\n' "$_t" | grep -qE '^\./|^\.\./specs/|^\.\./README\.md' && fail "F02 R1: a relative link target was not retargeted from docs/agents/"
+  printf '%s\n' "$_t" | grep -qxF 'README.md#observability-telemetry' || fail "F02 R1: the telemetry pointer does not target README.md#observability-telemetry"
+  unfenced "$ROOT/$INSTALL_A" | folded | grep -qF 'see [`../README.md`](README.md#observability-telemetry) → Observability and `agents/orchestrator.md` → "## Telemetry".' ||
+    fail "F02 R1: the telemetry sentence is not the pinned text"
+  _bad="$(for _x in $(printf '%s\n' "$_t" | grep -vE '^(#|https?:|mailto:)' | sed 's/#.*//' | sort -u); do
+            [ -e "$ROOT/docs/agents/$_x" ] || echo "$_x"; done)"
+  [ -z "$_bad" ] || fail "F02 R1: counterpart link targets do not resolve from docs/agents/: $_bad"
+  pass "F02_R1_counterpart_retargets"
+}
+
+# F02_R6 — each suite of the coupling table reads the counterpart. <root> lets a mutant mirror be scanned.
+INSTALL_SUITES="agents_host escalation feedback_config feedback_report greenfield install installer_toggles opencode_compat pi_agents pi_front pi_integrity pi_preflight pr_loop promote reporting_rule sdd_fix_parallel init_drift_guard planner_topology"
+suites_missing_counterpart() {
+  for _s in $INSTALL_SUITES; do
+    grep -qF 'docs/agents/INSTALL.md' "$1/tests/test_$_s.sh" || echo "tests/test_$_s.sh"
+  done
+}
+F02_R6_suites_cite_counterpart() {
+  _bad="$(suites_missing_counterpart "$ROOT")"
+  [ -z "$_bad" ] || fail "F02 R6: these suites do not cite docs/agents/INSTALL.md: $_bad"
+  rm -rf "$T/f6"; mkdir -p "$T/f6/tests"; cp "$ROOT"/tests/test_*.sh "$T/f6/tests/"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f6/tests/test_promote.sh" > "$T/f6/p.new" && mv "$T/f6/p.new" "$T/f6/tests/test_promote.sh"
+  suites_missing_counterpart "$T/f6" | grep -qF 'tests/test_promote.sh' || fail "F02 R6: the check misses a suite still citing docs/INSTALL.md"
+  pass "F02_R6_suites_cite_counterpart"
+}
+
+# F02_R10 — the registry entry, the budget it carries and the index row pairing the two paths.
+F02_R10_registry_and_index() {
+  printf '%s\n' "$HUMAN_DOCS" | tr ' ' '\n' | grep -qxF 'docs/INSTALL.md:300:yes' ||
+    fail "F02 R10: HUMAN_DOCS lacks the entry docs/INSTALL.md:300:yes"
+  index_rows "$AGENTS_README" | awk '$1 == "docs/INSTALL.md" && $2 == "docs/agents/INSTALL.md" { f = 1 } END { exit !f }' ||
+    fail "F02 R10: ## Index has no row pairing docs/INSTALL.md with docs/agents/INSTALL.md"
+  pass "F02_R10_registry_and_index"
+}
+
+# F02_R2 — the human INSTALL's shape. <file> lets a mutant copy under $T be checked.
+HUMAN_INSTALL_ANCHORS='agents/INSTALL.md#pi
+agents/INSTALL.md#retiring-gemini
+agents/INSTALL.md#host-detection----agentshost-opt-in
+agents/INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled
+agents/INSTALL.md#harness-feedback-feedback--on-by-default
+agents/INSTALL.md#worker-roster-workersroster--opt-in-local-only
+agents/INSTALL.md#per-role-model-routing-models--opt-in
+agents/INSTALL.md#self-mode----self-harness-developers-only
+agents/INSTALL.md#config-migration-on-upgrade-non-destructive
+agents/INSTALL.md#layout--ownership'
+install_shape_problems() {
+  _f="$1"
+  [ "$(nlines "$_f")" -le 300 ] || echo "exceeds 300 lines"
+  sed -n '1p' "$_f" | grep -qE '^# ' || echo "line 1 is not a Markdown H1"
+  sed -n '1,15p' "$_f" | grep -qF '](agents/INSTALL.md)' || echo "no counterpart link within the first 15 lines"
+  _h="$(unfenced "$_f" | grep '^## ')"
+  _want='## Prerequisites
+## Install
+## Choose your front-ends
+## Bootstrap (first run)
+## Upgrade
+## Umbrella (many repositories)
+## Ownership
+## Further reading'
+  [ "$_h" = "$_want" ] || echo "the ## headings are not the eight pinned ones in order"
+  _fr="$(slice "$_f" "## Further reading")"
+  while IFS= read -r _a; do
+    printf '%s\n' "$_fr" | grep -qF "]($_a)" || echo "## Further reading does not link $_a"
+  done <<EOA
+$HUMAN_INSTALL_ANCHORS
+EOA
+  link_targets "$_f" | while IFS= read -r _t; do
+    case "$_t" in ""|\#*|http://*|https://*|mailto:*) continue ;; esac
+    _p="${_t%%#*}"
+    _r="$(cd "$(dirname "$_f")" && python3 -I -c 'import os, sys; print(os.path.relpath(os.path.normpath(os.path.join(os.getcwd(), sys.argv[1])), sys.argv[2]))' "$_p" "$DOCS_DIR" 2>/dev/null)"
+    case "$_r" in ..|../*) echo "link $_t leaves docs/" ;; esac
+    [ -e "$(dirname "$_f")/$_p" ] || echo "link $_t does not resolve"
+  done
+}
+DOCS_DIR="$ROOT/docs"
+F02_R2_human_shape() {
+  [ -f "$ROOT/$INSTALL_H" ] || fail "F02 R2: docs/INSTALL.md does not exist"
+  _bad="$(install_shape_problems "$ROOT/$INSTALL_H")"
+  [ -z "$_bad" ] || fail "F02 R2: docs/INSTALL.md: $(printf '%s' "$_bad" | tr '\n' ';')"
+  # mutants on private copies: each must be reported
+  rm -rf "$T/f2"; mkdir -p "$T/f2/docs"; DOCS_DIR="$T/f2/docs"
+  sed 's/^## Ownership$/## What is yours/' "$ROOT/$INSTALL_H" > "$T/f2/docs/a.md"
+  [ -n "$(install_shape_problems "$T/f2/docs/a.md")" ] || fail "F02 R2: the shape check misses a renamed ## heading"
+  grep -vF '#worker-roster-workersroster--opt-in-local-only' "$ROOT/$INSTALL_H" > "$T/f2/docs/b.md"
+  [ -n "$(install_shape_problems "$T/f2/docs/b.md")" ] || fail "F02 R2: the shape check misses a dropped further-reading anchor"
+  { cat "$ROOT/$INSTALL_H"; printf '\n[x](../AGENTS.md)\n'; } > "$T/f2/docs/c.md"
+  cp "$ROOT/AGENTS.md" "$T/f2/AGENTS.md"
+  install_shape_problems "$T/f2/docs/c.md" | grep -qF 'leaves docs/' || fail "F02 R2: the shape check misses a link that leaves docs/"
+  { printf '# Installing\n'; for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do echo; done; sed -n '2,$p' "$ROOT/$INSTALL_H" | grep -vF '](agents/INSTALL.md)'; printf '\n[agents](agents/INSTALL.md)\n'; } > "$T/f2/docs/d.md"
+  install_shape_problems "$T/f2/docs/d.md" | grep -qF 'first 15 lines' || fail "F02 R2: the shape check misses a counterpart link past line 15"
+  DOCS_DIR="$ROOT/docs"
+  pass "F02_R2_human_shape"
+}
+# section_diagram <doc> <heading> — the mermaid text of one section, behind a @@COUNT line.
+section_diagram() {
+  _s="$(slice "$1" "$2")"
+  _n="$(printf '%s\n' "$_s" | grep -cE '^ {0,3}(```|~~~)[ 	]*mermaid[ 	]*$' || true)"
+  echo "@@COUNT $_n"
+  printf '%s\n' "$_s" | mermaid_blocks
+}
+# diagram_problems <doc> <heading> <tokens, one per line> <prose tokens, one per line>
+diagram_problems() {
+  _d="$(section_diagram "$1" "$2")"
+  [ "$(printf '%s\n' "$_d" | sed -n '1p')" = "@@COUNT 1" ] || echo "$2 does not hold exactly one mermaid block"
+  printf '%s\n' "$_d" | sed -n '3p' | sed 's/^[[:space:]]*//' | grep -qE '^flowchart( |$)' || echo "the $2 diagram is not a flowchart"
+  while IFS= read -r _w; do
+    [ -n "$_w" ] || continue
+    printf '%s\n' "$_d" | grep -qF -- "$_w" || echo "the $2 diagram does not name '$_w'"
+  done <<EOT
+$3
+EOT
+  _p="$(slice "$1" "$2" | awk "$FENCE_AWK"'fence_delim($0) { next } !fence' | folded)"
+  while IFS= read -r _w; do
+    [ -n "$_w" ] || continue
+    printf '%s' "$_p" | grep -qF -- "$_w" || echo "the $2 prose does not carry '$_w'"
+  done <<EOT
+$4
+EOT
+}
+INSTALL_DIAGRAM_TOKENS='harness-install.sh
+.harness/
+AGENTS.md
+--umbrella
+umbrella.manifest.yaml
+--thin
+coordinator
+child'
+F02_R3_install_diagram() {
+  _bad="$(diagram_problems "$ROOT/$INSTALL_H" "## Install" "$INSTALL_DIAGRAM_TOKENS" '--agents=
+--builder-backend=
+--pr-loop=')"
+  [ -z "$_bad" ] || fail "F02 R3: $(printf '%s' "$_bad" | tr '\n' ';')"
+  [ "$(section_diagram "$ROOT/$INSTALL_H" "## Install" | grep -c 'subgraph ')" -eq 2 ] || fail "F02 R3: the Install diagram does not hold exactly two subgraphs"
+  # mutants on private copies
+  _m() { rm -rf "$T/f3"; mkdir -p "$T/f3"; sed "$1" "$ROOT/$INSTALL_H" > "$T/f3/m.md"
+         cmp -s "$ROOT/$INSTALL_H" "$T/f3/m.md" && fail "F02 R3: setup: the mutant '$1' did not apply"
+         _bm="$(diagram_problems "$T/f3/m.md" "## Install" "$INSTALL_DIAGRAM_TOKENS" '--agents=
+--builder-backend=
+--pr-loop=')"
+         [ -n "$_bm" ] || [ "$(section_diagram "$T/f3/m.md" "## Install" | grep -c 'subgraph ')" -ne 2 ] || fail "F02 R3: the diagram check misses the mutant '$1'"; }
+  _m '/--thin, only when you pass it/d'
+  _m 's/^flowchart TB$/graph TB/;t'
+  _m 's/`--pr-loop=`/the third flag/'
+  _m '/subgraph many/d'
+  pass "F02_R3_install_diagram"
+}
+UPGRADE_DIAGRAM_TOKENS='init.sh
+Install now? [y/N]
+Proceed with the upgrade? [y/N]
+upgrade-backup
+harness-install.sh
+preserved
+commit
+exit 2
+exit 3
+exit 4'
+UPGRADE_PROSE_TOKENS='git pull
+./harness-install.sh
+update.check: false
+HARNESS_SKIP_UPDATE_CHECK=1
+update.remote'
+F02_R4_upgrade_diagram() {
+  _bad="$(diagram_problems "$ROOT/$INSTALL_H" "## Upgrade" "$UPGRADE_DIAGRAM_TOKENS" "$UPGRADE_PROSE_TOKENS")"
+  [ -z "$_bad" ] || fail "F02 R4: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _m() { rm -rf "$T/f4"; mkdir -p "$T/f4"; sed "$1" "$ROOT/$INSTALL_H" > "$T/f4/m.md"
+         cmp -s "$ROOT/$INSTALL_H" "$T/f4/m.md" && fail "F02 R4: setup: the mutant '$1' did not apply"
+         [ -n "$(diagram_problems "$T/f4/m.md" "## Upgrade" "$UPGRADE_DIAGRAM_TOKENS" "$UPGRADE_PROSE_TOKENS")" ] || fail "F02 R4: the diagram check misses the mutant '$1'"; }
+  _m '/exit 4/d'
+  _m 's/Proceed with the upgrade? \[y\/N\]/Proceed? [y\/N]/'
+  _m 's/update\.remote/update.fork/g'
+  # a second mermaid block in the section
+  rm -rf "$T/f4"; mkdir -p "$T/f4"
+  awk '/^## Upgrade$/ { print; print ""; print "```mermaid"; print "flowchart LR"; print "  a --> b"; print "```"; next } { print }' "$ROOT/$INSTALL_H" > "$T/f4/m.md"
+  [ -n "$(diagram_problems "$T/f4/m.md" "## Upgrade" "$UPGRADE_DIAGRAM_TOKENS" "$UPGRADE_PROSE_TOKENS")" ] || fail "F02 R4: the diagram check misses a second mermaid block"
+  pass "F02_R4_upgrade_diagram"
+}
+
+# F02_R5 — the human sentences are true (two-token pins on the doc folded outside fences) and the
+# known over-claims are absent. accuracy_problems/over_claims take a file so mutants are checked.
+accuracy_problems() {
+  _t="$(unfenced "$1" | folded)"
+  _pin() { printf '%s' "$_t" | grep -qE -- "$2" || echo "$1 missing"; }
+  _pin S1 'never runs .git init. for you'
+  _pin S2 'prints that one line and changes nothing'
+  _pin S3 'until you answer .y. twice'
+  _pin S4 'product\.md. you never edited, which is refreshed'
+  _pin S5a 'fails until the upgrade is committed'
+  _pin S5b 'warns and goes on'
+  _pin S6a 'immediate subdirectories that are git repositories'
+  _pin S6b 'only when you pass it'
+  _pin S7 'keep the current value when you press Enter'
+}
+over_claims() {
+  _t="$(unfenced "$1" | folded)"
+  for _o in 'uninstall' 'upgrades itself' 'upgrades automatically' 'automatically upgrade' \
+            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' 'E00-F01' 'cannot prove it wrote'; do
+    printf '%s' "$_t" | grep -qiF -- "$_o" && echo "$_o"
+  done
+  return 0
+}
+F02_R5_accuracy_sentences() {
+  _bad="$(accuracy_problems "$ROOT/$INSTALL_H")"
+  [ -z "$_bad" ] || fail "F02 R5: docs/INSTALL.md lacks pinned sentence(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  rm -rf "$T/f5"; mkdir -p "$T/f5"
+  _m() { sed "$2" "$ROOT/$INSTALL_H" > "$T/f5/m.md"
+         cmp -s "$ROOT/$INSTALL_H" "$T/f5/m.md" && fail "F02 R5: setup: the mutant for $1 did not apply"
+         accuracy_problems "$T/f5/m.md" | grep -qF "$1 missing" || fail "F02 R5: the pin $1 survives its mutant"; }
+  _m S1 's/never runs `git init` for you/runs `git init` for you/'
+  _m S2 's/prints that one line and changes nothing/prints that one line/'
+  _m S3 's/until you answer `y` twice/until you answer `y`/'
+  _m S4 's/, which is refreshed to$/ is refreshed to/;s/^the new stub\.$/the new stub./'
+  _m S5b 's/warns and goes on/warns/'
+  _m S6b 's/only when you pass it/when asked/'
+  _m S7 's/keep the current value when you press Enter/keep the default/'
+  pass "F02_R5_accuracy_sentences"
+}
+F02_R5_no_over_claims() {
+  _bad="$(over_claims "$ROOT/$INSTALL_H")"
+  [ -z "$_bad" ] || fail "F02 R5: docs/INSTALL.md contains the over-claim(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  names_uninstall() { grep -qiF 'uninstall' "$1"; }
+  ! names_uninstall "$ROOT/docs/README.md" || fail "F02 R5: docs/README.md still claims an uninstall"
+  rm -rf "$T/f5b"; mkdir -p "$T/f5b"
+  for _m in 'The harness upgrades itself.' 'UNINSTALL' 'It upgrades automatically.' 'Then automatically upgrade.' \
+            'everything is preserved' 'nothing is overwritten' 'the installer runs git init' '(E00-F01)' 'the installer cannot prove it wrote are kept'; do
+    { cat "$ROOT/$INSTALL_H"; printf '\n%s\n' "$_m"; } > "$T/f5b/m.md"
+    [ -n "$(over_claims "$T/f5b/m.md")" ] || fail "F02 R5: the over-claim check misses '$_m'"
+  done
+  { cat "$ROOT/$INSTALL_H"; printf '\n```text\nThe harness upgrades itself. uninstall E00-F01\n```\n'; } > "$T/f5b/m.md"
+  [ -z "$(over_claims "$T/f5b/m.md")" ] || fail "F02 R5: the over-claim check flags text inside a fence"
+  sed 's/^\(.*Install the harness into a project, choose front-ends, upgrade\)\.\(.*\)$/\1, uninstall.\2/' "$ROOT/docs/README.md" > "$T/f5b/readme.md"
+  names_uninstall "$T/f5b/readme.md" || fail "F02 R5: the docs/README.md uninstall check misses a restored 'uninstall'"
+  pass "F02_R5_no_over_claims"
+}
+
+# F02_R7 — the installer, init.sh and the seed config cite the counterpart; the title pointer in
+# WORKFLOW.md names it. <root> lets a mutant mirror be scanned.
+stale_citations() {
+  for _f in harness-install.sh init.sh harness.config.yaml; do
+    grep -qF 'docs/INSTALL.md' "$1/$_f" && echo "$_f still cites docs/INSTALL.md"
+  done
+  grep -F 'Per-role model routing' "$1/harness-install.sh" | grep -qF 'docs/agents/INSTALL.md' ||
+    echo "harness-install.sh: the § Per-role model routing pointer does not name docs/agents/INSTALL.md"
+  grep -qF 'docs/agents/INSTALL.md' "$1/docs/WORKFLOW.md" || echo "docs/WORKFLOW.md does not name docs/agents/INSTALL.md"
+  return 0
+}
+F02_R7_no_stale_citations() {
+  _bad="$(stale_citations "$ROOT")"
+  [ -z "$_bad" ] || fail "F02 R7: $(printf '%s' "$_bad" | tr '\n' ';')"
+  rm -rf "$T/f7"; mkdir -p "$T/f7/docs"; cp "$ROOT/harness-install.sh" "$ROOT/init.sh" "$ROOT/harness.config.yaml" "$T/f7/"; cp "$ROOT/docs/WORKFLOW.md" "$T/f7/docs/"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/init.sh" > "$T/f7/i.new" && mv "$T/f7/i.new" "$T/f7/init.sh"
+  stale_citations "$T/f7" | grep -qF 'init.sh still cites' || fail "F02 R7: the check misses a reverted init.sh citation"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/docs/WORKFLOW.md" > "$T/f7/w.new" && mv "$T/f7/w.new" "$T/f7/docs/WORKFLOW.md"
+  stale_citations "$T/f7" | grep -qF 'WORKFLOW.md does not name' || fail "F02 R7: the check misses a reverted WORKFLOW.md title pointer"
+  pass "F02_R7_no_stale_citations"
+}
+
+# F02_R8 — anchors resolve. anchor_problems <root> prints "<file> -> <target>" for every relative
+# <path>.md#<fragment> / #<fragment> link (inline or reference definition, outside fences) under
+# README.md and docs/**/*.md whose fragment is not the GitHub slug of a heading of the target.
+anchor_problems() {
+  { echo "$1/README.md"; find "$1/docs" -name '*.md' | sort; } > "$T/anchor.files"
+  : > "$T/anchor.links"; : > "$T/anchor.heads"
+  while IFS= read -r _f; do
+    [ -f "$_f" ] || continue
+    link_targets "$_f" | while IFS= read -r _t; do
+      case "$_t" in *"#"*) ;; *) continue ;; esac
+      case "$_t" in http://*|https://*|mailto:*) continue ;; esac
+      printf '%s\t%s\n' "$_f" "$_t"
+    done >> "$T/anchor.links"
+    unfenced "$_f" | grep -E '^#{1,6} ' | while IFS= read -r _h; do printf '%s\t%s\n' "$_f" "$_h"; done >> "$T/anchor.heads" || true
+  done < "$T/anchor.files"
+  # a target outside the scan set (an agents/*.md role prompt) still needs its headings indexed
+  python3 -I -c '
+import os, sys
+seen = set()
+for line in open(sys.argv[1], encoding="utf-8"):
+    f, t = line.rstrip("\n").split("\t", 1)
+    path = t.split("#", 1)[0]
+    if path:
+        seen.add(os.path.normpath(os.path.join(os.path.dirname(f), path)))
+for p in sorted(seen):
+    if os.path.isfile(p): print(p)' "$T/anchor.links" | while IFS= read -r _g; do
+    grep -qxF "$_g" "$T/anchor.files" && continue
+    unfenced "$_g" | grep -E '^#{1,6} ' | while IFS= read -r _h; do printf '%s\t%s\n' "$_g" "$_h"; done >> "$T/anchor.heads" || true
+  done
+  python3 -I - "$1" "$T/anchor.links" "$T/anchor.heads" <<'PY'
+import os, re, sys
+root, links, heads = sys.argv[1:4]
+def slug(h):
+    h = re.sub(r'^#+\s*', '', h).strip().lower()
+    return re.sub(r'[^a-z0-9 _-]', '', h).replace(' ', '-')
+slugs = {}
+for line in open(heads, encoding='utf-8'):
+    f, h = line.rstrip('\n').split('\t', 1)
+    slugs.setdefault(os.path.normpath(f), set()).add(slug(h))
+for line in open(links, encoding='utf-8'):
+    f, t = line.rstrip('\n').split('\t', 1)
+    path, frag = t.split('#', 1)
+    tgt = os.path.normpath(os.path.join(os.path.dirname(f), path)) if path else os.path.normpath(f)
+    if not os.path.isfile(tgt):
+        continue
+    if frag not in slugs.get(tgt, set()):
+        print(os.path.relpath(f, root) + ' -> ' + t)
+PY
+}
+F02_R8_anchors_resolve() {
+  _bad="$(anchor_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F02 R8: unresolved anchors: $(printf '%s' "$_bad" | tr '\n' ';')"
+  mirror m8; printf '\n[x](docs/INSTALL.md#no-such)\n' >> "$T/m8/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'README.md -> docs/INSTALL.md#no-such' || fail "F02 R8: the anchor check misses a stale fragment in README.md"
+  mirror m8; printf '\n[x](INSTALL.md#nope)\n' >> "$T/m8/docs/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'docs/README.md -> INSTALL.md#nope' || fail "F02 R8: the anchor check misses a stale fragment in docs/README.md"
+  mirror m8; printf '\n[x](#nowhere)\n' >> "$T/m8/docs/agents/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'docs/agents/README.md -> #nowhere' || fail "F02 R8: the anchor check misses a stale fragment in docs/agents/README.md"
+  mirror m8; printf '\n[x][r]\n\n[r]: INSTALL.md#nope-ref\n' >> "$T/m8/docs/README.md"
+  anchor_problems "$T/m8" | grep -qxF 'docs/README.md -> INSTALL.md#nope-ref' || fail "F02 R8: the anchor check misses a stale reference-style definition"
+  mirror m8; printf '\n[x](INSTALL.md#bootstrap-first-run) [y](agents/INSTALL.md#layout--ownership)\n\n```md\n[z](INSTALL.md#fenced-nope)\n```\n' >> "$T/m8/docs/README.md"
+  [ -z "$(anchor_problems "$T/m8")" ] || fail "F02 R8: the anchor check flags a valid link, the & slug rule or a fenced link: $(anchor_problems "$T/m8")"
+  pass "F02_R8_anchors_resolve"
+}
+
+# F02_R11 — release: a CHANGELOG heading equals the runtime VERSION, and the section naming E39-F02,
+# docs/agents/INSTALL.md and docs/INSTALL.md sits one MINOR (patch 0) above the section below it.
+f02_changelog_problem() {
+  _v="$(awk '
+    function flush() {
+      if (sec != "" && f == "" && body ~ /E39-F02/ && body ~ /docs\/agents\/INSTALL\.md/ && body ~ /docs\/INSTALL\.md/) f = sec
+      else if (f != "" && o == "" && sec != "") o = sec
+    }
+    /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ { flush(); v = $2; gsub(/[][]/, "", v); sec = v; body = ""; next }
+    { body = body "\n" $0 }
+    END { flush(); print f; print o }' "$1")"
+  _f="$(printf '%s\n' "$_v" | sed -n '1p')"; _o="$(printf '%s\n' "$_v" | sed -n '2p')"
+  [ -n "$_f" ] || { echo "no section names E39-F02, docs/agents/INSTALL.md and docs/INSTALL.md"; return 0; }
+  [ -n "$_o" ] || { echo "the section $_f has no older section below it"; return 0; }
+  IFS=. read -r _fa _fb _fc <<EOV
+$_f
+EOV
+  IFS=. read -r _oa _ob _oc <<EOV
+$_o
+EOV
+  [ "$_fa" -eq "$_oa" ] && [ "$_fb" -eq $((_ob + 1)) ] && [ "$_fc" -eq 0 ] || echo "$_f is not one MINOR above $_o with patch 0"
+  return 0
+}
+F02_R11_version_and_changelog() {
+  _cur="$(cat "$ROOT/VERSION")"
+  grep -qF "## [$_cur]" "$ROOT/CHANGELOG.md" || fail "F02 R11: CHANGELOG has no '## [$_cur]' section for the runtime VERSION"
+  _p="$(f02_changelog_problem "$ROOT/CHANGELOG.md")"
+  [ -z "$_p" ] || fail "F02 R11: $_p"
+  sed 's#docs/agents/INSTALL\.md#docs/agents/GONE.md#g' "$ROOT/CHANGELOG.md" > "$T/f11a.md"
+  [ -n "$(f02_changelog_problem "$T/f11a.md")" ] || fail "F02 R11: the changelog check misses a section without docs/agents/INSTALL.md"
+  _fv="$(awk '/^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ { v = $2; gsub(/[][]/, "", v); sec = v } /E39-F02/ { print sec; exit }' "$ROOT/CHANGELOG.md")"
+  [ -n "$_fv" ] || fail "F02 R11: no CHANGELOG section names E39-F02"
+  sed "s/^## \[$_fv\]/## [${_fv%.*}.1]/" "$ROOT/CHANGELOG.md" > "$T/f11b.md"
+  grep -qF "## [${_fv%.*}.1]" "$T/f11b.md" || fail "F02 R11: setup: the PATCH mutant did not apply"
+  [ -n "$(f02_changelog_problem "$T/f11b.md")" ] || fail "F02 R11: the changelog check misses a PATCH-step E39-F02 section"
+  pass "F02_R11_version_and_changelog"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -901,8 +1350,16 @@ row R8_move_clean_exit0; row R8_move_vanished_token_exit1; row R8_move_dropped_l
 row R8_move_link_retarget_counts_as_moved; row R8_move_exit2_usage; row R8_move_exit3_not_a_repo; row R8_move_deleted_last_path; row R8_summary_last_line
 row R10_agents_md_rows; row R10_repo_citations_resolve
 row R12_version_minor_and_changelog
+row F02_R1_counterpart_announcement; row F02_R1_counterpart_headings_in_order; row F02_R1_counterpart_retargets
+row F02_R6_suites_cite_counterpart
+row F02_R10_registry_and_index
+row F02_R2_human_shape; row F02_R3_install_diagram; row F02_R4_upgrade_diagram
+row F02_R5_accuracy_sentences; row F02_R5_no_over_claims
+row F02_R7_no_stale_citations
+row F02_R8_anchors_resolve
+row F02_R11_version_and_changelog
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
-for f in $(sed -n 's/^\(R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
+for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
 done
 echo "test_docs_for_humans.sh: all rows passed"

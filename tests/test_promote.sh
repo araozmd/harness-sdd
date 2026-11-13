@@ -19,7 +19,7 @@ set -eu
 
 SRC="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 INSTALL="$SRC/harness-install.sh"
-INSTALL_DOC="$SRC/docs/INSTALL.md"
+INSTALL_DOC="$SRC/docs/agents/INSTALL.md"
 UMBRELLA_DOC="$SRC/docs/UMBRELLA.md"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harness-promote)"
 trap 'rm -rf "$T"' EXIT
