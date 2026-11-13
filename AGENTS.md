@@ -101,6 +101,8 @@ live in `progress/`; append the durable changelog to `progress/history.md`.
 | `docs/RATIONALE.md` | Why the harness exists; the two-layer deletion ledger |
 | `docs/WORKFLOW.md` | State transitions and human gates |
 | `docs/SPEC-FORMAT.md` | EARS, four-file specs, and traceability |
+| `docs/CONCEPTS.md` | The method in plain language: the loop, specs, gates, code over prose, the review principle |
+| `docs/agents/README.md` | The machine layer: exact contracts moved verbatim from the human docs, plus the docs conventions |
 
 ## Branch, review, and release lifecycle
 
