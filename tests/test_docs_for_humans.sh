@@ -882,6 +882,87 @@ R8_summary_last_line() {
   pass "R8_summary_last_line"
 }
 
+
+# ---------------------------------------------------------------- E39-F02 — INSTALL split
+# Rows named F02_R<n>_<slug>; <n> is the E39-F02 spec's R-id. Rows that read a doc take a root
+# so a mutant copy under $T can be scanned; none reads VERSION as a literal or diffs main.
+INSTALL_H="docs/INSTALL.md"
+INSTALL_A="docs/agents/INSTALL.md"
+
+F02_R1_counterpart_announcement() {
+  [ -f "$ROOT/$INSTALL_A" ] || fail "F02 R1: docs/agents/INSTALL.md does not exist"
+  [ "$(sed -n '1p' "$ROOT/$INSTALL_A")" = "# Installing the harness into a project" ] ||
+    fail "F02 R1: line 1 of docs/agents/INSTALL.md is not the base H1"
+  _first="$(sed -n '2,$p' "$ROOT/$INSTALL_A" | grep -v '^[[:space:]]*$' | sed -n '1p')"
+  [ "$_first" = '> For agents — exact contracts; the human guide is [docs/INSTALL.md](../INSTALL.md).' ] ||
+    fail "F02 R1: the first non-empty line after the H1 is not the announcement (got: $_first)"
+  pass "F02_R1_counterpart_announcement"
+}
+F02_R1_counterpart_headings_in_order() {
+  _got="$(unfenced "$ROOT/$INSTALL_A" | grep '^#')"
+  _expect='# Installing the harness into a project
+## Prerequisites
+## Install
+### Shared skill units and legacy prompt migration
+### pi
+### Retiring Gemini
+## Starting from nothing (new product)
+## Bootstrap (first run)
+### `/sdd-pr-loop` (opt-in, gated on `pr_loop.enabled`)
+## Host detection — `--agents=host` (opt-in)
+### Which markers are trusted
+### Declaring the host yourself — `HARNESS_HOST_AGENT`
+### What happens when the host is undetected
+### The fresh-install default
+### Seeing what it would do — `--print-agents`
+### Changing the selection later
+## OpenCode parallel-fix support (`/sdd-fix-parallel`)
+## Harness feedback (`feedback:`) — on by default
+## Worker roster (`workers.roster`) — opt-in, local-only
+## The second question — `execution.builder.backend`
+### Scripted installs — `--builder-backend=` / `HARNESS_BUILDER_BACKEND`
+### Choosing `delegate` before wiring `delegate_cmd`
+## The third question — `pr_loop.enabled`
+### Scripted installs — `--pr-loop=`
+### `HARNESS_PR_LOOP_ENABLED` is per-run, and is never persisted
+### No install-time preflight
+### Changing either answer later
+## Upgrade
+### Commit the upgrade — `init.sh` now checks that you did
+### Staying current — the update check (E38-F01)
+## Umbrella mode (cascade install)
+### Promoting a single install to a coordinator
+### Shared spec repository (`--shared-repo`)
+### Body layout — `--thin` and `--standalone`
+## Per-role model routing (`models:`) — opt-in
+### `builder-heavy` — the escalation tier
+### What each tier stamps
+### pi model and thinking (E35-F03)
+### Codex reasoning effort — `model_reasoning_effort` (E99-F161)
+### Pinning an exact model — `models.pin.<front-end>.<tier>`
+### Where the values land
+### Supported OpenCode versions
+### OpenCode model helper
+## Self mode — `--self` (harness developers only)
+### Optional Codex Builder/heavy model choices
+## Config migration on upgrade (non-destructive)
+## Layout & ownership
+## Fallback: AI-driven adoption'
+  [ "$_got" = "$_expect" ] || fail "F02 R1: the headings of docs/agents/INSTALL.md are not the 48 base headings in base order"
+  pass "F02_R1_counterpart_headings_in_order"
+}
+F02_R1_counterpart_retargets() {
+  _t="$(link_targets "$ROOT/$INSTALL_A")"
+  printf '%s\n' "$_t" | grep -qE '^\./|^\.\./specs/|^\.\./README\.md' && fail "F02 R1: a relative link target was not retargeted from docs/agents/"
+  printf '%s\n' "$_t" | grep -qxF 'README.md#observability-telemetry' || fail "F02 R1: the telemetry pointer does not target README.md#observability-telemetry"
+  unfenced "$ROOT/$INSTALL_A" | folded | grep -qF 'see [`../README.md`](README.md#observability-telemetry) → Observability and `agents/orchestrator.md` → "## Telemetry".' ||
+    fail "F02 R1: the telemetry sentence is not the pinned text"
+  _bad="$(for _x in $(printf '%s\n' "$_t" | grep -vE '^(#|https?:|mailto:)' | sed 's/#.*//' | sort -u); do
+            [ -e "$ROOT/docs/agents/$_x" ] || echo "$_x"; done)"
+  [ -z "$_bad" ] || fail "F02 R1: counterpart link targets do not resolve from docs/agents/: $_bad"
+  pass "F02_R1_counterpart_retargets"
+}
+
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -901,8 +982,9 @@ row R8_move_clean_exit0; row R8_move_vanished_token_exit1; row R8_move_dropped_l
 row R8_move_link_retarget_counts_as_moved; row R8_move_exit2_usage; row R8_move_exit3_not_a_repo; row R8_move_deleted_last_path; row R8_summary_last_line
 row R10_agents_md_rows; row R10_repo_citations_resolve
 row R12_version_minor_and_changelog
+row F02_R1_counterpart_announcement; row F02_R1_counterpart_headings_in_order; row F02_R1_counterpart_retargets
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
-for f in $(sed -n 's/^\(R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
+for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"
 done
 echo "test_docs_for_humans.sh: all rows passed"
