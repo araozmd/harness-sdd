@@ -37,7 +37,7 @@ marked machine layer.
 ## Features
 | id | title | status | sdd | depends_on |
 |---|---|---|---|---|
-| F01 | Docs split + README rewrite: docs/agents/ machine layer, Mermaid diagrams, logo, concise human guides | in-progress | true | — |
+| F01 | Docs split + README rewrite: docs/agents/ machine layer, Mermaid diagrams, logo, concise human guides | done | true | — |
 | F02 | INSTALL split (single-repo vs umbrella and upgrade-flow diagrams) | pending | true | F01 |
 | F03 | WORKFLOW split (state-machine and PR-loop diagrams) | pending | true | F01 |
 | F04 | UMBRELLA + CONFIG-LAYERING split | pending | true | F01 |
