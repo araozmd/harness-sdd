@@ -3,7 +3,7 @@
 A task is a row on the board. The Orchestrator reads its status and hands it to one role at a
 time: the Architect writes the spec, the Builder writes the code, the Reviewer checks it. Two
 gates frame the story, a human approval before code is written and an independent review before
-anything merges, and each has exceptions that this page names.
+anything merges. The approval gate has exceptions, and this page names them.
 
 Exact contracts — the routing table, the reason codes and the PR loop's exit codes — are in [agents/WORKFLOW.md](agents/WORKFLOW.md).
 
@@ -83,8 +83,9 @@ Two Builder roles exist. `builder-heavy` is the same instructions at a heavier m
 
 Both routes need a second yes from the installer's arming verdict, and `after_rejections: 0` turns escalation off entirely, `complexity: complex` included.
 
-The choice is made by a tool, `tools/builder-role.sh`, not by judgement, so the same board state
-always yields the same answer. The check looks at whether the stamp differs, not whether it is
+The choice is made by a tool, `tools/builder-role.sh`, not by judgement, so the same recorded state — the board,
+`escalation.after_rejections`, the installer's arming verdict and, when the host is known, its
+front-end — always yields the same answer. The check looks at whether the stamp differs, not whether it is
 stronger; ranking models is up to you.
 
 ## The PR review loop
@@ -93,11 +94,12 @@ stronger; ranking models is up to you.
 
 Once a feature's local gate is green and its PR is open, `/sdd-pr-loop <pr>` drives the Codex
 review cycle to a terminal state. It needs the Codex GitHub App on the repository, an
-authenticated `gh` and `jq`; a preflight checks all three and posts nothing.
+authenticated `gh` and `jq`. A preflight checks `gh`, its login, `jq` and that the PR is open,
+and posts nothing; a missing Codex App shows up as no Codex activity on the first watch.
 
 ```mermaid
 flowchart TB
-    pre["preflight: Codex GitHub App, authed gh, jq — posts nothing"] --> trig["trigger: gh pr comment — @codex review"]
+    pre["preflight: authed gh, jq, open PR — posts nothing"] --> trig["trigger: gh pr comment — @codex review"]
     trig --> watch["watch: tools/wait-for-codex.sh in the background"]
     watch -->|findings| cls["classify: P0, P1, P2 or nit from the badge, filtered by blocking_severities"]
     watch -->|clean| gate
@@ -129,7 +131,7 @@ ends with `no actionable work`. The codes include `unmet-dependency`, `dependenc
 `gated-epic`, `human-gate`, `parked`, `gated-owner`, `owner-excluded` and `no-candidates`.
 
 A park is a field on a feature, not a status. It carries a required `reason`, it composes with
-every status except `done`, and `/sdd-next` skips the feature until someone removes the park.
+every status except `done`, and `/sdd-next` skips the feature while the park is in place.
 An approved feature whose PR is still open is parked with `gate: merge` and reported as
 `awaiting-merge`; the park clears when the merge is recorded. An owner gate means a person has
 to act, not an agent, and no retry will clear it. On a PR, `needs-human` means the loop stopped

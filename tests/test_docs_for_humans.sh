@@ -1549,6 +1549,13 @@ needs-human'
 F03_R4_pr_loop_diagram() {
   _bad="$(diagram_problems "$ROOT/$WF_H" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")"
   [ -z "$_bad" ] || fail "F03 R4: $(printf '%s' "$_bad" | tr '\n' ';')"
+  # the preflight checks authed gh, jq and an open PR — not the Codex App (tools/wait-for-codex.sh wfc_preflight)
+  _pf() { section_diagram "$1" "## The PR review loop" | grep -qF 'preflight: authed gh, jq, open PR — posts nothing'; }
+  _pf "$ROOT/$WF_H" || fail "F03 R4: the preflight node is not 'authed gh, jq, open PR'"
+  rm -rf "$T/f34"; mkdir -p "$T/f34"
+  sed 's/preflight: authed gh, jq, open PR/preflight: Codex GitHub App, authed gh, jq/' "$ROOT/$WF_H" > "$T/f34/pf.md"
+  cmp -s "$ROOT/$WF_H" "$T/f34/pf.md" && fail "F03 R4: setup: the preflight mutant did not apply"
+  _pf "$T/f34/pf.md" && fail "F03 R4: the preflight check misses a diagram that claims the Codex App is checked"
   rm -rf "$T/f34"; mkdir -p "$T/f34"
   _m() { sed "$2" "$ROOT/$WF_H" > "$T/f34/m.md"
          cmp -s "$ROOT/$WF_H" "$T/f34/m.md" && fail "F03 R4: setup: the mutant $1 did not apply"
@@ -1586,7 +1593,7 @@ wf_accuracy_problems() {
 wf_over_claims() {
   _t="$(unfenced "$1" | folded)"
   for _o in 'nothing is built until' 'always pauses' 'never skips' 'fails closed' 'done: Reviewer approves' \
-            'Reviewer approves → done' 'merges automatically' 'E99-F130'; do
+            'Reviewer approves → done' 'merges automatically' 'E99-F130' 'checks all three'; do
     printf '%s' "$_t" | grep -qiF -- "$_o" && echo "$_o"
   done
   return 0
@@ -1618,7 +1625,7 @@ F03_R5_no_over_claims() {
   [ -z "$_bad" ] || fail "F03 R5: docs/WORKFLOW.md contains the over-claim(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
   rm -rf "$T/f35b"; mkdir -p "$T/f35b"
   for _m in 'Nothing is built until a human approves.' 'The loop MERGES AUTOMATICALLY.' 'The gate always pauses.' 'It never skips the gate.' \
-            'The gate fails closed.' 'in_review --> done: Reviewer approves' 'Reviewer approves → done' '(E99-F130)'; do
+            'The gate fails closed.' 'in_review --> done: Reviewer approves' 'Reviewer approves → done' '(E99-F130)' 'The preflight checks all three.'; do
     { cat "$ROOT/$WF_H"; printf '\n%s\n' "$_m"; } > "$T/f35b/m.md"
     [ -n "$(wf_over_claims "$T/f35b/m.md")" ] || fail "F03 R5: the over-claim check misses '$_m'"
   done
