@@ -1776,6 +1776,7 @@ row F02_R8_anchors_resolve
 row F02_R11_version_and_changelog
 # ---- E39-F03
 row F03_R1_counterpart_announcement; row F03_R1_counterpart_headings_in_order; row F03_R1_counterpart_retargets
+row F03_R9_registry_and_index
 row F03_R6_suites_cite_counterpart
 row F03_R2_human_shape
 row F03_R3_state_diagram
