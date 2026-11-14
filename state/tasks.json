@@ -2397,7 +2397,7 @@
         {
           "id": "E39-F03",
           "title": "WORKFLOW split: docs/agents/WORKFLOW.md + human WORKFLOW (state-machine and PR-loop diagrams); re-point suites and role-prompt citations",
-          "status": "in-progress",
+          "status": "in-review",
           "sdd": true,
           "autonomous": true,
           "depends_on": [
