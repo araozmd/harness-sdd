@@ -2397,20 +2397,21 @@
         {
           "id": "E39-F03",
           "title": "WORKFLOW split: docs/agents/WORKFLOW.md + human WORKFLOW (state-machine and PR-loop diagrams); re-point suites and role-prompt citations",
-          "status": "in-review",
+          "status": "done",
+          "landed": {
+            "base": "origin/main",
+            "commit": "9188a93db28c15cd4970251e262fbb37ea2929a6",
+            "ref": "9188a93db28c15cd4970251e262fbb37ea2929a6",
+            "repo": "harness-sdd",
+            "verified": "ancestor"
+          },
           "sdd": true,
           "autonomous": true,
           "depends_on": [
             "E39-F01",
             "E39-F02"
           ],
-          "spec_path": "specs/epics/E39-docs-for-humans/F03-workflow-split/",
-          "parked": {
-            "gate": "merge",
-            "reason": "approved; PR open, awaiting merge (336)",
-            "unblocked_by": "the PR merging \u2014 then `set-status E39-F03 done --evidence <merge-ref>`",
-            "pr": "336"
-          }
+          "spec_path": "specs/epics/E39-docs-for-humans/F03-workflow-split/"
         },
         {
           "id": "E39-F04",
