@@ -2404,7 +2404,13 @@
             "E39-F01",
             "E39-F02"
           ],
-          "spec_path": "specs/epics/E39-docs-for-humans/F03-workflow-split/"
+          "spec_path": "specs/epics/E39-docs-for-humans/F03-workflow-split/",
+          "parked": {
+            "gate": "merge",
+            "reason": "approved; PR open, awaiting merge (336)",
+            "unblocked_by": "the PR merging \u2014 then `set-status E39-F03 done --evidence <merge-ref>`",
+            "pr": "336"
+          }
         },
         {
           "id": "E39-F04",
