@@ -25,7 +25,7 @@ cd "$ROOT"
 ORCH="agents/orchestrator.md"
 SCOUT="agents/scout.md"
 STORE="store/local.md"
-WORKFLOW="docs/WORKFLOW.md"
+WORKFLOW="docs/agents/WORKFLOW.md"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; }

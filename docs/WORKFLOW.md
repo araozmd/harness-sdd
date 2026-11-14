@@ -1,417 +1,31 @@
-# The Workflow
+# How work moves through the harness
 
-## Host invocation and clean role contexts
+A task is a row on the board. The Orchestrator reads its status and hands it to one role at a
+time: the Architect writes the spec, the Builder writes the code, the Reviewer checks it. Two
+gates frame the story, a human approval before code is written and an independent review before
+anything merges. The approval gate has exceptions, and this page names them.
 
-Supported front ends are Claude Code (primary), Codex (second), OpenCode
-(third), Antigravity, and pi. This document uses canonical `/sdd-*` names for Claude,
-OpenCode, Antigravity, and pi (pi: `/sdd-*` prompt templates or `/skill:sdd-*`; the project
-must be trusted first, `/trust` or `-a` on a headless run, then `/reload` or restart pi; pi role isolation is the generated `.pi/agents/<role>.md` files
-for `pi-subagents`, with `tools/pi-dispatch.sh` as the fallback). In Codex, invoke `$sdd-new <intent>`, `$sdd-plan <intent>`,
-`$sdd-drill <epic-id>`, `$sdd-next`, `$sdd-fix <description>`, `$sdd-fix-parallel`,
-`$sdd-report`, and gated `$sdd-pr-loop <pr>`. Text accompanying the explicit skill mention supplies
-`$ARGUMENTS`; `/skills` is the discovery UI. In Antigravity, skills are natively
-discovered from `.agents/skills/` as `/sdd-*` slash commands, and role handoffs use
-dynamic `define_subagent` with `agents/<role>.md` system prompts via `invoke_subagent`.
+Exact contracts — the routing table, the reason codes and the PR loop's exit codes — are in [agents/WORKFLOW.md](agents/WORKFLOW.md).
 
-Codex uses native named roles from `.codex/agents/`: seven standard roles plus
-`pr-fixer` while the PR-loop gate is on. Each Architect, Builder, Reviewer or
-PR-fixer handoff starts a fresh role context with file paths and bounded
-instructions, never forwarded chat history. Every role runs init first and
-halts on failure. The Orchestrator still pauses at `spec-ready` for human
-approval unless explicitly autonomous; only the independent Reviewer verdict
-permits `done`. If the host cannot start a required fresh role, report that
-limitation and the handoff path instead of performing an alleged isolated role
-in the current context.
+## From idea to task
 
-## Intake — the step before `pending` (`/sdd-new`)
+For a new product, `/sdd-plan` writes the vision, the architecture, the decision records and a
+set of `draft` epics. `/sdd-drill <epic-id>` then turns one epic into features; it is the step
+that moves an epic from `draft` to `planned`, and it decomposes the epic without writing any
+feature spec. Epics have their own short lifecycle: `draft`, `planned`, `in-progress`, `done`.
 
-For a **brand-new product**, whole-project planning comes first — see
-[Whole-project inception](#whole-project-inception-sdd-plan). `/sdd-new` is the intake
-for **later work** in an existing project.
+`autonomous: true` skips the approval gate, not the planning gate: a feature in a `draft` epic is never selected, whatever the feature itself says.
 
-Before a feature is `pending`, a raw idea has to become a well-formed TaskStore
-entry. That is **Inception**'s job (`agents/inception.md`), driven by the `/sdd-new`
-slash command. A human runs `/sdd-new "<idea>"`, answers a short adaptive Q&A, and
-Inception seeds the state machine below:
+For later work in an existing project, `/sdd-new "<idea>"` asks a few questions and seeds a
+`pending` row plus a short intent brief. It seeds; it never writes the spec. For a small fix,
+`/sdd-fix "<description>"` seeds a fix under the maintenance epic with a brief and no spec at
+all. The next section says what happens to each kind of row.
 
-```mermaid
-flowchart LR
-    idea["/sdd-new #quot;#lt;idea#gt;#quot;<br/>(raw idea)"] --> inception["Inception<br/>(triage + allocate id)"]
-    inception --> entry["pending entry in state/tasks.json<br/>+ progress/inbox/#lt;id#gt;.md brief"]
-    entry --> sm(["state machine below"])
-```
+## The feature state machine
 
-Inception **seeds; it never specs** — it writes only a `pending` entry plus the
-intent brief, never the four spec files, and never advances status past `pending`.
-From there `/sdd-next` (the Orchestrator) drives the flow below, including the human
-gate. Inception does not spawn the Architect — but the brief is not inert: when the
-Orchestrator spawns the Architect for that feature, it passes
-`progress/inbox/<feature-id>.md` as a primary input, and the Architect reads it
-first and specs from it. That read is what wires the captured intent into spec
-generation.
-
-### Deterministic selection with a portable fallback
-
-`/sdd-next` normally asks the read-only, zero-dependency Node selector
-`tools/next-task.mjs` for one schema-version-1 JSON decision. Bare selection,
-`--mine`, and an exact feature target map respectively to no scope flag,
-`--mine`, and `--feature E##-F##`. A valid result is authoritative: the
-Orchestrator follows its route or reports its blocked/complete/halted outcome
-without independently choosing different work.
-
-Node remains optional. If it is unavailable, the selector fails, stdout is
-invalid JSON, or the schema version is unsupported, the Orchestrator reports the
-condition and uses the complete Markdown routing table retained in
-`agents/orchestrator.md` as the behavioral oracle. Both paths preserve the same
-epic, dependency, approval, ownership, slice merge, and rollup policy; only the
-Orchestrator performs state writes.
-
-## Whole-project inception (`/sdd-plan`)
-
-Where `/sdd-new` triages **one idea**, `/sdd-plan` captures the **whole project** up
-front. It is the **Planner** (`agents/planner.md`), a producer that sits **upstream** of
-both the per-epic `/sdd-drill` (F03) and the `/sdd-next` loop. A human runs
-`/sdd-plan "<idea>"`, answers a short adaptive Q&A, and the Planner writes the durable
-design artifacts — `specs/vision.md`, `specs/architecture.md` + ADRs at
-`specs/adr/NNNN-*.md` — and seeds a block of `draft` epics (`state/tasks.json` rows with
-`features: []` + a one-paragraph `epic.md` each). When the architecture names **more than
-one deployable**, it also writes a repo-topology ADR and an **inert**
-`umbrella.manifest.draft.yaml`: presence alone does not engage umbrella mode, and only a
-later explicit promotion step (E28-F03) turns it into a live coordinator.
-
-The Planner is a **producer that never specs**: it writes no feature
-`.spec/.plan/.tasks/.tests`, never spawns the Architect, and **never advances an epic
-past `draft`**. Seeded `draft` epics are inert — the F01 `next()` gate already keeps the
-Orchestrator from selecting their features. The flow reads `/sdd-plan` (sketch the
-roadmap) → `/sdd-drill <epic-id>` (deepen one epic, flip `draft → planned`) → `/sdd-next`
-(execute). It is purely additive: a repo that never runs `/sdd-plan` behaves exactly as
-before.
-
-## Per-epic drill-down (`/sdd-drill`)
-
-Where `/sdd-plan` sketches the **whole roadmap** as `draft` epics, `/sdd-drill` deepens
-**one** of them. It is the **Driller** (`agents/driller.md`), a consumer that sits between
-`/sdd-plan` and the `/sdd-next` loop. A human runs `/sdd-drill <epic-id>` on a single
-`draft` epic; the Driller decomposes it into a list of `pending` feature entries (ids,
-one-line intents, `depends_on`), fills the epic's `epic.md` feature table, writes a
-per-feature inbox brief, and appends any per-epic **ADR deltas** the decomposition forces.
-
-The drill ends in **exactly one** human decision at the epic granularity:
-
-- **approve** → flip the epic `draft → planned` and stamp `autonomous: true` on every
-  seeded feature, so the loop runs end-to-end with no per-feature gate;
-- **keep gated** → flip the epic `draft → planned` while leaving every feature
-  `autonomous: false`, so each parks at the normal per-feature spec-approval gate.
-
-`/sdd-drill` is the **only step that flips an epic `draft → planned`** (the Planner never
-advances past `draft`). It **decomposes, never specs** — it **never writes feature specs**
-(no feature `.spec/.plan/.tasks/.tests`) and never spawns the Architect; the Architect
-specs each feature just-in-time during the run. The flow reads `/sdd-plan` (sketch) →
-`/sdd-drill <epic-id>` (deepen one epic) → `/sdd-next` (execute). It is purely additive: a
-repo that never runs `/sdd-drill` behaves exactly as before.
-
-## Change-size discipline (`change_size:`)
-
-How large a feature is allowed to be is decided at **drill time** — the Architect specs what
-it is handed, the Builder builds the spec, and the reviewer reads whatever diff comes out.
-Nothing downstream revisits that decision, so the harness makes it explicit where it is made.
-
-The `change_size:` block in `harness.config.yaml` is **advisory in two tiers**.
-Neither tier blocks anything; each produces a *recorded decision*:
-
-| tier | default | what it asks for |
-|---|---|---|
-| **advise** | `advise_lines: 1500` production lines, or `advise_files: 25` | split, or record one line saying why not |
-| **escalate** | `escalate_lines: 3000` production lines, or `escalate_files: 50` | a recorded split plan, or an explicit override naming the reason |
-| **drill-time proxy** | `max_requirements: 12` `R-id`s in one feature spec | split at decomposition, before any spec exists |
-
-An absent `change_size:` block behaves exactly as those defaults.
-
-**Why not a hard cap.** A single wall is the wrong instrument twice over: an agent-written
-change is legitimately denser than a hand-written one, and a rename sweep, a generated
-contract or a vendored file can be thousands of lines at near-zero review risk per line.
-Review risk concentrates rather than spreading — in the case that motivated this rule, 10% of
-the files carried 67% of the findings — so the budget prompts a *split along seams*, not a
-refusal.
-
-**Why production lines.** Tests are a deliberate quality choice the Reviewer already enforces
-(a passing test per `R-id`); budgeting total lines would penalise exactly the discipline the
-harness asks for. Budget the production number and let tests scale off it.
-
-**Why requirement count at drill time.** It is the only size signal that exists before any
-code does, and each `R-id` obliges a test — so the count *is* the size of the eventual diff.
-
-**Who reads what.** The Driller reads `max_requirements` and splits an over-budget candidate
-into siblings sequenced on `depends_on`, recording the decision in the epic's `epic.md`. The
-Architect reads the same key and stops before writing the four spec files if the feature would
-exceed it, reporting the count and the seams instead — or, where a human directs it to proceed,
-writing an explicit override line into the `.spec.md`. Neither role emits a `blocked` record on
-size: `blocked` is a closed vocabulary about dependencies and ownership.
-
-### The pre-PR check (`tools/change-size.sh`)
-
-The line and file budgets govern a *measured diff*, which does not exist at decomposition
-time. They are consumed at the **Reviewer → PR handoff** — the last moment splitting is still
-cheap, because a PR once opened carries review threads, a review history, and a `depends_on`
-edge someone is waiting on.
-
-```sh
-sh "$HARNESS_DIR/tools/change-size.sh" [--format text|json]
-```
-
-Omit `--base`: the tool resolves `refs/remotes/origin/HEAD` and falls back through the usual
-names. A hard-coded `--base origin/main` exits `4` on a repo whose default is `develop` or
-`trunk`, which turns the check into a silent no-op on exactly the repos nobody tested it on.
-
-It measures the diff from the **merge base** (the branch may be rebased or carry merges; only
-the merge base is what a reviewer actually reads), classifies every changed file, and reports
-the tier plus — when over budget — the production files carrying the most additions. That last
-part is the point: the actionable question at the handoff is *where do I cut*, not *how big is
-it*, and a bare total is equally true of the 15,500 low-risk lines and the 1,716 dangerous ones.
-
-**It never blocks.** Exit 0 at every tier, including `escalate`. The only non-zero exit is `4`
-— not a git repo, no resolvable base ref, bad flag — and that measures nothing. A tool that
-could fail a branch for being large would be a hard cap wearing an advisory label, and the
-first response to it would be to stop running it.
-
-Classification is additive and configurable: `change_size.test_paths` and
-`change_size.generated_paths` take extended regexes that are **added** to the built-in
-multi-ecosystem defaults, never substituted for them. Get this wrong and the number is not
-slightly off, it is meaningless — so extend the classifier rather than letting a repo's tests
-count as production.
-
-The Reviewer runs it before approving and records the tier and the decision in its verdict;
-the Orchestrator runs it before opening the PR and carries the tier into the PR body. That
-second half covers **every** PR route the Orchestrator drives — the ordinary approve → PR
-handoff, an umbrella child repo's slice PR, and a `/sdd-fix-parallel` worker's dedicated PR.
-Pass `--repo` whenever the caller is not standing in the tree being measured (`HARNESS_DIR`
-locates the script, not the branch), or the check measures the wrong tree and reports `ok` for
-a branch it never looked at.
-
-### The test-drift check (`tools/test-drift-check.sh`)
-
-The Reviewer's `sh tools/run-tests.sh` proves the assertions that still exist pass; it cannot
-see one that was weakened so it still passes. `tools/test-drift-check.sh <base-ref>
-[<head-ref>] [--tasks-md <feature.tasks.md>] [--feature-scope <default-ref>]` lists, for every touched test file (the same
-classifier `tools/change-size.sh` uses), each removed or modified assertion line, each newly
-added skip/only/xfail marker and each test name present at base and absent at head. It reports
-and fails: exit `0` when none of those three kinds of finding is present (or all are waived),
-`1` unwaived findings, `2` usage, `3` cannot diff. Exit `0` covers only those three kinds:
-other changed lines in a test file, such as fixtures and expected values, are not checked, and
-the Reviewer still reads the test diff.
-It never judges whether an edit tightened or weakened an assertion — that look is what it
-forces. A finding is waived per test, by exact name, with a `waive-test-drift: <test name> —
-<reason>` line in the feature's `.tasks.md`. Extra assertion patterns go in
-`change_size.assert_patterns`. It is an added check; `run-tests.sh` stays primary.
-The Reviewer runs it once against the default branch (the contract) and, when the branch
-carries pair commits, once per pair commit with `--feature-scope <default branch>`: on a branch
-that has merged the default branch, the pair baseline would otherwise report the default
-branch's own test changes, brought in by the merge, as drift. `--feature-scope` keeps only the
-test files the branch itself changed since its merge-base with that branch (a rename stays when
-either path is the branch's own), and the summary line then ends `(feature scope <short-sha>)`.
-
-## Observable slices and the walking skeleton (ADR-0008)
-
-The size rule above says how *much* a feature may carry; this rule says what *shape* it must
-have, so that something can be exercised before the last feature lands. Three clauses, all
-applied by the Driller at `/sdd-drill`:
-
-1. **Every feature names a behavior observable at the product boundary** — an HTTP response, a
-   CLI invocation, a UI interaction, a file a user or client reads or an exit code. The brief states it in its
-   `## Observable behavior` section (one line: the surface and what a user or client sees).
-2. **The first feature of a fresh epic is the walking skeleton** — the thinnest end-to-end path
-   a user or client can exercise, the lowest `F##` a default drill seeds, with no intra-epic
-   `depends_on`. Cross-cutting setup is that skeleton's content, never its own feature.
-3. **A candidate whose outcome is only internal is merged into the slice that consumes it**,
-   and the size rule's split then runs along observable seams, not layers.
-
-`max_requirements` stays the size proxy; this rule says nothing about count. When a feature is
-nonetheless internal, or a fresh epic's first feature is not end-to-end, the Driller records one
-line per exempted feature in the epic's `## Notes`, beginning `Observable-slice exemption:` and
-naming the feature id and why; for an epic whose only consumer is another epic, the line names
-that consuming epic and the surface where the behavior becomes observable.
-
-The Doc-critic checks the result at `target-type=epic-decomposition` and raises
-`observable-behavior-missing`, `walking-skeleton-missing` and `internal-only-outcome`; a matching
-exemption line downgrades a finding to an `exemption-recorded` note. The rule is advisory and it
-never blocks: no `blocked` record, no gate, no status, no schema change. The wording lives in
-`agents/driller.md` and `agents/doc-critic.md`.
-
-## Architecture-aligned specs (the Architect cites ADRs)
-
-The planning tier produces durable design artifacts; this contract makes them
-**consumed**. `/sdd-plan` (the Planner) writes `specs/architecture.md` + the ADRs at
-`specs/adr/NNNN-*.md`, and `/sdd-drill` (the Driller) records, in each feature's inbox
-brief, the `ADR-NNNN` ids that feature is expected to honor. The **Architect**
-(`agents/architect.md`) closes the loop: when those artifacts are present it reads
-`specs/architecture.md` + the ADRs as a **mandatory input** alongside the brief, and every
-feature `.spec.md` it writes carries a **`## Architecture alignment`** section citing the
-`ADR-NNNN` ids the feature touches (seeded from the brief's recorded ids — the F03-D7
-hook), each with a one-line "how this honors it".
-
-- When architecture artifacts exist but the feature touches **no** recorded decision, the
-  section records the explicit **`ADRs touched: none`** (a legitimate state, not a silent
-  omission). A divergence is **stated in the section** (which ADR, how, why); the Architect
-  never authors an ADR delta — that stays the Driller's job.
-- **Graceful degradation:** in a repo that never ran `/sdd-plan` (or `/sdd-new`'s
-  altitude-3 flow) the architecture is **absent** (a bare/template-stub file counts as
-  absent), so the section is **not required** — the Architect records the absence and
-  proceeds from the brief, fabricating no citation and never failing. Specs written before
-  this contract stay valid (no retro-fit).
-- The **Reviewer** confirms the section is present (citing ≥1 ADR or stating
-  `ADRs touched: none`) **only where** architecture artifacts exist **and** the spec is
-  `sdd: true` — and that each cited `ADR-NNNN` **resolves to an existing ADR file**: a
-  **qualified** `<ns>/ADR-NNNN` against `specs/<ns>/adr/NNNN-*.md` **only** (`platform` =
-  `specs/adr/`), a **bare** `ADR-NNNN` against **any** `adr/` namespace under `specs/`.
-  A missing section there — like a cited-but-nonexistent
-  (dangling) id — is a **soft flag** (not a hard reject), and the check never fires for
-  a legacy/no-architecture feature or an `sdd: false` brief-only item. `init.sh` also
-  runs a **warn-only sweep** of the same resolution check at session start, surfacing a
-  dangling citation early without ever blocking the gate.
-
-This places the citation contract **between** `/sdd-plan`/`/sdd-drill` (the producers) and
-the Builder/Reviewer (the consumers) — it is additive and distinct from the `/sdd-plan`,
-`/sdd-drill`, and `/sdd-fix` lanes.
-
-## Stage and NFRs (ADR-0009)
-
-Non-functional requirements are stage-aware, so an MVP plan does not grow production
-machinery nobody asked for. The project declares its stage once, as a `stage:` line in
-`specs/product.md` frontmatter (the `---` block that starts on line 1) — `discovery`, `pilot`
-or `production`; when the line is
-absent or unrecognized, the stage is `production` (today's behavior). Only the human writes
-it. The Planner reads it before writing the architecture and ADRs, the Driller copies it
-into every inbox brief's `## Constraints` as `Stage: <value>`, and the Architect reads it
-before writing the `.plan.md`.
-
-| Sticky (never deferred) | Bolt-on (deferred by an ADR with a trigger) |
-|---|---|
-| tenant isolation | encryption at rest |
-| the auth boundary | WAF |
-| secrets out of the repo | rate limits |
-| validation at the system edge | backups, caching |
-
-Sticky NFRs are never deferred at any stage; extending the list is a change to ADR-0009.
-A bolt-on the stage excludes is deferred **by writing, never by omitting**: a deferred ADR
-whose header carries `- **Status:** deferred` and a mandatory `- **Trigger:**` line (the
-observable condition that reopens it), cited from the plan's `## Deferred` subsection. That
-subsection is either a `| Bolt-on | Deferred by | Trigger |` table whose rows each cite an
-`ADR-NNNN`, or the single line `Deferred: none — <why>`. Every plan row cites the `R-id` it
-serves or the `ADR-NNNN` that defers it; a bolt-on is never added without an `R-id`. The
-grammar is `docs/SPEC-FORMAT.md` → *Plan rows cite an R-id or an ADR*.
-
-Enforcement is `E36-F04`: `tools/plan-cite-check.py` turns the grammar into an exit code,
-`init.sh` runs it and the deferred-ADR trigger sweep warn-only at session start, the doc-critic
-reports it at the `feature-spec` checkpoint, and the Reviewer rejects on exit 1 (check 8); a
-plan written before the tool merged is flagged, not rejected.
-
-## Doc-critic checkpoints
-
-The **Doc-critic** (`agents/doc-critic.md`) is an automated, advisory review pass that
-runs at three defined checkpoints in the planning tier. It reviews harness-generated
-documents and specs, flags only issues that would cause real downstream problems
-(completeness, consistency, clarity, scope, YAGNI), and lets the generating agent fix
-them inline before proceeding. It is **advisory only** and never blocks or introduces a
-human gate.
-
-| Checkpoint | Caller | `target-type` | What is reviewed |
-|---|---|---|---|
-| After `/sdd-plan` | Planner | `plan-output` | `specs/vision.md`, `specs/architecture.md`, ADRs at `specs/adr/NNNN-*.md`, and every seeded `specs/epics/<id>-<slug>/epic.md` |
-| After `/sdd-drill` | Driller | `epic-decomposition` | The target `epic.md`, its feature table, per-feature inbox briefs under `progress/inbox/`, and any ADR deltas appended by the drill |
-| Before `spec-ready` | Architect | `feature-spec` | The four files for one feature: `.spec.md`, `.plan.md`, `.tasks.md`, `.tests.md` |
-
-The generating agent spawns the critic as a sub-agent with the `target-type` and the
-paths just written, applies any advisory findings **inline**, and proceeds. If the critic
-errors or times out, the agent proceeds **best-effort** and appends a short note to
-`progress/<run>/` so the skipped pass is auditable. The critic reviews **documents only**;
-production-code review remains the Reviewer's job (E05).
-
-Beside the critic at the `feature-spec` checkpoint sits the implementation-readiness lint
-(E37-F01): the Architect runs `tools/readiness-check.py <feature-dir>` before hand-off and it
-must exit 0, the doc-critic reports its lines as advisory findings, the Reviewer rejects on
-exit 1 (check 9; a plan written before the tool merged is flagged, not rejected), and
-`init.sh` sweeps every in-flight feature warn-only at session start (section 2e).
-
-At the `feature-spec` checkpoint the critic's note opens with a `## Paraphrase` (E37-F02): what
-the feature proposes and how the existing system works, restated from the four spec files
-alone — the inbox brief and the chat are withheld on purpose, because the Builder never sees
-them either — followed by a per-file `### Could not restate` list. Each `could-not-restate`
-item is blocking for the Architect's hand-off: fix it, or after at most one re-audit record it
-in the `.spec.md` under `## Accepted trade-offs`. The critic itself stays advisory — no new
-status, no new gate — and the Reviewer reads `## Accepted trade-offs` and treats a recorded
-trade-off as a decision, not a defect.
-
-## Drift check on epic rollup
-
-Rolling-wave planning has a failure mode: a plan sketched early goes **stale** as you learn.
-When an epic completes, the new ADRs and architecture deltas its implementation produced can
-invalidate the briefs behind the epics still waiting in `draft`/`planned`/`pending`. The drift
-check closes that loop, and it is **distinct from** the `/sdd-plan`, `/sdd-drill`,
-architecture-alignment, and `/sdd-fix` lanes above.
-
-- **When it fires:** **only** when an epic **rolls up to `done`** (all its features are `done`,
-  so the Orchestrator derives+persists the epic's `done`). It does not run on every loop or on a
-  feature `done` that does not complete its epic.
-- **Scout flags.** The Orchestrator spawns the **read-only Scout** in a drift-check mode to
-  re-validate the remaining `draft`/`planned`/`pending` epics against the just-completed epic's
-  artifacts. The Scout writes a per-epic still-valid/stale findings file to `progress/` and makes
-  **no** state change.
-- **Orchestrator demotes.** The **Orchestrator** (not the Scout) demotes a stale
-  `planned`/`pending` epic to **`draft`** and re-validates. A stale `draft` epic stays `draft`
-  but is flagged; an `in-progress`/`done` epic is **never** demoted.
-- **Backward only + manual re-drill.** Demotion only ever moves an epic **backward**
-  (`planned`/`pending` → `draft`) — it never advances one. Bringing a demoted epic back to
-  `planned` stays a **manual** `/sdd-drill <epic>` step; the Orchestrator reports that re-drill
-  pointer on every demotion.
-- **No-op, never silent.** With no remaining planning-tier epics, or no architecture to
-  re-validate against, the check emits a clear "nothing to re-validate" note and changes nothing.
-
-## Living-doc drift report (E37-F03)
-
-The living documents — `specs/product.md`, `specs/architecture.md` and every ADR under
-`specs/adr/` or a product space `specs/<product>/adr/` — describe the system every role reads
-about, and nothing above checks that the code still matches them. `python3
-tools/drift-report.py` (installed: `python3 .harness/tools/drift-report.py`) compares them with
-the tree: it extracts every backticked repo-rooted path and `path:name` symbol the documents
-name, resolves each with the implementation-readiness lint's own resolver, and writes
-`progress/drift/<YYYY-MM-DD>.md` — one section per document listing each `doc-names-missing`
-and `doc-names-missing-symbol` finding with the reconciliation choice (update the doc, or
-update the code) left to a human, and, when `--inventory <dir>` is passed, each `code-unnamed`
-file directly under that directory that no living document names. It is advisory: no gate, no
-board write, no edit to any document or code; it exits 0 whenever the report was written and 2
-only when it could not run, and it prints the report path. Run it on demand — suggested once
-per release, before the `VERSION` bump — and read the report; a run on the same day overwrites
-that day's report. It is distinct from the epic-rollup drift check above (the Scout
-re-validating planned epics), from `init.sh`'s installed-body drift guard and from
-`tools/test-drift-check.sh`'s weakened-assertion check. Replaced patterns — a document that
-describes a mechanism the code now implements differently — are not detected, and neither is a
-token outside the shapes the tool extracts: a backticked path whose first directory does not
-exist at the root (a typo such as tols/x.py), a bare file name found nowhere, or any token the
-implementation-readiness grammar ignores (placeholders, globs, URLs, absolute paths). "No drift
-detected" means every backticked repo-rooted path and path:name symbol the tool recognised
-resolves, and nothing in the requested inventory is unnamed.
-
-## Epic lifecycle
-
-Epics have their own, simpler lifecycle: `draft → planned → in-progress → done`.
-
-- **`draft`** — an inception sketch **anchored by a one-paragraph business brief** and
-  carrying the **drillable-minimum five elements** (business brief; epic-level success
-  criteria; technical considerations / restrictions / non-goals; cross-epic dependencies
-  and boundaries; pointers to relevant shared ADRs), but **not yet drilled into
-  features** — no feature specs, no `F01`, no EARS acceptance criteria, no detailed
-  technical plan (see `agents/planner.md`). The Orchestrator **never selects work from a
-  `draft` epic** — its features are not actionable, no matter what the feature itself
-  says (`autonomous: true` skips the human approval gate, not this planning gate).
-- **`planned`** — drilled down and human-approved; its features follow the feature
-  state machine below, exactly as features of a `pending` epic do.
-- Epic-level **`pending` is a legacy alias of `planned`** — gating-equivalent and
-  kept indefinitely for backward compatibility. New docs use `planned`.
-
-## State machine
-
-A feature moves through these states. The Orchestrator routes on the current state;
-the human gate sits between `spec-ready` and `in-progress`.
+Every feature has one status, and the Orchestrator routes on it. The diagram shows the whole
+path, including the human approval, its autonomous skip, the rejection loop and the single
+route to `done`.
 
 ```mermaid
 stateDiagram-v2
@@ -419,722 +33,124 @@ stateDiagram-v2
     state "in-progress" as in_progress
     state "in-review" as in_review
 
-    [*] --> pending
-    pending --> spec_ready: sdd:true · Architect writes 4 spec files
-    pending --> in_progress: sdd:false · autonomous:true · Orchestrator sets in-progress, then Builder
-    pending --> in_progress: sdd:false · autonomous:false (--gated) ⏸ HUMAN GATE — parked until a human approves
-    spec_ready --> in_progress: human approves ⏸ HUMAN GATE (skipped if autonomous:true)
-    in_progress --> in_review: Builder writes code from approved specs
-    in_review --> in_review: Reviewer approves · open the PR · still not done
-    in_review --> done: the PR MERGES · set-status done --evidence <merge commit>
-    in_review --> in_progress: Reviewer rejects · feedback → progress/
+    [*] --> pending: /sdd-new, /sdd-drill or /sdd-fix seeds the task
+    pending --> spec_ready: sdd true — the Architect writes the four spec files
+    spec_ready --> in_progress: a human approves (skipped when autonomous is true)
+    pending --> in_progress: sdd false and autonomous — no spec, straight to the Builder
+    pending --> in_progress: sdd false with --gated — parked at the human gate until a human approves
+    in_progress --> in_review: the Builder finishes the tasks file
+    in_review --> in_progress: the Reviewer rejects — feedback in progress/, builder-heavy after after_rejections rejections
+    in_review --> in_review: the Reviewer approves — the PR opens, not done yet
+    in_review --> done: the PR merges — set-status done with the merge commit as evidence
     done --> [*]
-    note right of done: written after the work LANDS, never on the approval — append to progress/history.md
 ```
 
-## Ownership & scoped selection (`owner` + `/sdd-next --mine`)
+- **`pending`** — the task is seeded and not yet specced. With `sdd: true` (the full flow) the
+  Architect writes the four spec files and the feature becomes `spec-ready`.
+- **`spec-ready`** — the spec waits at the human gate, described next.
+- **`in-progress`** — the Builder works through the tasks file as red and green pairs: a
+  failing test first, then the minimal code that passes it.
+- **`in-review`** — the Reviewer verifies every requirement. Approval opens the PR and the
+  feature stays here.
+- **`done`** — written after the work lands.
 
-The TaskStore carries an **optional** `owner` field so a team sharing one install can
-scope work to a person without racing on `state/tasks.json`. It is **additive and
-backward-compatible**: with **no `owner` anywhere** and no `workflow.identity`, behavior
-is **exactly today's** — board-wide selection that ignores `owner`. No migration is
-needed; existing owner-free stores keep validating unchanged.
+`done` is written after the work lands — the PR merge, or `none:<why>` when there is nothing to merge — never on the approval; an approved feature stays `in-review` while its PR is open.
 
-- **Two levels, feature wins.** `owner` (a string) may be set on an **epic** and/or on a
-  **feature**. A feature's **effective owner** is its own `owner` when set, otherwise its
-  parent epic's `owner`, otherwise **unowned**.
-- **Identity.** The current developer's identity is `workflow.identity` in
-  `harness.config.yaml`. Empty (default) ⇒ solo/board-wide. `"@me"` or `"self"` resolves
-  **dynamically** to the authed `gh` user login (`gh api user`), so a **shared** config
-  reflects whoever runs `/sdd-next` (the board-mirror `assignee` pattern). Any other value
-  is a **literal** identity string. Comparison is literal — no alias/fuzzy matching.
-- **Scoped selection.** `/sdd-next --mine` considers **only** features whose effective
-  owner equals the resolved identity, selecting the first that is otherwise actionable.
-  Scoping is applied **after** every existing `next()` gate (epic gate, `depends_on`-done,
-  actionable status, human gate) — it **never relaxes** a gate. An owned feature that is
-  not otherwise actionable is still skipped.
-- **Owned-only, no claim (F01 boundary).** Scoped mode **never** selects an unowned
-  feature and **never writes or claims** an `owner`. Claiming unassigned work, mode
-  detection, and reassign UX are **E10-F02**.
-- **Fail closed, never widen.** If `--mine` is requested but the identity is unresolved
-  (`workflow.identity` empty, or a `@me`/`self` lookup fails), or if no owned actionable
-  feature exists, `/sdd-next` selects nothing, reports why, and changes **no** state — it
-  does **not** silently widen to board-wide selection.
-- **Mirror stays one-way.** `state/tasks.json` is the single source of truth for `owner`;
-  no agent reads the board to learn ownership.
+A feature with `sdd: false` skips the spec, because a one-line tweak does not need four files.
+A fix with `sdd: false` has no spec: when it is autonomous the Orchestrator sets it `in-progress` and the Builder starts at once; `/sdd-fix --gated` parks it at the human gate until a human moves it to `in-progress` or re-stamps it autonomous.
 
-## Running in waves and across machines
+## The human gate
 
-The roadmap's parallelism is already on the board as `depends_on` edges. The selector
-projects it into **waves** — derived, **never stored** (ADR-0010): nothing about a wave
-is written to the board, and there is no lane, lease or claim field.
+With `require_spec_approval: true` (the default) the Orchestrator pauses at `spec-ready` until a human moves the feature to `in-progress`; a task marked `autonomous: true` skips the pause — use it only for low-risk work.
 
-- **Definition.** `done` features are wave 0; a non-done feature's wave is 1 + the
-  highest wave among its dependencies (a `done` dependency counts as 0, so a feature with
-  no dependencies is wave 1). The **critical path** is the longest chain of non-done
-  features along `depends_on`, root first; ties go to ADR-0001 id order.
-- **Invocation.** `node tools/next-task.mjs --waves [--json] [--epic E##]`
-  (`node .harness/tools/next-task.mjs ...` in an installed target). Without `--json` it
-  prints a report — one row per feature with its status, route, `auto` when
-  `autonomous: true`, and either `runnable` or its blocker codes; with `--json` it prints
-  one envelope (`outcome: "waves"`). `--waves` covers the whole board. `--epic E##` lists
-  only that epic, but wave numbers stay board-wide (a dependency in another epic still
-  counts), so an epic's first listed wave can be above 1. The Driller ends its report with
-  this view for the epic it just seeded.
-- **Running wave 1 across machines.** Read wave 1 (its `runnable` rows), give each
-  machine one feature, and run `/sdd-next <id>` on that machine — targeting is the
-  multi-machine primitive. Start the critical path first.
-- **Alternative scoping.** Set `owner` on the features (or their epics) and run
-  `/sdd-next --mine` on each machine, as in the section above; each record's `owner`
-  column shows the effective owner.
-- **Known limitation.** Bare `/sdd-next` on identical boards picks the same feature on
-  every machine, because selection is deterministic; use `/sdd-next <id>` or `--mine`.
-- **Invalid graph.** A live dependency cycle or a `depends_on` id absent from the board
-  makes waves undefined: the view reports `invalid-graph` with the cycle witness /
-  `<id>=missing` records and prints no wave at all (exit 0). A stale cycle (every
-  dependency already `done`) is not invalid.
+At the gate a human does one of two things. Reading the four spec files and asking for changes
+leaves the feature at `spec-ready` while the Architect revises. Moving the feature to
+`in-progress` authorizes coding.
 
-### Fanning out a wave (`/sdd-next --wave`)
+The gate exists so that you own what is being built before hours of code go into a wrong
+premise. An autonomous task and an autonomous fix run without the pause, so the gate is a default you
+can turn off per task, not a rule that holds for every row.
 
-On one machine, `/sdd-next --wave [--max N] [--epic E##]` turns the wave view into work: it
-runs each selected feature of one wave through the normal loop in its own worktree, as a
-targeted worker (`agents/orchestrator.md` → "Wave coordinator mode (/sdd-next --wave)").
+## Build and review
 
-- **Manifest.** After provisioning and before any worker starts, the coordinator writes the
-  manifest `progress/wave-<YYYYMMDDTHHMMSSZ>/summary.md` with every record of the wave and,
-  for each provisioned feature, its branch and worktree.
-- **Machine load.** Workers share one `tools/run-tests.sh` slot. A worker whose full test
-  gate is refused (exit 5) returns `runner-busy` and is re-run once, alone, after the wave
-  settles; a cancelled or killed worker is `interrupted` and is never relaunched.
-- **Workers stop at the PR.** Each worker opens its PR and leaves the feature `in-review`
-  with verdict `pr-opened`; it never runs `/sdd-pr-loop` and never merges.
-- **Merge order.** The coordinator prints a `merge order:` line: the opened PRs only, in
-  selection order. The operator runs `/sdd-pr-loop` per PR in that order; before each PR after the first, merge the
-  updated `main` into its branch (one merge commit), set `VERSION` to the next MINOR over the
-  then-current `main`, place its `CHANGELOG.md` entry above `main`'s newest, and keep both
-  sides of `progress/history.md` and `state/tasks.json`.
-- **Wave 2 is a re-run.** After wave 1 merges, run `/sdd-next --wave` again; it derives the
-  next wave from the updated board. Nothing about a wave is stored.
-- **Teardown.** After a PR merges, `done` follows the normal post-merge path, and the operator
-  retires the worktree with `tools/fix-worktree.sh teardown <id> <slug>` from a clean primary.
+The Builder commits after each green test, so the history shows the work a pair at a time. The
+Reviewer runs the gate and the tests, checks every requirement against the spec and exercises
+the behaviour. Approval opens the PR; the merge, not the approval, ends the feature.
 
-## Diagnosing blocked selection
+A rejection returns the feature to `in-progress` with written feedback under `progress/`, and the build and review loop repeats until green.
 
-Dependency cycles and an empty `/sdd-next` result are planning diagnostics, not
-environment failures. After the local TaskStore passes structural validation,
-`init.sh` reports one deterministic warning per cyclic feature or slice component:
+Two Builder roles exist. `builder-heavy` is the same instructions at a heavier model tier; it takes over after `escalation.after_rejections` rejections (the shipped value is `2`), or from round one when the spec is tagged `complexity: complex`.
 
-```text
-⚠️  TaskStore dependency-cycle [feature]: E2-F1 -> E2-F2 -> E2-F1 (warn-only)
+Both routes need a second yes from the installer's arming verdict, and `after_rejections: 0` turns escalation off entirely, `complexity: complex` included.
+
+The choice is made by a tool, `tools/builder-role.sh`, not by judgement, so the same recorded inputs — the spec's `complexity:` tag, the build↔review round,
+the configured Builder backend and `escalation.after_rejections`, the installer's arming verdict and,
+when the host is known, its front-end — always yield the same answer. The check looks at whether the stamp differs, not whether it is
+stronger; ranking models is up to you.
+
+## The PR review loop
+
+`/sdd-pr-loop` is installed only while `pr_loop.enabled` is `true`, and a fresh install seeds `false`; without it, request the review, apply the blocking findings and wait for the merge yourself.
+
+Once a feature's local gate is green and its PR is open, `/sdd-pr-loop <pr>` drives the Codex
+review cycle to a terminal state. It needs the Codex GitHub App on the repository, an
+authenticated `gh` and `jq`. A preflight checks `gh`, its login, `jq` and that the PR is open,
+and posts nothing; a missing Codex App shows up as no Codex activity on the first watch.
+
+```mermaid
+flowchart TB
+    pre["preflight: authed gh, jq, open PR — posts nothing"] --> trig["trigger: gh pr comment — @codex review"]
+    trig --> watch["watch: tools/wait-for-codex.sh in the background"]
+    watch -->|findings| cls["classify: P0, P1, P2 or nit from the badge, filtered by blocking_severities"]
+    watch -->|clean| gate
+    cls -->|blocking comments| fix["fix: one pr-fixer per blocking comment, one commit each, then push"]
+    cls -->|none blocking| gate
+    fix --> rounds{"another round left before max_rounds?"}
+    rounds -->|yes| trig
+    rounds -->|no| nh["needs-human — the loop labels the PR and stops"]
+    gate{"gate re-check: required CI green, head unchanged, every unresolved thread Codex-owned?"}
+    gate -->|"a non-Codex participant, red CI or a changed thread"| nh
+    gate -->|"yes, auto_merge true"| merge["merge with merge_strategy and delete the branch"]
+    gate -->|"yes, auto_merge false"| summary["green summary — you merge"]
 ```
 
-The full closed path is a repair witness. Feature and slice graphs are separate;
-missing or cross-kind dependencies are blockers but are not invented as cycle
-nodes. Warnings are **warn-only**: they do not change state or make an otherwise
-healthy initialization fail.
-
-When selection finds no task, the Orchestrator names each blocked candidate and
-gate with stable reason codes:
-
-```text
-blocked E2-F1 [dependency-cycle]: dependency cycle (feature): E2-F1 -> E2-F2 -> E2-F1
-blocked E2-F1 [unmet-dependency]: blocking dependencies: E2-F2=pending
-no actionable work: selection blocked; see reasons above
-```
-
-Other reasons distinguish a draft parent (`gated-epic`), a park (`parked`, below),
-an owner gate (`gated-owner`, below), human approval (`human-gate`), scoped
-ownership (`owner-excluded` /
-`owner-unresolved`), a truly empty or all-done board (`no-candidates`), and — in the
-`--waves` view only — a graph whose waves are undefined (`invalid-graph`, above). This
-output is informational and read-only. It explains the current selection policy;
-it does not relax a gate, pick a fallback, or introduce a new TaskStore status.
-
-## Parking a feature (`parked`)
-
-`depends_on` expresses board-internal blocking. A **park** expresses everything
-else — a review cycle, a product decision, anything that makes a real feature not
-yet workable:
-
-```jsonc
-{ "id": "E14-F13", "status": "pending", "sdd": true,
-  "parked": { "reason": "blocked on the Meta review cycle",
-              "unblocked_by": "review closes + the 3 pricing decisions land" } }
-```
-
-**Presence means parked**, and `reason` is required and non-empty — a park nobody
-can read is the thing this replaces. `unblocked_by` is optional.
-
-| | |
-|---|---|
-| `/sdd-next` | skips it and reports `blocked <id> [parked]: <reason>` |
-| targeting it | returns blocked with the same record, never selected |
-| its dependents | report the park inline: `E14-F13=pending (parked: <reason>)` |
-| `tasks-lock.py set-status` | **refuses** — unpark first |
-
-**It is a field, not a status.** A park can arrive *after* speccing, so it composes
-with every status except `done` — a finished feature is not "not yet workable", and
-that combination is rejected by every validator — and unparking restores exactly the
-routing the feature had — `featureRoute` never sees the park at all.
-
-To unpark, remove the `parked` object (an `apply` mutation); the ordinary
-transition then succeeds. A status change is deliberately refused while parked: a
-park that a transition silently clears is a suggestion, not a park.
-
-> **Known gap.** A parked feature is listed only when the board has *no* actionable
-> work, because a `selected` result carries no blocker list. Parking something and
-> forgetting it therefore remains possible; a dedicated report would change what a
-> `selected` envelope contains and belongs in its own feature.
-
-**`autonomous` is not a park.** It means "do not auto-approve my spec, do not
-auto-build"; it has never meant "do not spec it", and the Architect route at
-`pending` never consults it.
-
-### Blocked on the owner (`parked.gate: "owner"`)
-
-A park says "not workable *yet*". Some features are not workable **by any agent,
-ever**: the automatable slice is finished and every remaining requirement is a
-person's — a console attestation, a deploy approval, a signature, a decision.
-E10-F03 is the worked example, and before this existed every status was a lie —
-`in-progress` routed a Builder at work that did not exist, `in-review` routed a
-Reviewer at an already-approved slice, and `done` was false. So selection kept
-choosing it and each Orchestrator re-derived from `progress/history.md` why to skip
-it: exactly the tribal knowledge the TaskStore exists to remove.
-
-```jsonc
-{ "id": "E10-F03", "status": "in-review", "sdd": true,
-  "parked": { "gate": "owner",
-              "reason": "R1/R8/R11 are console-only owner attestations; R4 stage/prod needs a deploy",
-              "unblocked_by": "the owner attests in the Google + Azure consoles" } }
-```
-
-`gate` is a **discriminator on the park**, not a second field and not a status
-value:
-
-| | |
-|---|---|
-| `/sdd-next` | skips it and reports `blocked <id> [gated-owner]: owner gate: <reason> … [a person must act, not an agent; route when released: <route>]` |
-| its dependents | report `E10-F04=pending (owner gate: <reason>)` — "parked" would tell a reader to wait; "owner gate" tells them waiting will never clear it |
-| `tasks-lock.py set-status` | **refuses**, and says *a person must act first, then unpark it* — so `done` cannot be walked to while the attestations are outstanding |
-| an unknown `gate` value | a **validation error** in all three validators, never a silent downgrade to a plain park — the reason code is the deliverable |
-
-Everything a plain park already guarantees still holds: `reason` is required and
-non-empty, the underlying route is never suppressed, and it composes with every
-status but `done`. Releasing it is the same two explicit acts — the owner does the
-thing, then someone removes the `parked` object.
-
-**Why not a `blocked` status.** A status cannot compose: E10-F03 is
-`in-review`-*and*-owner-gated, and a status would erase where to return to — the
-same argument that made the park a field. It would also touch every status enum,
-transition table and switch in the harness. **Why not an `owner_gated` boolean.** A
-bare boolean carries no reason (the thing that makes a gate legible), so it needs a
-companion note — at which point it is a duplicate park; and two mechanisms meaning
-"held, do not route" is how a tool that honours one and not the other ends up
-routing a gated item.
-
-### `done` needs a landing record (`landed`)
-
-`done` is what stops the selector routing an item. So a feature marked `done` whose
-work never merged is both **unshipped and unreachable** — nothing will ever pick it
-up again, while downstream briefs cite it as a landed mechanism. An audit of 148
-`done` features across seven repositories found **four**: `E99-F58` and `E99-F59`
-sat on never-pushed local branches; `E09-F02` and `E99-F29` on PRs that were closed
-**unmerged**. All four were found **by accident**, and the harm is already in the
-corpus — the board entry for `E99-F32`, the feature that actually shipped the
-Spanish Managed Login, cites `E99-F29` as landed.
-
-```
-# single-repo feature
-python3 .harness/tools/tasks-lock.py set-status <id> done --evidence <ref|none:why>
-# SLICED feature: repeat --evidence once per slice repository
-python3 .harness/tools/tasks-lock.py set-status <id> done \
-    --evidence viernes-infra=<ref> --evidence viernes-users=none:<why>
-```
-
-```jsonc
-{ "id": "E99-F77", "status": "done",
-  "landed": { "ref": "68d3638", "verified": "unchecked" } }
-
-// a SLICED feature: one record per repository, and the feature-level `verified`
-// rolls up to the WEAKEST slice.
-{ "id": "E09-F02", "status": "done",
-  "landed": { "ref": "viernes-infra=abc1234; viernes-users=none: superseded",
-              "verified": "declared",
-              "slices": [ { "repo": "viernes-infra", "ref": "abc1234", "verified": "unchecked" },
-                          { "repo": "viernes-users", "ref": "none: superseded", "verified": "declared" } ] } }
-```
-
-On a pretty-printed board `landed` is written multi-line, in the exact shape
-`json.dumps(board, indent=2)` produces (so a later `apply` / `add-feature` leaves it
-byte-identical); `repo` names the repository (manifest key, else the main worktree's
-directory), never a linked-worktree folder.
-
-**When `done` is written: after the work LANDS.** An approve verdict says the work
-is *correct*, not that it is *merged*. So the order on the main path is: approve →
-open the PR (the feature stays `in-review`) → **observe the merge** → then
-`set-status done --evidence <merge commit>`. Writing `done` on the approval instead
-re-creates the exact failure this record exists to prevent — the PR is later closed
-unmerged or abandoned and the feature sits `done`, unselectable, with work that never
-shipped — and it also makes the record useless, because the only ref that exists at
-approval time is an unmerged branch tip.
-
-⚠️ **There is no board state yet for "approved, awaiting merge".** A feature left
-`in-review` is *not* inert: the selector routes `in-review` to `reviewer`, so
-`/sdd-next` will keep offering an already-approved feature for review. Until a
-first-class hold exists, **park** it while the PR is open (`parked.reason: "PR #N
-open, awaiting merge"`) — a parked feature is reported as blocked and never
-selected — then unpark and write `done` with the merge commit. `set-status` refuses
-any transition while a park is in place, so the unpark comes first.
-
-`none:<why>` remains the one legitimate `done` with nothing to merge (a console
-action, a supersession). Use it when there is **nothing** to merge — never when
-there is something that has not merged *yet*.
-
-**Each ref is VERIFIED, per one decision table.** The question verification really asks
-is *what happens when it is impossible?* Answering that per input, as fixes accumulate,
-is how the first attempt collected five review rounds of the same defect — so it is
-answered once, and `tools/tasks-lock.py` implements these rows in order:
-
-| # | situation | outcome |
-|---|---|---|
-| 1 | `none:<why>` | `declared` |
-| 2 | the ref resolves to no git object anywhere | `unchecked` + warning |
-| 3 | a binding names a repo the **manifest does not contain** | **REFUSED** |
-| 4 | the manifest names it, but the directory is absent/unreadable here | `unchecked` |
-| 5 | the repo is located, but the object is unknown in it | `unchecked` |
-| 6 | no default branch can be determined | `unchecked` |
-| 7 | ancestry is checkable and TRUE **against a confirmed base** | `ancestor` |
-| 8 | ancestry is FALSE **and** the base tip is confirmed current | **REFUSED** |
-| 9 | ancestry is FALSE but the tip could **not** be confirmed | `unchecked` |
-
-**The asymmetry that decides every row.** A *false attestation* is worse than none — the
-record gains the authority of a check that never happened — so `ancestor` comes only from
-row 7. A *false refusal* is worse than a silent pass — a guard that rejects genuinely
-merged work gets routed around or switched off — so refusal is reserved for the two
-provably-wrong claims: row 8, and row 3. Rows 3 and 4 are the distinction that matters
-most: a **malformed claim** (the board names a repository the project does not declare) is
-refused; **not being able to see a repository from here** degrades. Row 3 applies only
-where a manifest is configured and readable.
-
-**Where a repository lives is the manifest's answer**, resolved against the manifest
-file's own directory — the shipped example uses siblings (`../viernes-bff`) and nothing
-requires a key to equal a directory name. **What an object id is, is git's answer**: every
-non-`none:` ref goes to `git rev-parse --verify <ref>^{commit}`, so a sha of any width, a
-tag and a branch all resolve. Because a branch **moves**, the record keeps both `ref` (what
-you claimed) and `commit` (the immutable id it resolved to, which ancestry was computed on
-and a re-audit re-checks).
-
-**Every feature needs it, sliced or not.** A sliced feature *looks* attested — the
-schema refuses `done` unless every slice is `done` *and* `merged` — but **nothing in
-the harness ever writes `slice.merged`**. Every occurrence in `tools/` is a read or
-a type assertion; the agent sets it by hand through `apply --mutator`. `E09-F02` is
-the proof: a sliced feature whose three slices are all `merged: true` while the
-first slice's own `pr` field points at `viernes-infra#24` — closed, unmerged.
-Exempting the weaker mechanism from the stronger one would ship that hole documented
-as safe, so a sliced feature satisfies **both**: every slice `done`+`merged`, *and*
-evidence — **one binding per slice repository**.
-
-| the `--evidence` value | what happens |
-|---|---|
-| a ref git RESOLVES, reachable from the default branch | accepted, recorded `verified: "ancestor"` with the repo, base and immutable `commit` |
-| a ref git resolves that is **not** reachable, where the base tip is confirmed current | **REFUSED** — the board is left byte-identical |
-| a ref git cannot resolve here (a PR URL, an unfetched sha, an unreadable repo) | accepted with a **warning**, recorded `verified: "unchecked"` |
-| `none:<why>` | accepted, recorded `verified: "declared"` — work with no commit (a console action, a supersession). The reason is required |
-| omitted, on **any** feature (sliced included) | **REFUSED**, board left byte-identical |
-| **unbound** (`<ref>`, no `<repo>=`) on a **sliced** feature | **REFUSED** — it names no repository, so it attests no particular slice |
-| bound to a repo the feature has **no slice in**, **repeated** for one repo, or **missing** for a slice repo | **REFUSED**, naming the repository |
-| `<repo>=<ref>` on a feature with **no** slices | **accepted**, and it is the only remedy for an ambiguous ref — the name is resolved and checked, so the record names a repository that was actually consulted |
-| on any **non-`done`** transition | **REFUSED** — the record means one thing |
-
-The value is never pattern-matched: asking whether a string "looks like a commit id"
-is what made the 40-hex assumption miss SHA-256's 64-character ids. Git is asked
-instead, and whatever it will not resolve is row 2.
-
-**The record is additive.** `landed` is optional in the schema and never required by
-it, only by the write path, so every board written before this existed stays valid
-and stays unattested.
-
-## The human-in-the-loop gate
-
-When `harness.config.yaml` has `require_spec_approval: true` (default), the
-Orchestrator **pauses** at `spec-ready`. A human:
-
-1. Reads the four spec files for the feature.
-2. Requests changes if needed (the Architect revises; stays `spec-ready`).
-3. Moves the feature to `in-progress` to authorize coding.
-
-A task with `autonomous: true` in its frontmatter / TaskStore entry skips this gate
-— use it only for low-risk work. The point of the gate is that you keep ownership
-of *what the AI is building* before hours of code get written on a wrong premise.
-
-## Selective SDD (the `sdd` flag)
-
-Full SDD for a one-line tweak is overkill. Each task carries `sdd: true|false`:
-
-- `sdd: true` → full flow: Architect → gate → Builder → Reviewer.
-- `sdd: false` + `autonomous: true` → the Orchestrator **sets the feature to
-  `in-progress`** (so the Builder's Loop A precondition holds), then sends the Builder
-  straight at it, then Reviewer. No human pause.
-- `sdd: false` + `autonomous: false` (e.g. `/sdd-fix --gated`) → **parked at the human
-  gate**: the Orchestrator does **not** auto-run it. A human must approve it (move it to
-  `in-progress`, or re-stamp `autonomous: true`) before the Builder runs.
-
-### Lightweight fix lane (`/sdd-fix`)
-
-For a one-line bug or hotfix, even seeding a full feature is overkill. `/sdd-fix
-"<desc>"` (the **Fixer**, `agents/fixer.md`) is a thin front-end over the `sdd: false`
-primitive: it seeds the fix as an `sdd: false` feature under a single **reserved
-maintenance epic** (`E99`, `status: planned`, created on first use and reused by id
-thereafter), carrying only a one-paragraph **inbox brief** at `progress/inbox/<id>.md` —
-**no 4-file spec**, no drill. The fix is stamped `autonomous: true` by default, then handed
-off **in-session** to the existing `sdd: false → Builder → Reviewer` path: the Orchestrator
-sets it `in-progress` and the Builder runs it end-to-end. A `--gated` opt-out instead stamps
-`autonomous: false`, which **parks the fix at the human gate** — the Orchestrator does not
-auto-run it, so it waits until a human moves it to `in-progress` (or re-stamps it
-`autonomous: true`). The lane **adds no new status and no new routing** — it reuses the
-`sdd: false` primitive above (now split by `autonomous`); the Builder works from the inbox
-brief and the Reviewer verifies the fix behaviourally.
-
-**Concurrent sessions and duplicate fix ids.** `add-feature` allocates the new id above
-the max `F##` across the working board, `HEAD` and every local and remote-tracking ref
-(read offline, never fetched; it scans the 200 most recently committed refs). Two sessions
-can still mint the same id on boards nobody has fetched; `validate-board.py` (and so
-`init.sh`) rejects duplicate feature or epic ids, so the collision is loud. The recovery is
-`tasks-lock.py renumber <old-id> <new-id>`, run by the session whose board lands second
-on its own un-landed row. See [agents/fixer.md](../agents/fixer.md) "Duplicate fix id"
-and [store/local.md](../store/local.md).
-
-### Bounded parallel fix lane (`/sdd-fix-parallel`)
-
-The argument-free command consumes only ready autonomous `sdd:false` E99 fixes. It
-orders numeric ids, selects at most `fix_lane.max_parallel` (default `3`), and reports
-later ready candidates as cap-deferred. Every serial brief records
-`## Files expected to change`; immutable guards cover `harness-install.sh`,
-`tests/test_install.sh`, and `tools/*`, while `fix_lane.shared_paths` only extends the
-guard. Missing, unsafe, or ambiguous metadata serializes fail-safe.
-
-After native-concurrency/config preflight and a complete manifest, the coordinator
-provisions each selected F02 worktree exactly once while the primary is clean. It then
-switches the canonical primary to a collision-checked coordinator bookkeeping branch,
-atomically claims the successful subset through F01 with canonical `HARNESS_DIR`, and
-commits that shared claim before dispatch. All safe targeted workers start before any
-is awaited; guarded fixes run exclusively in numeric order after that wave settles.
-
-Each targeted worker keeps its pre-provisioned branch/worktree, drives clean
-Builder↔Reviewer rounds, creates only the code PR after local approval, and runs
-`/sdd-pr-loop` for that PR alone if it is installed (otherwise it drives that one PR's
-review by hand). An observed code merge is reported to the coordinator;
-the worker does not recreate or tear down F02 resources.
-
-After all workers settle, the coordinator serializes history, performs one locked final
-status reconciliation, and persists that truth through its bookkeeping PR. Once that
-PR merge is observed, it fetches and fast-forwards the canonical local base, proves the
-primary is clean/on the updated base/exact captured commit, and then tears down only
-merged fixes with the original exact F02 identities. It never stashes, resets, cleans,
-or force-deletes shared state. Recoverable failures preserve resources and do not
-cancel siblings. No ready work is a zero-mutation success; missing native concurrency
-or `execution.builder.backend: delegate` fails before manifest/provision/claim and
-points to serial `/sdd-fix`.
-
-The helper `tools/fix-worktree.sh` accepts any `E##-F##` id, so `/sdd-next --wave` provisions
-`sdd: true` features with it too; the E99 lane itself is unchanged.
-
-On OpenCode, the installer exposes `/sdd-fix-parallel` only after its concurrency
-capability marker or an explicit override enables it; the probe remains available.
-See [installation](INSTALL.md) for the capability gate.
-
-## The PR review loop (`/sdd-pr-loop`)
-
-After a feature's local gate is green and its PR is open, `/sdd-pr-loop <pr>` drives the
-Codex review cycle to a terminal state. It is installed only while `pr_loop.enabled` is
-`true`, and that gate is **opt-in**: a fresh install seeds `false`, so the command is
-absent until someone turns it on — see
-[INSTALL.md](agents/INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled) for the config block
-and the `HARNESS_*` env knobs. Where it is **not** installed, drive the same cycle by
-hand: request the review, apply the blocking findings, wait for merge.
-
-**Preconditions.** The **Codex GitHub App** on the repository, an **authed `gh`**, and
-**`jq`** on `PATH`. Step 0 of the loop runs `tools/wait-for-codex.sh preflight <pr>`,
-which checks each one and **posts nothing**; a failure exits `8` (auth/tooling: `gh` or
-`jq` missing, or `gh` unauthenticated), `9` (environment: the repo slug does not resolve,
-usually the wrong directory) or `10` (usage: the PR number does not resolve or is not
-open) with a one-line diagnostic naming the failed check and its remedy, and the loop
-stops there. None of this
-is an `init.sh` dependency.
-
-**One round.**
-
-1. **Preflight** — stop on any failure before posting.
-2. **Trigger** — `gh pr comment <pr> --body "@codex review"`, taking the trigger comment
-   id from the URL that command prints (`…#issuecomment-<id>`), never from a separate
-   comment-list call: an unpaginated list returns only the first 30 (oldest) comments, so
-   on a busy PR the lookup yields a stale id and silently disables the freshness filter.
-3. **Watch** — launch `tools/wait-for-codex.sh <pr> <trigger-id> <round-dir>` **in the
-   background** and branch on its exit code; never hand-poll. `0` findings · `3` clean ·
-   `2` ceiling timeout (never "clean") · `4` usage/precondition · `5` no Codex activity
-   inside `HARNESS_FIRST_RESPONSE` (the Codex GitHub App is probably not installed).
-   The script's other modes have their own codes (`classify` 6, `merge-verify` 7 and 11,
-   `preflight` 8-10), which step 7 and the preconditions above rely on; the full table is
-   in the header of `tools/wait-for-codex.sh`.
-   The watcher writes `pr.json`, `review-comments.json`, `issue-comments.json`,
-   `reactions.json` and `trigger-ts.txt` into the round dir on every poll — `gh pr view`
-   alone returns neither the inline findings nor a banner past the first 100 comments.
-   Codex signals *clean* three different ways (a review banner naming the head commit,
-   that same banner as an issue comment, or a 👍 reaction on the trigger comment) and all
-   three are load-bearing.
-4. **Classify** — match `P0|P1|P2|nit` case-insensitively anywhere in the body (Codex tags
-   severity as a shields.io **badge**, not bare text), first match wins, default `P2`,
-   then filter to `blocking_severities`. Only **fresh** inline comments count: filed
-   against `headRefOid` **and** `created_at >= trigger`, because GitHub re-stamps stale
-   threads' `commit_id` onto each new head.
-5. **Stall check** — a blocking comment id present in this round *and* the previous one
-   escalates immediately, whatever the round number.
-6. **Fix** — one fresh `pr-fixer` sub-agent per blocking comment (one comment, one fix,
-   one commit), including the native Codex role with file-only handoffs, then push.
-   The `max_rounds - 1` round instead builds one combined prompt and
-   escalates to a different worker, or runs one combined in-session pass. Reaching
-   `max_rounds` labels the PR `needs-human` and stops.
-7. **Gate re-check + terminal state** — with every gate green: if any unresolved review
-   thread has a **non-Codex** participant, route to `needs-human`, resolve nothing and do
-   not merge. Otherwise resolve the Codex-owned threads and, when `auto_merge` is true,
-   merge with `merge_strategy` and `--delete-branch`; with `auto_merge` false, stop after
-   the green summary. Local branch cleanup runs only if the merge landed (the
-   `merge-verify post` receipt returned `0`). A handover summary (rounds, worker totals, round-by-round, blocking
-   comments resolved, cache path) is written to
-   `<HARNESS_DIR>/.pr-loop/<pr>/handover-summary.md` and posted on **both** terminal
-   states.
-
-   Both terminal paths also run the `merge-verify pre` receipt (the PR's head must still
-   be the reviewed head), wait on the required CI, and snapshot a `thread_fingerprint` of
-   **every** review thread, resolved ones included, before that wait. Any difference
-   afterwards, or an unreadable snapshot, refuses the green action and routes to
-   `needs-human`; a difference, an unreadable hand-back snapshot, or an unreadable
-   snapshot after the CI wait also records the round as `stale` (never in a dry run). Limits: a PR review body or a PR-level (issue)
-   comment with no inline thread is not fingerprinted, and neither is an in-place edit of
-   a non-last comment inside a thread. On the merge path, `gh pr merge` exiting `0` can
-   mean only *enqueued* (merge queue or repo auto-merge): if `merge-verify post` finds the
-   PR still OPEN at its ceiling it exits `11`, and the loop waits up to
-   `HARNESS_QUEUE_RECONCILE_CEILING` (default 300s), then cancels the request
-   (`gh pr merge --disable-auto`, and the `dequeuePullRequest` mutation for a merge queue),
-   re-reads the state and hands off as `needs-human` with a comment saying whether the
-   cancel was confirmed, the PR is CLOSED (nothing was left to cancel), or a request may
-   still be queued. If the queue lands the PR during the reconcile, the loop takes the
-   normal merged path instead. A dry run does none of the
-   mutations.
-
-The per-round cache lives at `<HARNESS_DIR>/.pr-loop/<pr>/round-<n>/`, is gitignored, and
-is best-effort — if it is missing or corrupt, reconstruct it from the `gh` API. Re-check
-an existing round offline (no `gh`, no network) with
-`sh tools/wait-for-codex.sh evaluate <round-dir>` — `0` findings, `3` clean, `1` pending.
-
-## Between approval and merge — `awaiting-merge` (E99-F130)
-
-An approved feature whose PR is still open lives in neither `in-review` (the selector
-would hand it back to a Reviewer) nor `done` (the merge commit does not exist yet, so
-`--evidence` has nothing to verify). Park it: `tasks-lock.py await-merge <id> --pr <n>`
-sets `parked.gate: merge`, the selector reports it as `awaiting-merge` — distinct from
-`gated-owner`, because an in-flight PR clears itself while an owner gate never does —
-and every transition except its own exit bounces. When the merge is observed,
-`set-status <id> done --evidence <merge-ref>` clears the park and writes the landing
-receipt in one guarded write.
-
-## Stacked-PR lane — DEPRECATED (E21-F07)
-
-The stacked-PR lane shipped in E21-F04/F05 and was removed in E21-F07 after the E21-F06
-gate answered its opening question — *does the lane earn its keep?* — with **no**
-(2026-08-17). Measured, 0 of the repository's last 100 PRs targeted a non-default base,
-so the merge-order guard never fired; the lane's cost (an increment-naming rule plus
-four role contracts that had to agree) landed on the harness's most consistency-fragile
-surface.
-
-**Use the sibling-feature split instead**: an over-budget feature is split into sibling
-features sequenced by `depends_on` (`agents/driller.md`, E21-F01 R4) — each its own board
-feature, its own PR against the default branch, its own review. That is the supported
-answer to a feature that exceeds the change-size budget, and it needs no machinery this
-document has to keep accurate. Git history preserves the removed lane if the decision is
-ever revisited.
-
-## Reporting harness defects (`/sdd-report`)
-
-When a verified harness defect occurs, `/sdd-report` (Codex: `$sdd-report`) reports it
-upstream. Reporting is strictly confined to four defect triggers:
-
-- **`harness-malfunction`** — a harness script (`init.sh`, `harness-install.sh`, `tools/*`,
-  or TaskStore locking/validation) fails while the project itself is healthy.
-- **`contradictory-instruction`** — role prompts or documentation conflict, or a gate
-  cannot be satisfied as written.
-- **`workaround`** — you had to depart from the documented workflow to finish.
-- **`missing-capability`** — a recurring situation has no path in the workflow.
-
-Failures of project code or tests, transient network/auth issues, and agent mistakes caught
-by harness gates are **not triggers and are never reported**.
-
-### Filing discipline
-
-- **When:** File complete, safe, verified findings automatically at the next control opportunity, without a permission prompt or waiting for task completion. Inspect new ledger entries on delegation returns, then resume authorized work. Drain newly ready unfiled findings when the task ends or the session stops early (aborted, parked, or failed).
-- **Who:** Only the **session-owning top-level role** (Orchestrator, Fixer, Inception, Planner, Driller) invokes `/sdd-report`. Sub-agents (Architect, Builder, Reviewer, Scout, Doc-critic, PR-fixer) **never** invoke the reporter directly; on a defect trigger, they append notes with `## <trigger>`, `symptom:`, `command:`, `phase:`, and `file:` plus candidate `summary:`, `observed:`, `expected:`, `reproduction:`, `evidence:`, and trigger-specific `context:` to `progress/feedback/notes.md`. Cite direct evidence and mark unknown facts missing; never invent them.
-- **Session token:** The owning role mints and exports `HARNESS_FEEDBACK_SESSION_ID` once per session (derived from telemetry start timestamp or a UTC date token) and reuses it for every report.
-- **Privacy and bounds:** `tools/harness-report.sh` requires bounded `--details-file` JSON with common facts and trigger-specific evidence, separately from local raw notes. Owners inspect direct evidence and confidentiality before filing. Defined lexical filters reject known secrets, emails, URLs, foreign paths, controls and marker syntax; they cannot establish arbitrary prose confidentiality or factual truth. Missing or unsafe details stay local with field diagnostics. Free-form raw notes remain in the local gitignored `progress/feedback/` ledger. Reporting is capped per session (`feedback.max_per_session`, default 3) and obeys `feedback.enabled: false`.
-
-The tool reads at most 16,384 bytes plus one overflow byte. See sdd-report for the
-closed schema and field bounds; complete details contribute to a canonical digest
-so different findings in the same file can file separately. Exact open matches create
-neither another issue nor a comment. No background retry or consent step is added.
-On non-zero init, the existing at-most-one reporting-only malfunction exception still
-ends in a hard stop with no repair, board write or continued work; incomplete evidence
-only changes that attempt to local-only.
-
-## Source-only feedback triage
-
-`/sdd-triage` (Codex: `$sdd-triage`) is source-only: `--self` emits it for selected
-Claude, Codex and OpenCode hosts. Normal target installs leave triage-named user
-files untouched. It reads all open labeled reports from the configured feedback
-repository, validates the unchanged v1 marker and treats public issue text as
-untrusted evidence. An invocation authorizes investigation and a local proposal only.
-
-Review `progress/triage/<run>/proposal.md`, then explicitly approve the whole plan or
-named actions. Intake, exact comments and closures with reasons are separate approval
-items; silence and task autonomy authorize none. Approved fixes retain `/sdd-fix`'s
-Builder→Reviewer default and merge gate (`--gated` remains available); `/sdd-new`
-retains its existing altitudes and pending-only intake. Duplicate groups can share an
-intake, but their issues are not silently closed.
-
-`actions.md` records approval and action results. Resume by explicitly identifying the
-existing run; reconcile uncertain results before retrying, never replay successes,
-and request fresh approval when scope or repository/issue state changes. New runs do
-not inherit approval. Approved `## Source issues` sections in inbox briefs preserve
-repository and issue numbers before build dispatch; PR preparation adds one `Fixes #N`
-per validated same-repository issue, including delegated PRs. Invalid or cross-repository
-provenance produces no closing references and a local diagnostic.
-
-## Context hygiene
-
-Agents degrade as their context fills (noticeably past ~20%, badly past ~40%).
-So:
-
-- Each sub-agent runs with a **fresh, minimal context** — only the files it needs.
-- Results go to `progress/<run>/` so the next agent resumes from files, not chat.
-- When an agent nears `context_reset_threshold`, it should write a structured
-  hand-off to `progress/` and let a fresh agent continue ("context reset").
-- `progress/history.md` is the durable changelog across the whole project.
-
-## One run, end to end (example)
-
-1. `./init.sh` → green.
-2. Orchestrator reads TaskStore → `E01-F01 example-feature` is `pending`, `sdd:true`.
-3. Orchestrator spawns the Architect, passing `progress/inbox/E01-F01.md` (the
-   Inception brief); the Architect reads it first and writes the 4 files from it →
-   `spec-ready`. **Pause.**
-4. Human reads specs, approves → `in-progress`.
-5. Builder works `tasks.md` as red/green pairs (failing test, then minimal code), commit per GREEN, self-checks → `in-review`.
-6. Reviewer runs tests + Playwright, verifies every R-id. On **reject** it writes
-   file-based feedback to `progress/<run>/review.md` → `in-progress` → Builder
-   addresses → re-review; this build↔review loop repeats until green. On **approve**
-   the feature stays `in-review` and the PR is opened. Each round is recorded in
-   `progress/history.md`.
-7. The PR **merges** → `set-status done --evidence <merge commit>`. `done` is written
-   after the work lands, never on the approval (see "`done` needs a landing record").
-8. History updated. Orchestrator picks the next task.
-
-### Which Builder runs — deterministic escalation
-
-There are **two** Builder role names. `builder-heavy` is the *same instruction body* at a
-heavier model tier ([ADR-0002](../specs/adr/0002-builder-heavy-is-a-tier-not-a-second-prompt.md)),
-so picking between them is routing, never behaviour. The Orchestrator does not decide by
-judgement — it asks a tool, so the same recorded state always yields the same answer:
-
-```sh
-tools/builder-role.sh <complexity> <round> [--backend <in-session|delegate>] \
-                      [--config <path>] [--arming <path>] \
-                      [--frontend "$(sh tools/host-frontend.sh)"]
-# → builder | builder-heavy
-```
-
-Two things can select the heavy role:
-
-| trigger | where it comes from |
-|---|---|
-| `complexity: complex` in the feature spec's frontmatter | the Architect, at spec time — starts heavy on round 1 |
-| `round > escalation.after_rejections` | the **existing** build↔review counter — at the shipped `2`, the first build after two rejections |
-
-Both triggers need a **second yes**: the installer's arming verdict (below).
-
-```yaml
-escalation:
-  after_rejections: 2   # the shipped value — 0 disables BOTH triggers
-```
-
-Notes that matter in practice:
-
-- **Escalation needs two independent yeses.** A positive `after_rejections` — which is both
-  the threshold and your master switch — **and** an `armed` first line in
-  `.harness/.escalation-arming` — or, when the host is known, the host's own `<key>=raise`
-  line (ADR-0011). Either one alone routes to `builder`.
-- **The installer computes the verdict; you do not have to.** `harness-install.sh` asks its
-  own model resolver what `builder` and `builder-heavy` resolve to on every front-end it
-  stamps, and records the comparison. `armed` means `builder-heavy` resolves to a **different
-  resolved stamp** — the `model` plus, on Codex, `model_reasoning_effort` (E99-F163) and, on pi, `thinking` (E35-F03) — on
-  every selected front-end. Anything else is `blocked`, and the file names the
-  front-end that blocked it:
-
-  ```
-  blocked
-  claude=raise
-  codex=none
-  ```
-
-  A `blocked` first line still lets a host whose own line is `raise` escalate (ADR-0011).
-
-  A fifth verdict, `unstamped`, means the installer **declined to rewrite that front-end's
-  live artifact** — an edited `opencode.json`, or a foreign/edited/symlinked
-  `.codex/agents/builder*.toml`. The resolved stamp then describes a file that was never
-  written, so it is not the one that front-end will run, and the verdict refuses to vouch
-  for it. Restore the artifact (or let the installer own it) and re-run.
-
-  `none` is the case that matters: the heavy role resolves to **nothing on either axis**
-  while `builder` resolves to something, so escalating would abandon your configured Builder
-  model for the session default — a *downgrade*, arriving exactly when the build was
-  struggling. On `claude` a built-in tier alias is enough; on `opencode` a tier alone stamps
-  **nothing** — you must also set the matching `pin.opencode.<tier>`. On `codex` a tier alone
-  stamps NO `model` but, since E99-F161, DOES stamp `model_reasoning_effort`, and since
-  E99-F163 the verdict compares the whole resolved stamp (`model` plus effort) — so an effort
-  difference alone arms without any `model` pin, and a pin is needed only for distinct `model`
-  ids. See `docs/agents/INSTALL.md`'s "Codex reasoning effort" section. On `pi` the same shape
-  holds (E35-F03): a tier alone stamps NO `model` (pi has no floating alias) but DOES stamp a
-  `thinking:` level on the role file, so a `thinking` difference alone arms, and a
-  `pin.pi.<tier>` (`provider/id`) is needed only for distinct models. A fifth-verdict
-  `unstamped` also covers an edited or symlinked `.pi/agents/builder*.md`.
-  The verdict is computed at **install time**, so re-run the installer after changing any of
-  it.
-- **The first line is the AND; the host's own line decides when the host is known.** The
-  first line is the AND across selected front-ends; the Orchestrator passes its host's key
-  (printed by `tools/host-frontend.sh` from the session markers) and `builder-role.sh` reads
-  that front-end's own line (ADR-0011), so one misconfigured front-end no longer disables
-  escalation on the others. An empty key — no marker, two markers, or no `--frontend` — falls
-  back to the first line. Neither rule downgrades anyone, and the detail lines tell you which
-  front-end to fix.
-  Source `--self` defaults to `claude,codex,opencode,pi` (the root `.escalation-arming` ends in
-  `pi=neither`): inherited Codex leaves the combined first line `blocked` while a Claude Code
-  session still escalates on its `claude=raise` line. Explicit
-  `--self --agents=claude` retains the Claude-only verdict; model choices remain
-  in each host’s source role files and are preserved on regeneration.
-- **WHAT IT DOES NOT CHECK: that the stamp is STRONGER, or that it exists.** The harness has
-  no model list and invents none, so `pin.claude.reasoning: haiku` arms. Ranking is yours —
-  what the check closes is the silent downgrade to no model or effort at all.
-- **An absent verdict means off.** Either the installer has not run since v0.58.0, or no role
-  resolves on either axis. Same remedy: configure `models.builder-heavy` and re-run the
-  installer.
-- **`0` disables BOTH triggers — including `complexity: complex`.** It is the master switch,
-  not just a round threshold. A tagged spec on a target that has not opted in routes to
-  `builder` and the tool says why on stderr. (Leaving the tag live at `0` would escalate into
-  the same unresolvable heavy role the veto exists to prevent.) `0` also does not *invert*:
-  a bare `round > 0` would be true for every round, turning the off-switch into
-  always-escalate.
-- **Absent means standard, silently.** A spec written before this feature carries no tag and
-  routes to `builder` with no warning. A value outside `standard | complex` also resolves to
-  `standard`, but says so on stderr — a typo should be visible, never fatal.
-- **Under `execution.builder.backend: delegate` escalation is inapplicable.** The external
-  executor picks its own model, so the harness never escalates there and records that the
-  rule did not apply, rather than claiming an escalation that had no effect.
-- **Escalation is one-way within a feature.** `round` only increases; there is no demotion
-  rule.
+A round in five lines: run the preflight, post the trigger comment, watch for the answer in the
+background, classify each fresh finding by its severity badge against `blocking_severities`, and
+start one `pr-fixer` per blocking comment. Then the gate is checked again.
+
+The loop merges only when every gate is green and every unresolved review thread is Codex-owned; a thread with a non-Codex participant routes the PR to `needs-human`, and so does reaching `max_rounds`.
+
+With `auto_merge: false` the loop stops after the green summary and leaves the merge to you.
+
+On either terminal state the loop posts a handover summary on the PR.
+
+## When work stops
+
+When `/sdd-next` finds nothing to run, it names each blocked candidate with a reason code and
+ends with `no actionable work`. The codes include `unmet-dependency`, `dependency-cycle`,
+`gated-epic`, `human-gate`, `parked`, `gated-owner`, `owner-excluded` and `no-candidates`.
+
+A park is a field on a feature, not a status. It carries a required `reason`, it composes with
+every status except `done`, and `/sdd-next` skips the feature while the park is in place.
+An approved feature whose PR is still open is parked with `gate: merge` and reported as
+`awaiting-merge`; the park clears when the merge is recorded. An owner gate means a person has
+to act, not an agent, and no retry will clear it. On a PR, `needs-human` means the loop stopped
+and a person finishes the review.
+
+## Further reading
+
+Each link opens the section of the exact contract that decides the topic.
+
+- [Intake](agents/WORKFLOW.md#intake--the-step-before-pending-sdd-new) — how an idea becomes a `pending` row.
+- [Epic lifecycle](agents/WORKFLOW.md#epic-lifecycle) — `draft` to `done`, and the planning gate.
+- [State machine](agents/WORKFLOW.md#state-machine) — the transitions and their guards.
+- [The human gate](agents/WORKFLOW.md#the-human-in-the-loop-gate) — what the approval pause covers.
+- [Selective SDD](agents/WORKFLOW.md#selective-sdd-the-sdd-flag) — the `sdd` flag and the fix lanes.
+- [Which Builder runs](agents/WORKFLOW.md#which-builder-runs--deterministic-escalation) — the escalation rule.
+- [The PR review loop](agents/WORKFLOW.md#the-pr-review-loop-sdd-pr-loop) — the steps and the exit codes.
+- [Parking a feature](agents/WORKFLOW.md#parking-a-feature-parked) — parks, owner gates and landing evidence.
+- [Diagnosing blocked selection](agents/WORKFLOW.md#diagnosing-blocked-selection) — the reason codes in full.
+- [Running in waves](agents/WORKFLOW.md#running-in-waves-and-across-machines) — parallel work and several machines.
+- [The spec format](SPEC-FORMAT.md) — the four files every `sdd: true` feature carries.
+- [Concepts](CONCEPTS.md) — the whole harness in one page.
+- [Installing](INSTALL.md) — setup, upgrade and configuration.

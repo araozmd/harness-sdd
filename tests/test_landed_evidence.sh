@@ -1779,16 +1779,16 @@ grep -qE '^ *\| `in-review` \|.*Reviewer' "$ORCH" \
   || fail "R19 control: the route table has no in-review row routing to the Reviewer, so the assertion above proves nothing"
 
 # The same order in the other two contracts, each scoped to its own section.
-_wf_sec="$(section "$SRC/docs/WORKFLOW.md" 'needs a landing record')"
+_wf_sec="$(section "$SRC/docs/agents/WORKFLOW.md" 'needs a landing record')"
 [ -n "$(printf '%s' "$_wf_sec" | tr -d '[:space:]')" ] \
-  || fail "R19: could not extract the landing-record section from docs/WORKFLOW.md"
+  || fail "R19: could not extract the landing-record section from docs/agents/WORKFLOW.md"
 printf '%s\n' "$_wf_sec" | grep -qiE 'after the (PR )?merge|after the work lands|observe the merge' \
-  || fail "R19: docs/WORKFLOW.md's landing-record section does not state that \`done\` is written after the work lands"
+  || fail "R19: docs/agents/WORKFLOW.md's landing-record section does not state that \`done\` is written after the work lands"
 # The state diagram is the part a reader trusts fastest, so it must not still draw the
 # approve edge onto `done`.
-grep -qF 'in_review --> done: Reviewer approves' "$SRC/docs/WORKFLOW.md" \
+grep -qF 'in_review --> done: Reviewer approves' "$SRC/docs/agents/WORKFLOW.md" \
   && fail "R19: the state diagram still draws 'in-review --> done: Reviewer approves' — the diagram would contradict the prose beside it"
-grep -qE 'in_review --> done' "$SRC/docs/WORKFLOW.md" \
+grep -qE 'in_review --> done' "$SRC/docs/agents/WORKFLOW.md" \
   || fail "R19 control: the state diagram has no in-review → done edge at all, so the assertion above proves nothing"
 pass "E99-F102 R19 done_is_documented_as_written_after_the_work_lands"
 

@@ -611,7 +611,7 @@ _tc="$(_tc_value harness.config.yaml)"
 { printf '%s\n' "$_tc" | grep -qF 'sh tests/test_sdd_fix_parallel.sh' \
     || { printf '%s\n' "$_tc" | grep -qF 'tools/run-tests.sh' && [ -f tests/test_sdd_fix_parallel.sh ]; }; } \
   || fail "R18: suite not reachable from full verification"
-for f in README.md docs/WORKFLOW.md docs/agents/INSTALL.md; do
+for f in README.md docs/agents/WORKFLOW.md docs/agents/INSTALL.md; do
   need "$f" '/sdd-fix-parallel' "R18: $f does not document command"
 done
 python3 - VERSION CHANGELOG.md <<'PY' || fail "R18: E15-F03 MINOR version policy failed"

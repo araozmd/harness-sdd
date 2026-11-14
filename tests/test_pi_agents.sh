@@ -1101,7 +1101,7 @@ test_pi_dispatch_prose_and_docs() {
     grep -qF -- "$_tok" "$_t/.harness/manifest.txt" || fail "R12c: .harness/manifest.txt lacks '$_tok'"
   done
   # (d) the five docs
-  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/agents/INSTALL.md docs/WORKFLOW.md; do
+  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/agents/INSTALL.md docs/agents/WORKFLOW.md; do
     grep -qF '.pi/agents' "$SRC/$_d" || fail "R12d: $_d does not mention .pi/agents"
     grep -qF 'pi-dispatch.sh' "$SRC/$_d" || fail "R12d: $_d does not mention pi-dispatch.sh"
     if grep -q 'arrives with E35-F02' "$SRC/$_d"; then fail "R12d: $_d still says role isolation arrives with E35-F02"; fi
@@ -1431,12 +1431,12 @@ test_pi_routing_docs() {
   grep '^| tier |' "$SRC/docs/agents/INSTALL.md" | grep -F 'pi `model`' | grep -qF 'pi `thinking`' || fail "R11d: the INSTALL.md tier table lacks the two pi columns"
   awk 'BEGIN{RS=""} /model_reasoning_effort/ && /thinking/ {f=1} END{exit !f}' "$SRC/agents/orchestrator.md" \
     || fail "R11d: agents/orchestrator.md: no paragraph names both model_reasoning_effort and thinking"
-  awk 'BEGIN{h="Which Builder runs"} /^```/{f=!f} !f && /^#+ /{k=(index($0,h)>0);next} k' "$SRC/docs/WORKFLOW.md" | tr '\n' ' ' | grep -qiE 'pi[^.]{0,200}thinking' \
-    || fail "R11d: docs/WORKFLOW.md's 'Which Builder runs' section does not describe pi thinking"
+  awk 'BEGIN{h="Which Builder runs"} /^```/{f=!f} !f && /^#+ /{k=(index($0,h)>0);next} k' "$SRC/docs/agents/WORKFLOW.md" | tr '\n' ' ' | grep -qiE 'pi[^.]{0,200}thinking' \
+    || fail "R11d: docs/agents/WORKFLOW.md's 'Which Builder runs' section does not describe pi thinking"
   _t="$(new_target r11d)"; ok_inst --agents=pi "$_t"
   grep -qF 'resolve_pi_thinking' "$_t/.harness/manifest.txt" || fail "R11d: manifest.txt does not name resolve_pi_thinking"
   grep -qF '.pi/agents/builder' "$_t/.harness/manifest.txt" || fail "R11d: manifest.txt does not name the pi unstamped cause"
-  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/agents/INSTALL.md docs/WORKFLOW.md; do
+  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/agents/INSTALL.md docs/agents/WORKFLOW.md; do
     tr '\n' ' ' < "$SRC/$_d" | grep -qE 'no `model:` or `thinking:`[^.]{0,60}\(E35-F03\)' && fail "R11d: $_d still says role files carry no model:/thinking: (E35-F03)"
   done
   grep -q '^## \[0.94.0\]' "$SRC/CHANGELOG.md" || fail "R11d: CHANGELOG.md lacks ## [0.94.0]"

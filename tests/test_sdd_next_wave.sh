@@ -47,7 +47,7 @@ if ! HOME="$TMP/home" CODEX_HOME="$TMP/codex" HARNESS_AGENTS="claude,codex,openc
   exit 1
 fi
 ORCH="$T/.harness/agents/orchestrator.md"
-WORKFLOW="$T/.harness/docs/WORKFLOW.md"
+WORKFLOW="$T/.harness/docs/agents/WORKFLOW.md"
 CFG="$T/.harness/harness.config.yaml"
 B_CLAUDE="$T/.claude/commands/sdd-next.md"
 B_OPENCODE="$T/.opencode/command/sdd-next.md"

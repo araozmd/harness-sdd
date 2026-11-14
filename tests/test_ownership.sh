@@ -28,7 +28,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SCHEMA="$ROOT/store/tasks.schema.json"
 ORCH="$ROOT/agents/orchestrator.md"
 CFG="$ROOT/harness.config.yaml"
-WORKFLOW="$ROOT/docs/WORKFLOW.md"
+WORKFLOW="$ROOT/docs/agents/WORKFLOW.md"
 LOCAL="$ROOT/store/local.md"
 VERSION_FILE="$ROOT/VERSION"
 T="$(mktemp -d 2>/dev/null || mktemp -d -t harnessowner)"
@@ -255,8 +255,8 @@ for doc in "$WORKFLOW" "$LOCAL"; do
 done
 # The "no owner anywhere ⇒ today's behavior" guarantee (R14) — WORKFLOW.md at least.
 grep -qiE "no .owner. anywhere|today.?s board-wide|exactly today" "$WORKFLOW" \
-  || fail "docs/WORKFLOW.md lacks the 'no owner ⇒ today's behavior' guarantee [docs_describe_ownership]"
-pass "docs/WORKFLOW.md + store/local.md describe owner, effective owner, identity, --mine [docs_describe_ownership]"
+  || fail "docs/agents/WORKFLOW.md lacks the 'no owner ⇒ today's behavior' guarantee [docs_describe_ownership]"
+pass "docs/agents/WORKFLOW.md + store/local.md describe owner, effective owner, identity, --mine [docs_describe_ownership]"
 
 # ── VERSION bump accompanied by a CHANGELOG entry (R15 — shape, never a git delta) ─
 # Assert the SHAPE of the bump, never a git delta and never a hardcoded literal:

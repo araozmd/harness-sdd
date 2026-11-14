@@ -5,7 +5,7 @@
 # Behavioral rows drive the tool against tests/fixtures/drift/repo (copied into a fresh
 # $T/<row>/repo per row, each variant derived with sed/awk/printf/cp so every row has exactly
 # one cause) and pass --root "$R". HARNESS_DIR is unset for every run (env -u) so the row's
-# root decides the harness directory. Prose rows slice docs/WORKFLOW.md and README.md through
+# root decides the harness directory. Prose rows slice docs/agents/WORKFLOW.md and README.md through
 # the fence-aware slicer (tests/lib/fence.awk) and anchor whole sentences from their subject
 # over folded newlines. Co-occurrence is not polarity: read the diff.
 #
@@ -668,7 +668,7 @@ R7_sibling_missing_exit2() {
   grep -qF 'cannot load' "$T/err" || fail "R7_sibling_missing_exit2: the error does not say 'cannot load'"
 }
 
-# ── R9: the docs/WORKFLOW.md section and the README sentence ─────────────────────────────
+# ── R9: the docs/agents/WORKFLOW.md section and the README sentence ─────────────────────────────
 # slice_doc <file> <exact-heading> — the fence-aware slice, heading line included, to the next
 # heading, folded onto one line (newlines → spaces, runs squeezed).
 slice_doc() {
@@ -680,8 +680,8 @@ slice_doc() {
 }
 WF_HEAD='## Living-doc drift report (E37-F03)'
 R9_workflow_section() {
-  _wf="$ROOT/docs/WORKFLOW.md"
-  [ "$(grep -cxF -- "$WF_HEAD" "$_wf" || true)" -eq 1 ] || fail "R9_workflow_section: docs/WORKFLOW.md does not carry exactly one '$WF_HEAD' heading"
+  _wf="$ROOT/docs/agents/WORKFLOW.md"
+  [ "$(grep -cxF -- "$WF_HEAD" "$_wf" || true)" -eq 1 ] || fail "R9_workflow_section: docs/agents/WORKFLOW.md does not carry exactly one '$WF_HEAD' heading"
   _a="$(grep -nxF '## Drift check on epic rollup' "$_wf" | cut -d: -f1)"
   _b="$(grep -nxF -- "$WF_HEAD" "$_wf" | cut -d: -f1)"
   _c="$(grep -nxF '## Epic lifecycle' "$_wf" | cut -d: -f1)"

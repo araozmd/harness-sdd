@@ -120,7 +120,7 @@ observed is the Reviewer's behavior check.
 ## Plan rows cite an R-id or an ADR
 
 Stage-aware NFRs (ADR-0009) rest on one citation grammar, stated here once and copied exactly
-into the ADR and plan templates, `agents/architect.md` and `docs/WORKFLOW.md`. Four forms:
+into the ADR and plan templates, `agents/architect.md` and `docs/agents/WORKFLOW.md`. Four forms:
 
 1. **Stage line.** In `specs/product.md`'s frontmatter (the `---` block that starts on line 1
    and runs to the next `---` line), a line matching `^stage: (discovery|pilot|production)$`.

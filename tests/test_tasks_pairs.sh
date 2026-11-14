@@ -352,7 +352,7 @@ pass "R3_spec_format_pairs_section"
 slice "$ROOT/docs/SPEC-FORMAT.md" '## The four files' | grep -F '| `.tasks.md`' | grep -qi 'red/green pair' \
   || fail "R3_spec_format_table_row: .tasks.md row lacks 'red/green pair'"
 pass "R3_spec_format_table_row"
-slice "$ROOT/docs/WORKFLOW.md" '## One run, end to end' | grep -E '^5\.' | grep -i 'pair' | grep -qi 'commit' \
+slice "$ROOT/docs/agents/WORKFLOW.md" '## One run, end to end' | grep -E '^5\.' | grep -i 'pair' | grep -qi 'commit' \
   || fail "R3_workflow_step5: step 5 lacks pair/commit"
 pass "R3_workflow_step5"
 

@@ -1127,7 +1127,7 @@ Two things worth knowing:
   harness declines and names the front-end to fix. **Re-run the installer
   after changing a tier or a pin** — the verdict is computed at install time.
   What it does **not** check: that the **stamp** is *stronger*, or that it exists. The
-  harness has no model list and invents none. See `docs/WORKFLOW.md` → "Which Builder runs".
+  harness has no model list and invents none. See `docs/agents/WORKFLOW.md` → "Which Builder runs".
 
 An **upgraded** target keeps whatever `models:` block it already had, so it will not grow
 a `builder-heavy:` line. Nothing breaks: an unlisted role falls through to

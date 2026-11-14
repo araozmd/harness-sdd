@@ -1707,17 +1707,17 @@ _got="$(cd "$R" && eval "$_defline" && printf '%s' "$_def")"
 [ "$_got" = origin/develop ] || fail "R11a: origin/HEAD wins when present, got '$_got'"
 pass "R11a_reviewer_section"
 
-# FS7 — docs/WORKFLOW.md says the same as the Reviewer section (fix/drift-feature-scope).
+# FS7 — docs/agents/WORKFLOW.md says the same as the Reviewer section (fix/drift-feature-scope).
 _wsec="$(awk "$FENCE_AWK"'
   fence_delim($0) { if (keep) print; next }
   !fence && /^#+ / { keep = (index($0, "### The test-drift check (`tools/test-drift-check.sh`)") == 1); next }
   keep
-' "$ROOT/docs/WORKFLOW.md" | tr '\n' ' ')"
-[ -n "$_wsec" ] || fail "FS7: docs/WORKFLOW.md has no '### The test-drift check' section"
+' "$ROOT/docs/agents/WORKFLOW.md" | tr '\n' ' ')"
+[ -n "$_wsec" ] || fail "FS7: docs/agents/WORKFLOW.md has no '### The test-drift check' section"
 for _clause in '`tools/test-drift-check.sh <base-ref> [<head-ref>] [--tasks-md <feature.tasks.md>] [--feature-scope <default-ref>]` lists,' \
   'The Reviewer runs it once against the default branch (the contract) and, when the branch carries pair commits, once per pair commit with `--feature-scope <default branch>`: on a branch that has merged the default branch, the pair baseline would otherwise report the default branch'"'"'s own test changes, brought in by the merge, as drift.' \
   '`--feature-scope` keeps only the test files the branch itself changed since its merge-base with that branch (a rename stays when either path is the branch'"'"'s own), and the summary line then ends `(feature scope <short-sha>)`.'; do
-  printf '%s' "$_wsec" | grep -qF -- "$_clause" || fail "FS7: docs/WORKFLOW.md must say: $_clause"
+  printf '%s' "$_wsec" | grep -qF -- "$_clause" || fail "FS7: docs/agents/WORKFLOW.md must say: $_clause"
 done
 pass "FS7_workflow_names_feature_scope"
 

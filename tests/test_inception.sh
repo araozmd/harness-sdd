@@ -201,8 +201,8 @@ pass "R15 completion_report"
 tr '\n' ' ' < AGENTS.md | grep -qiE 'Inception[^.]{0,40}front door' || fail "R16: AGENTS.md does not name Inception as the front door"
 grep -qi 'agents/\*.md.*Inception\|Inception.*Orchestrator' AGENTS.md \
   || fail "R16: AGENTS.md role list does not include Inception"
-grep -qF '/sdd-new' docs/WORKFLOW.md           || fail "R16: WORKFLOW.md does not show /sdd-new"
-grep -qi 'before.*pending\|pre-.pending\|step before' docs/WORKFLOW.md \
+grep -qF '/sdd-new' docs/agents/WORKFLOW.md           || fail "R16: WORKFLOW.md does not show /sdd-new"
+grep -qi 'before.*pending\|pre-.pending\|step before' docs/agents/WORKFLOW.md \
   || fail "R16: WORKFLOW.md does not describe the pre-pending step"
 pass "R16 docs_mention_intake"
 

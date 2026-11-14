@@ -823,7 +823,7 @@ pass "R9c builder.md carries the section-scoping rule and the reachable-another-
 # over-inclusion (vacuous scope) the extractors above exist to prevent.
 #
 # LATENT, NOT LIVE, at the time this was written, and worth saying plainly: orchestrator.md's
-# three indented ```` ```json ```` fences and docs/WORKFLOW.md's one are properly paired and
+# three indented ```` ```json ```` fences and docs/agents/WORKFLOW.md's one are properly paired and
 # contain no column-0 `#`, so the naive toggle's mis-tracking changed no result. But "correct
 # only because of what the files happen to contain today" is precisely the condition R9/R9b
 # were in before this feature, and fixing one while declining the other would be incoherent.

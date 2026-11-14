@@ -183,7 +183,7 @@ if mode in ('all','release'):
     release=changelog.split('## [0.91.0]',1)[1].split('\n## [',1)[0]
     for token in ['triage','approval','Source issues']:
         check(token.lower() in release.lower(),'release_contract changelog '+token)
-    for file in ['docs/agents/README.md','docs/WORKFLOW.md']:
+    for file in ['docs/agents/README.md','docs/agents/WORKFLOW.md']:
         text=(src/file).read_text()
         for token in ['sdd-triage','source-only','proposal.md','actions.md','Source issues']:
             check(token in text,'release_contract '+file+' '+token)

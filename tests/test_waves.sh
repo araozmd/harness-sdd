@@ -601,10 +601,10 @@ section_of() {
 }
 
 test_workflow_docs() {
-  _doc="$ROOT/docs/WORKFLOW.md"
+  _doc="$ROOT/docs/agents/WORKFLOW.md"
   _h='## Running in waves and across machines'
   section_of "$_doc" "$_h" >"$TMP/sec"
-  [ -s "$TMP/sec" ] || fail "R11: docs/WORKFLOW.md has no '$_h' heading"
+  [ -s "$TMP/sec" ] || fail "R11: docs/agents/WORKFLOW.md has no '$_h' heading"
   for _lit in '--waves' '--epic' '/sdd-next <id>' '--mine' 'ADR-0010' 'wave 1' 'owner'; do
     grep -qF -- "$_lit" "$TMP/sec" || fail "R11: the '$_h' section does not mention '$_lit'"
   done

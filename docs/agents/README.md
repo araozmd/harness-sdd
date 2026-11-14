@@ -13,6 +13,7 @@ Each file is the machine counterpart of one human doc. Humans start at
 |---|---|---|
 | `README.md` | `docs/agents/README.md` | Every section of the 0.109 README except the title, the loop diagram, quick start, the short CLI table and the documentation links |
 | `docs/INSTALL.md` | `docs/agents/INSTALL.md` | The whole 0.110 INSTALL: prerequisites, install and layout, skill units, pi, Gemini retirement, the new-product and bootstrap sequences, the PR-loop gate, host detection, the three questions, feedback, worker roster, upgrade and the update check, umbrella mode, model routing, self mode, config migration, layout and ownership |
+| `docs/WORKFLOW.md` | `docs/agents/WORKFLOW.md` | The whole 0.111 WORKFLOW: host invocation, intake, inception and drill-down, the change-size and test-drift checks, observable slices, architecture-aligned specs, stage and NFRs, the doc-critic checkpoints, drift checks and the drift report, the epic lifecycle, the state machine, ownership, waves, blocked selection, parking and the landing record, the human gate, selective SDD and the fix lanes, the PR review loop, awaiting-merge, the deprecated stacked-PR lane, defect reporting, triage, context hygiene, the end-to-end example and Builder escalation |
 
 ## Conventions
 
@@ -153,7 +154,7 @@ make a structurally valid board fail. If `/sdd-next` selects nothing, its
 `blocked <id> [<reason-code>]` lines explain the relevant dependency, epic,
 human-gate, or scoped-owner gate and finish with a `no actionable work` summary.
 Diagnostics are read-only and do not change selection policy. See
-[Diagnosing blocked selection](../WORKFLOW.md#diagnosing-blocked-selection).
+[Diagnosing blocked selection](WORKFLOW.md#diagnosing-blocked-selection).
 
 `/sdd-next` uses `tools/next-task.mjs` for deterministic, read-only JSON
 selection. Missing Node or invalid selector output is reported and falls back to

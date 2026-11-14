@@ -12,6 +12,7 @@
 # `rc -eq N`, never a shell-dependent code.
 #
 # E39-F02 registers docs/INSTALL.md and adds the F02_R* rows (anchor lint, scan-set plants).
+# E39-F03 registers docs/WORKFLOW.md and adds the F03_R* rows (WORKFLOW split).
 #
 # Registry: HUMAN_DOCS lists <path>:<line-budget>:<diagram yes|no>. A later slice appends an
 # entry; an override above the default 300 carries a `# why:` comment on the line above it.
@@ -29,7 +30,7 @@ trap 'rm -rf "$T"' EXIT
 trap 'exit 1' HUP INT TERM  # a killed suite still runs its EXIT cleanup (2026-10-25)
 GIT_CEILING_DIRECTORIES="$T"; export GIT_CEILING_DIRECTORIES
 
-HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no docs/INSTALL.md:300:yes"
+HUMAN_DOCS="README.md:150:yes docs/README.md:60:no docs/CONCEPTS.md:220:yes docs/BRAND.md:90:no docs/INSTALL.md:300:yes docs/WORKFLOW.md:300:yes"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 pass() { echo "ok - $1"; echo "$1" >> "$T/passed"; }
@@ -1007,6 +1008,14 @@ F02_R10_registry_and_index() {
 }
 
 # F02_R2 — the human INSTALL's shape. <file> lets a mutant copy under $T be checked.
+HUMAN_INSTALL_HEADS='## Prerequisites
+## Install
+## Choose your front-ends
+## Bootstrap (first run)
+## Upgrade
+## Umbrella (many repositories)
+## Ownership
+## Further reading'
 HUMAN_INSTALL_ANCHORS='agents/INSTALL.md#pi
 agents/INSTALL.md#retiring-gemini
 agents/INSTALL.md#host-detection----agentshost-opt-in
@@ -1017,26 +1026,20 @@ agents/INSTALL.md#per-role-model-routing-models--opt-in
 agents/INSTALL.md#self-mode----self-harness-developers-only
 agents/INSTALL.md#config-migration-on-upgrade-non-destructive
 agents/INSTALL.md#layout--ownership'
-install_shape_problems() {
+# shape_problems <file> <## headings, one per line> <further-reading anchors, one per line> <counterpart basename>
+shape_problems() {
   _f="$1"
   [ "$(nlines "$_f")" -le 300 ] || echo "exceeds 300 lines"
   sed -n '1p' "$_f" | grep -qE '^# ' || echo "line 1 is not a Markdown H1"
-  sed -n '1,15p' "$_f" | grep -qF '](agents/INSTALL.md)' || echo "no counterpart link within the first 15 lines"
+  sed -n '1,15p' "$_f" | grep -qF "](agents/$4)" || echo "no counterpart link within the first 15 lines"
   _h="$(unfenced "$_f" | grep '^## ')"
-  _want='## Prerequisites
-## Install
-## Choose your front-ends
-## Bootstrap (first run)
-## Upgrade
-## Umbrella (many repositories)
-## Ownership
-## Further reading'
-  [ "$_h" = "$_want" ] || echo "the ## headings are not the eight pinned ones in order"
+  _want="$2"
+  [ "$_h" = "$_want" ] || echo "the ## headings are not the pinned ones in order"
   _fr="$(slice "$_f" "## Further reading")"
   while IFS= read -r _a; do
     printf '%s\n' "$_fr" | grep -qF "]($_a)" || echo "## Further reading does not link $_a"
   done <<EOA
-$HUMAN_INSTALL_ANCHORS
+$3
 EOA
   link_targets "$_f" | while IFS= read -r _t; do
     case "$_t" in ""|\#*|http://*|https://*|mailto:*) continue ;; esac
@@ -1049,19 +1052,19 @@ EOA
 DOCS_DIR="$ROOT/docs"
 F02_R2_human_shape() {
   [ -f "$ROOT/$INSTALL_H" ] || fail "F02 R2: docs/INSTALL.md does not exist"
-  _bad="$(install_shape_problems "$ROOT/$INSTALL_H")"
+  _bad="$(shape_problems "$ROOT/$INSTALL_H" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md)"
   [ -z "$_bad" ] || fail "F02 R2: docs/INSTALL.md: $(printf '%s' "$_bad" | tr '\n' ';')"
   # mutants on private copies: each must be reported
   rm -rf "$T/f2"; mkdir -p "$T/f2/docs"; DOCS_DIR="$T/f2/docs"
   sed 's/^## Ownership$/## What is yours/' "$ROOT/$INSTALL_H" > "$T/f2/docs/a.md"
-  [ -n "$(install_shape_problems "$T/f2/docs/a.md")" ] || fail "F02 R2: the shape check misses a renamed ## heading"
+  [ -n "$(shape_problems "$T/f2/docs/a.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md)" ] || fail "F02 R2: the shape check misses a renamed ## heading"
   grep -vF '#worker-roster-workersroster--opt-in-local-only' "$ROOT/$INSTALL_H" > "$T/f2/docs/b.md"
-  [ -n "$(install_shape_problems "$T/f2/docs/b.md")" ] || fail "F02 R2: the shape check misses a dropped further-reading anchor"
+  [ -n "$(shape_problems "$T/f2/docs/b.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md)" ] || fail "F02 R2: the shape check misses a dropped further-reading anchor"
   { cat "$ROOT/$INSTALL_H"; printf '\n[x](../AGENTS.md)\n'; } > "$T/f2/docs/c.md"
   cp "$ROOT/AGENTS.md" "$T/f2/AGENTS.md"
-  install_shape_problems "$T/f2/docs/c.md" | grep -qF 'leaves docs/' || fail "F02 R2: the shape check misses a link that leaves docs/"
+  shape_problems "$T/f2/docs/c.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md | grep -qF 'leaves docs/' || fail "F02 R2: the shape check misses a link that leaves docs/"
   { printf '# Installing\n'; for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do echo; done; sed -n '2,$p' "$ROOT/$INSTALL_H" | grep -vF '](agents/INSTALL.md)'; printf '\n[agents](agents/INSTALL.md)\n'; } > "$T/f2/docs/d.md"
-  install_shape_problems "$T/f2/docs/d.md" | grep -qF 'first 15 lines' || fail "F02 R2: the shape check misses a counterpart link past line 15"
+  shape_problems "$T/f2/docs/d.md" "$HUMAN_INSTALL_HEADS" "$HUMAN_INSTALL_ANCHORS" INSTALL.md | grep -qF 'first 15 lines' || fail "F02 R2: the shape check misses a counterpart link past line 15"
   DOCS_DIR="$ROOT/docs"
   pass "F02_R2_human_shape"
 }
@@ -1072,11 +1075,12 @@ section_diagram() {
   echo "@@COUNT $_n"
   printf '%s\n' "$_s" | mermaid_blocks
 }
-# diagram_problems <doc> <heading> <tokens, one per line> <prose tokens, one per line>
+# diagram_problems <doc> <heading> <tokens, one per line> <prose tokens, one per line> [<type>, default flowchart]
 diagram_problems() {
   _d="$(section_diagram "$1" "$2")"
   [ "$(printf '%s\n' "$_d" | sed -n '1p')" = "@@COUNT 1" ] || echo "$2 does not hold exactly one mermaid block"
-  printf '%s\n' "$_d" | sed -n '3p' | sed 's/^[[:space:]]*//' | grep -qE '^flowchart( |$)' || echo "the $2 diagram is not a flowchart"
+  _ty="${5:-flowchart}"
+  printf '%s\n' "$_d" | sed -n '3p' | sed 's/^[[:space:]]*//' | grep -qE "^$_ty( |\$)" || echo "the $2 diagram is not a $_ty"
   while IFS= read -r _w; do
     [ -n "$_w" ] || continue
     printf '%s\n' "$_d" | grep -qF -- "$_w" || echo "the $2 diagram does not name '$_w'"
@@ -1214,16 +1218,16 @@ stale_citations() {
   done
   grep -F 'Per-role model routing' "$1/harness-install.sh" | grep -qF 'docs/agents/INSTALL.md' ||
     echo "harness-install.sh: the § Per-role model routing pointer does not name docs/agents/INSTALL.md"
-  grep -qF 'docs/agents/INSTALL.md' "$1/docs/WORKFLOW.md" || echo "docs/WORKFLOW.md does not name docs/agents/INSTALL.md"
+  grep -qF 'docs/agents/INSTALL.md' "$1/docs/agents/WORKFLOW.md" || echo "docs/agents/WORKFLOW.md does not name docs/agents/INSTALL.md"
   return 0
 }
 F02_R7_no_stale_citations() {
   _bad="$(stale_citations "$ROOT")"
   [ -z "$_bad" ] || fail "F02 R7: $(printf '%s' "$_bad" | tr '\n' ';')"
-  rm -rf "$T/f7"; mkdir -p "$T/f7/docs"; cp "$ROOT/harness-install.sh" "$ROOT/init.sh" "$ROOT/harness.config.yaml" "$T/f7/"; cp "$ROOT/docs/WORKFLOW.md" "$T/f7/docs/"
+  rm -rf "$T/f7"; mkdir -p "$T/f7/docs/agents"; cp "$ROOT/harness-install.sh" "$ROOT/init.sh" "$ROOT/harness.config.yaml" "$T/f7/"; cp "$ROOT/docs/agents/WORKFLOW.md" "$T/f7/docs/agents/"
   sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/init.sh" > "$T/f7/i.new" && mv "$T/f7/i.new" "$T/f7/init.sh"
   stale_citations "$T/f7" | grep -qF 'init.sh still cites' || fail "F02 R7: the check misses a reverted init.sh citation"
-  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/docs/WORKFLOW.md" > "$T/f7/w.new" && mv "$T/f7/w.new" "$T/f7/docs/WORKFLOW.md"
+  sed 's#docs/agents/INSTALL\.md#docs/INSTALL.md#g' "$T/f7/docs/agents/WORKFLOW.md" > "$T/f7/w.new" && mv "$T/f7/w.new" "$T/f7/docs/agents/WORKFLOW.md"
   stale_citations "$T/f7" | grep -qF 'WORKFLOW.md does not name' || fail "F02 R7: the check misses a reverted WORKFLOW.md title pointer"
   pass "F02_R7_no_stale_citations"
 }
@@ -1331,6 +1335,425 @@ F02_R11_version_and_changelog() {
   pass "F02_R11_version_and_changelog"
 }
 
+
+# ---------------------------------------------------------------- E39-F03 — WORKFLOW split
+# Rows named F03_R<n>_<slug>; <n> is the E39-F03 spec's R-id. Rows that read a doc take a root or a
+# file so a mutant copy under $T can be scanned; none reads VERSION as a literal or diffs main.
+WF_H="docs/WORKFLOW.md"
+WF_A="docs/agents/WORKFLOW.md"
+
+F03_R1_counterpart_announcement() {
+  [ -f "$ROOT/$WF_A" ] || fail "F03 R1: docs/agents/WORKFLOW.md does not exist"
+  [ "$(sed -n '1p' "$ROOT/$WF_A")" = "# The Workflow" ] ||
+    fail "F03 R1: line 1 of docs/agents/WORKFLOW.md is not the base H1"
+  _first="$(sed -n '2,$p' "$ROOT/$WF_A" | grep -v '^[[:space:]]*$' | sed -n '1p')"
+  [ "$_first" = '> For agents — exact contracts; the human guide is [docs/WORKFLOW.md](../WORKFLOW.md).' ] ||
+    fail "F03 R1: the first non-empty line after the H1 is not the announcement (got: $_first)"
+  pass "F03_R1_counterpart_announcement"
+}
+F03_R1_counterpart_headings_in_order() {
+  _got="$(unfenced "$ROOT/$WF_A" | grep '^#')"
+  _expect='# The Workflow
+## Host invocation and clean role contexts
+## Intake — the step before `pending` (`/sdd-new`)
+### Deterministic selection with a portable fallback
+## Whole-project inception (`/sdd-plan`)
+## Per-epic drill-down (`/sdd-drill`)
+## Change-size discipline (`change_size:`)
+### The pre-PR check (`tools/change-size.sh`)
+### The test-drift check (`tools/test-drift-check.sh`)
+## Observable slices and the walking skeleton (ADR-0008)
+## Architecture-aligned specs (the Architect cites ADRs)
+## Stage and NFRs (ADR-0009)
+## Doc-critic checkpoints
+## Drift check on epic rollup
+## Living-doc drift report (E37-F03)
+## Epic lifecycle
+## State machine
+## Ownership & scoped selection (`owner` + `/sdd-next --mine`)
+## Running in waves and across machines
+### Fanning out a wave (`/sdd-next --wave`)
+## Diagnosing blocked selection
+## Parking a feature (`parked`)
+### Blocked on the owner (`parked.gate: "owner"`)
+### `done` needs a landing record (`landed`)
+## The human-in-the-loop gate
+## Selective SDD (the `sdd` flag)
+### Lightweight fix lane (`/sdd-fix`)
+### Bounded parallel fix lane (`/sdd-fix-parallel`)
+## The PR review loop (`/sdd-pr-loop`)
+## Between approval and merge — `awaiting-merge` (E99-F130)
+## Stacked-PR lane — DEPRECATED (E21-F07)
+## Reporting harness defects (`/sdd-report`)
+### Filing discipline
+## Source-only feedback triage
+## Context hygiene
+## One run, end to end (example)
+### Which Builder runs — deterministic escalation'
+  [ "$_got" = "$_expect" ] || fail "F03 R1: the headings of docs/agents/WORKFLOW.md are not the 37 base headings in base order"
+  pass "F03_R1_counterpart_headings_in_order"
+}
+F03_R1_counterpart_retargets() {
+  _t="$(link_targets "$ROOT/$WF_A")"
+  printf '%s\n' "$_t" | grep -qE '^\.\./agents/|^\.\./store/|^\.\./specs/|^agents/' && fail "F03 R1: a relative link target was not retargeted from docs/agents/"
+  printf '%s\n' "$_t" | grep -qxF '../INSTALL.md' || fail "F03 R1: the INSTALL.md target is not ../INSTALL.md"
+  printf '%s\n' "$_t" | grep -qxF 'INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled' || fail "F03 R1: the pr-loop opt-in target is not INSTALL.md#sdd-pr-loop-opt-in-gated-on-pr_loopenabled"
+  _bad="$(for _x in $(printf '%s\n' "$_t" | grep -vE '^(#|https?:|mailto:)' | sed 's/#.*//' | sort -u); do
+            [ -e "$ROOT/docs/agents/$_x" ] || echo "$_x"; done)"
+  [ -z "$_bad" ] || fail "F03 R1: counterpart link targets do not resolve from docs/agents/: $_bad"
+  pass "F03_R1_counterpart_retargets"
+}
+
+# F03_R6 — each of the 31 suites of the coupling table reads the counterpart; the three marker suites
+# and tests/lib/umbrella/thin.sh keep the human path. <root> lets a mutant mirror be scanned.
+WF_SUITES="adr_citation antigravity_front architect_adr change_size dependency_diagnostics doc_critic drift_check drift_report epic_lifecycle escalation feedback_triage inception install landed_evidence observable_slices ownership pi_agents pi_front plan_cite pr_loop readiness_check reviewer sdd_drill sdd_fix sdd_fix_parallel sdd_next_wave sdd_plan stage_nfrs tasks_pairs test_drift_check waves"
+WF_MARKERS="tests/test_umbrella_05_conversion.sh tests/test_umbrella_07_symlink_compare.sh tests/test_umbrella_11_rollback.sh tests/lib/umbrella/thin.sh"
+wf_suite_problems() {
+  for _s in $WF_SUITES; do
+    _f="$1/tests/test_$_s.sh"
+    grep -qF 'docs/agents/WORKFLOW.md' "$_f" || echo "tests/test_$_s.sh does not cite docs/agents/WORKFLOW.md"
+    if [ "$_s" = install ]; then
+      # the one line that names the human doc is the installed-contract loop (R9)
+      _l="$(grep -F 'docs/WORKFLOW.md' "$_f" | grep -v 'for _f in' | grep -vF 'docs/agents/WORKFLOW.md' | grep -c . || true)"
+      [ "$_l" -eq 0 ] || echo "tests/test_install.sh still cites docs/WORKFLOW.md outside the for _f in loop"
+    else
+      sed 's#docs/agents/WORKFLOW\.md##g' "$_f" | grep -qF 'docs/WORKFLOW.md' && echo "tests/test_$_s.sh still cites docs/WORKFLOW.md"
+    fi
+  done
+  for _m in $WF_MARKERS; do
+    grep -qF 'docs/WORKFLOW.md' "$1/$_m" || echo "$_m lost its docs/WORKFLOW.md marker"
+  done
+  return 0
+}
+F03_R6_suites_cite_counterpart() {
+  _bad="$(wf_suite_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F03 R6: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _w() { rm -rf "$T/f36"; mkdir -p "$T/f36/tests/lib/umbrella"; cp "$ROOT"/tests/test_*.sh "$T/f36/tests/"; cp "$ROOT/tests/lib/umbrella/thin.sh" "$T/f36/tests/lib/umbrella/"; }
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#g' "$T/f36/tests/test_waves.sh" > "$T/f36/n" && mv "$T/f36/n" "$T/f36/tests/test_waves.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'tests/test_waves.sh' || fail "F03 R6: the check misses a suite reverted to docs/WORKFLOW.md"
+  _w; sed 's#docs/WORKFLOW\.md#docs/agents/WORKFLOW.md#g' "$T/f36/tests/test_umbrella_11_rollback.sh" > "$T/f36/n" && mv "$T/f36/n" "$T/f36/tests/test_umbrella_11_rollback.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'test_umbrella_11_rollback.sh lost' || fail "F03 R6: the marker control misses a re-pointed marker suite"
+  _w; sed 's#docs/WORKFLOW\.md#docs/agents/WORKFLOW.md#g' "$T/f36/tests/lib/umbrella/thin.sh" > "$T/f36/n" && mv "$T/f36/n" "$T/f36/tests/lib/umbrella/thin.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'thin.sh lost' || fail "F03 R6: the marker control misses a re-pointed thin.sh"
+  _w; printf '# see docs/WORKFLOW.md\n' >> "$T/f36/tests/test_install.sh"
+  wf_suite_problems "$T/f36" | grep -qF 'test_install.sh still cites' || fail "F03 R6: the check misses a stray docs/WORKFLOW.md in test_install.sh"
+  pass "F03_R6_suites_cite_counterpart"
+}
+
+# F03_R9 — the registry entry, the budget it carries and the index row pairing the two paths.
+F03_R9_registry_and_index() {
+  printf '%s\n' "$HUMAN_DOCS" | tr ' ' '\n' | grep -qxF 'docs/WORKFLOW.md:300:yes' ||
+    fail "F03 R9: HUMAN_DOCS lacks the entry docs/WORKFLOW.md:300:yes"
+  index_rows "$AGENTS_README" | awk '$1 == "docs/WORKFLOW.md" && $2 == "docs/agents/WORKFLOW.md" { f = 1 } END { exit !f }' ||
+    fail "F03 R9: ## Index has no row pairing docs/WORKFLOW.md with docs/agents/WORKFLOW.md"
+  pass "F03_R9_registry_and_index"
+}
+
+# F03_R2 — the human WORKFLOW's shape (the generalised shape_problems). <file> lets a mutant copy be checked.
+HUMAN_WF_HEADS='## From idea to task
+## The feature state machine
+## The human gate
+## Build and review
+## The PR review loop
+## When work stops
+## Further reading'
+HUMAN_WF_ANCHORS='agents/WORKFLOW.md#intake--the-step-before-pending-sdd-new
+agents/WORKFLOW.md#epic-lifecycle
+agents/WORKFLOW.md#state-machine
+agents/WORKFLOW.md#the-human-in-the-loop-gate
+agents/WORKFLOW.md#selective-sdd-the-sdd-flag
+agents/WORKFLOW.md#which-builder-runs--deterministic-escalation
+agents/WORKFLOW.md#the-pr-review-loop-sdd-pr-loop
+agents/WORKFLOW.md#parking-a-feature-parked
+agents/WORKFLOW.md#diagnosing-blocked-selection
+agents/WORKFLOW.md#running-in-waves-and-across-machines'
+F03_R2_human_shape() {
+  [ -f "$ROOT/$WF_H" ] || fail "F03 R2: docs/WORKFLOW.md does not exist"
+  _bad="$(shape_problems "$ROOT/$WF_H" "$HUMAN_WF_HEADS" "$HUMAN_WF_ANCHORS" WORKFLOW.md)"
+  [ -z "$_bad" ] || fail "F03 R2: docs/WORKFLOW.md: $(printf '%s' "$_bad" | tr '\n' ';')"
+  rm -rf "$T/f32"; mkdir -p "$T/f32/docs"; DOCS_DIR="$T/f32/docs"
+  _sp() { shape_problems "$1" "$HUMAN_WF_HEADS" "$HUMAN_WF_ANCHORS" WORKFLOW.md; }
+  sed 's/^## When work stops$/## Blocked/' "$ROOT/$WF_H" > "$T/f32/docs/a.md"
+  cmp -s "$ROOT/$WF_H" "$T/f32/docs/a.md" && fail "F03 R2: setup: the renamed-heading mutant did not apply"
+  [ -n "$(_sp "$T/f32/docs/a.md")" ] || fail "F03 R2: the shape check misses a renamed ## heading"
+  grep -vF '#parking-a-feature-parked' "$ROOT/$WF_H" > "$T/f32/docs/b.md"
+  [ -n "$(_sp "$T/f32/docs/b.md")" ] || fail "F03 R2: the shape check misses a dropped further-reading anchor"
+  { cat "$ROOT/$WF_H"; printf '\n[x](../AGENTS.md)\n'; } > "$T/f32/docs/c.md"
+  cp "$ROOT/AGENTS.md" "$T/f32/AGENTS.md"
+  _sp "$T/f32/docs/c.md" | grep -qF 'leaves docs/' || fail "F03 R2: the shape check misses a link that leaves docs/"
+  { sed -n '1p' "$ROOT/$WF_H"; for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do echo; done; sed -n '2,$p' "$ROOT/$WF_H" | grep -vF '](agents/WORKFLOW.md)'; printf '\n[agents](agents/WORKFLOW.md)\n'; } > "$T/f32/docs/d.md"
+  _sp "$T/f32/docs/d.md" | grep -qF 'first 15 lines' || fail "F03 R2: the shape check misses a counterpart link past line 15"
+  DOCS_DIR="$ROOT/docs"
+  pass "F03_R2_human_shape"
+}
+
+# F03_R3 — the feature state machine diagram. wf_state_problems <doc> adds the done-edge rules.
+WF_STATE_TOKENS='pending
+spec-ready
+in-progress
+in-review
+done
+autonomous
+rejects
+builder-heavy
+approves
+merges'
+WF_STATE_PROSE='sdd: true
+sdd: false
+--gated'
+wf_state_problems() {
+  diagram_problems "$1" "## The feature state machine" "$WF_STATE_TOKENS" "$WF_STATE_PROSE" stateDiagram-v2
+  _d="$(section_diagram "$1" "## The feature state machine")"
+  [ "$(printf '%s\n' "$_d" | grep -c -- '--> done')" -eq 1 ] || echo "the state diagram does not hold exactly one '--> done' line"
+  printf '%s\n' "$_d" | grep -- '--> done' | grep -qF 'merge' || echo "the '--> done' line does not name the merge"
+  printf '%s\n' "$_d" | grep -qF 'done: Reviewer approves' && echo "the state diagram says done: Reviewer approves"
+  return 0
+}
+F03_R3_state_diagram() {
+  _bad="$(wf_state_problems "$ROOT/$WF_H")"
+  [ -z "$_bad" ] || fail "F03 R3: $(printf '%s' "$_bad" | tr '\n' ';')"
+  rm -rf "$T/f33"; mkdir -p "$T/f33"
+  _m() { sed "$2" "$ROOT/$WF_H" > "$T/f33/m.md"
+         cmp -s "$ROOT/$WF_H" "$T/f33/m.md" && fail "F03 R3: setup: the mutant $1 did not apply"
+         [ -n "$(wf_state_problems "$T/f33/m.md")" ] || fail "F03 R3: the state-diagram check misses the mutant $1"; }
+  _m done-edge 's/in_review --> done: the PR merges — set-status done with the merge commit as evidence/in_review --> done: the Reviewer approves/'
+  _m type 's/^stateDiagram-v2$/flowchart TB/'
+  _m heavy 's/, builder-heavy after after_rejections rejections//'
+  _m gated 's/--gated/the gated flag/g'
+  _m sddfalse 's/`sdd: false`/the no-spec flag/g'
+  # a second line targeting done, and the pinned old label
+  awk '/^    done --> \[\*\]$/ { print "    in_progress --> done: skip"; } { print }' "$ROOT/$WF_H" > "$T/f33/m.md"
+  [ -n "$(wf_state_problems "$T/f33/m.md")" ] || fail "F03 R3: the state-diagram check misses a second '--> done' line"
+  awk '/^    done --> \[\*\]$/ { print "    note right of done: done: Reviewer approves and merges"; } { print }' "$ROOT/$WF_H" > "$T/f33/m.md"
+  wf_state_problems "$T/f33/m.md" | grep -qF 'done: Reviewer approves' || fail "F03 R3: the state-diagram check misses the old 'done: Reviewer approves' label"
+  pass "F03_R3_state_diagram"
+}
+
+# F03_R4 — the PR review loop diagram.
+WF_LOOP_TOKENS='@codex review
+wait-for-codex.sh
+P0
+nit
+blocking_severities
+pr-fixer
+max_rounds
+needs-human
+non-Codex
+required CI
+auto_merge
+merge_strategy'
+WF_LOOP_PROSE='/sdd-pr-loop
+pr_loop.enabled
+max_rounds
+needs-human'
+F03_R4_pr_loop_diagram() {
+  _bad="$(diagram_problems "$ROOT/$WF_H" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")"
+  [ -z "$_bad" ] || fail "F03 R4: $(printf '%s' "$_bad" | tr '\n' ';')"
+  # the preflight checks authed gh, jq and an open PR — not the Codex App (tools/wait-for-codex.sh wfc_preflight)
+  _pf() { section_diagram "$1" "## The PR review loop" | grep -qF 'preflight: authed gh, jq, open PR — posts nothing'; }
+  _pf "$ROOT/$WF_H" || fail "F03 R4: the preflight node is not 'authed gh, jq, open PR'"
+  rm -rf "$T/f34"; mkdir -p "$T/f34"
+  sed 's/preflight: authed gh, jq, open PR/preflight: Codex GitHub App, authed gh, jq/' "$ROOT/$WF_H" > "$T/f34/pf.md"
+  cmp -s "$ROOT/$WF_H" "$T/f34/pf.md" && fail "F03 R4: setup: the preflight mutant did not apply"
+  _pf "$T/f34/pf.md" && fail "F03 R4: the preflight check misses a diagram that claims the Codex App is checked"
+  rm -rf "$T/f34"; mkdir -p "$T/f34"
+  _m() { sed "$2" "$ROOT/$WF_H" > "$T/f34/m.md"
+         cmp -s "$ROOT/$WF_H" "$T/f34/m.md" && fail "F03 R4: setup: the mutant $1 did not apply"
+         [ -n "$(diagram_problems "$T/f34/m.md" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")" ] || fail "F03 R4: the diagram check misses the mutant $1"; }
+  _m needs-human-node 's/needs-human — the loop labels the PR and stops/the loop labels the PR and stops/'
+  _m graph 's/^flowchart TB$/graph TB/'
+  _m prose-enabled 's/`pr_loop\.enabled`/the enabled flag/g'
+  _m prose-maxrounds 's/`max_rounds`/the round cap/g;s/before max_rounds/before the cap/'
+  # a second mermaid block in the section
+  awk '/^## The PR review loop$/ { print; print ""; print "```mermaid"; print "flowchart LR"; print "  a --> b"; print "```"; next } { print }' "$ROOT/$WF_H" > "$T/f34/m.md"
+  [ -n "$(diagram_problems "$T/f34/m.md" "## The PR review loop" "$WF_LOOP_TOKENS" "$WF_LOOP_PROSE")" ] || fail "F03 R4: the diagram check misses a second mermaid block"
+  pass "F03_R4_pr_loop_diagram"
+}
+
+# F03_R5 — the human sentences are true (one- or two-token pins on the doc folded outside fences)
+# and the known over-claims are absent. wf_accuracy_problems / wf_over_claims take a file so mutants are checked.
+wf_accuracy_problems() {
+  _t="$(unfenced "$1" | folded)"
+  _pin() { printf '%s' "$_t" | grep -qE -- "$2" || echo "$1 missing"; }
+  _pin S1a 'pauses at .spec-ready.'
+  _pin S1b 'only for low-risk work'
+  _pin S2 'skips the approval gate, not the planning gate'
+  _pin S3 'never on the approval'
+  _pin S4 'repeats until green'
+  _pin S5 'the same instructions at a heavier model tier'
+  _pin S6a 'second yes'
+  _pin S6b 'off entirely'
+  _pin S7 'parks it at the human gate'
+  _pin S8a 'non-Codex participant'
+  _pin S8b 'needs-human'
+  _pin S9a 'installed only while'
+  _pin S9b 'seeds .false.'
+  _pin S10 'stops after the green summary'
+}
+wf_over_claims() {
+  _t="$(unfenced "$1" | folded)"
+  for _o in 'nothing is built until' 'always pauses' 'never skips' 'fails closed' 'done: Reviewer approves' \
+            'Reviewer approves → done' 'merges automatically' 'E99-F130' 'checks all three'; do
+    printf '%s' "$_t" | grep -qiF -- "$_o" && echo "$_o"
+  done
+  return 0
+}
+F03_R5_accuracy_sentences() {
+  _bad="$(wf_accuracy_problems "$ROOT/$WF_H")"
+  [ -z "$_bad" ] || fail "F03 R5: docs/WORKFLOW.md lacks pinned sentence(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  rm -rf "$T/f35"; mkdir -p "$T/f35"
+  _m() { sed "$2" "$ROOT/$WF_H" > "$T/f35/m.md"
+         cmp -s "$ROOT/$WF_H" "$T/f35/m.md" && fail "F03 R5: setup: the mutant for $1 did not apply"
+         wf_accuracy_problems "$T/f35/m.md" | grep -qF "$1 missing" || fail "F03 R5: the pin $1 survives its mutant"; }
+  _m S1b 's/ — use it only for low-risk work//'
+  _m S2 's/skips the approval gate, not the planning gate/skips the approval gate and the planning gate/'
+  _m S3 's/ — never on the approval;/;/'
+  _m S4 's/repeats until green/repeats/'
+  _m S5 's/is the same instructions at a heavier model tier/runs on a stronger model/'
+  _m S6b 's/ turns escalation off entirely,/ turns escalation down,/'
+  _m S6a 's/Both routes need a second yes from/Both routes need a nod from/'
+  _m S7 's/parks it at the human gate/pauses it/'
+  _m S8a 's/a non-Codex participant/another participant/'
+  _m S9b 's/seeds `false`/seeds `true`/'
+  _m S9a 's/is installed only while/is installed while/'
+  _m S10 's/the loop stops after the green summary/the loop continues/'
+  _m S1a 's/the Orchestrator pauses at `spec-ready`/the Orchestrator waits/'
+  pass "F03_R5_accuracy_sentences"
+}
+F03_R5_no_over_claims() {
+  _bad="$(wf_over_claims "$ROOT/$WF_H")"
+  [ -z "$_bad" ] || fail "F03 R5: docs/WORKFLOW.md contains the over-claim(s): $(printf '%s' "$_bad" | tr '\n' ' ')"
+  rm -rf "$T/f35b"; mkdir -p "$T/f35b"
+  for _m in 'Nothing is built until a human approves.' 'The loop MERGES AUTOMATICALLY.' 'The gate always pauses.' 'It never skips the gate.' \
+            'The gate fails closed.' 'in_review --> done: Reviewer approves' 'Reviewer approves → done' '(E99-F130)' 'The preflight checks all three.'; do
+    { cat "$ROOT/$WF_H"; printf '\n%s\n' "$_m"; } > "$T/f35b/m.md"
+    [ -n "$(wf_over_claims "$T/f35b/m.md")" ] || fail "F03 R5: the over-claim check misses '$_m'"
+  done
+  { cat "$ROOT/$WF_H"; printf '\n```text\nNothing is built until x. always pauses never skips fails closed done: Reviewer approves merges automatically E99-F130\n```\n'; } > "$T/f35b/m.md"
+  [ -z "$(wf_over_claims "$T/f35b/m.md")" ] || fail "F03 R5: the over-claim check flags text inside a fence"
+  pass "F03_R5_no_over_claims"
+}
+
+# F03_R7 — agent-facing citations name the counterpart. wf_agent_problems <root> lets a mirror be scanned.
+WF_ROW_A='| `docs/WORKFLOW.md` | State transitions and human gates |'
+WF_ROW_B='| `docs/agents/WORKFLOW.md` | The exact workflow contract: the routing table, the gates, parking and landing evidence, the PR loop, Builder escalation |'
+WF_EMITTER='3. Find the next actionable feature and route it by status per `.harness/docs/agents/WORKFLOW.md`:'
+wf_agent_problems() {
+  for _f in agents/orchestrator.md agents/fixer.md; do
+    grep -qF 'docs/WORKFLOW.md' "$1/$_f" && echo "$_f still cites docs/WORKFLOW.md"
+  done
+  [ "$(grep -cF 'docs/WORKFLOW.md' "$1/AGENTS.md")" -eq 1 ] || echo "AGENTS.md does not hold exactly one docs/WORKFLOW.md line"
+  [ "$(grep -F 'docs/WORKFLOW.md' "$1/AGENTS.md")" = "$WF_ROW_A" ] || echo "AGENTS.md: the one docs/WORKFLOW.md line is not the reference row"
+  [ "$(grep -A1 -F -x -- "$WF_ROW_A" "$1/AGENTS.md" | sed -n '2p')" = "$WF_ROW_B" ] || echo "AGENTS.md: the reference row is not followed by the docs/agents/WORKFLOW.md row"
+  grep -qF '[the workflow](docs/agents/WORKFLOW.md)' "$1/AGENTS.md" || echo "AGENTS.md step 4 does not link docs/agents/WORKFLOW.md"
+  grep -qF '[human gates](docs/agents/WORKFLOW.md)' "$1/AGENTS.md" || echo "AGENTS.md gate sentence does not link docs/agents/WORKFLOW.md"
+  grep -qxF -- "$WF_EMITTER" "$1/harness-install.sh" || echo "harness-install.sh: the sdd-next emitter line is not the counterpart citation"
+  for _f in .claude/commands/sdd-next.md .opencode/command/sdd-next.md .agents/skills/sdd-next/SKILL.md; do
+    grep -qF 'docs/agents/WORKFLOW.md' "$1/$_f" || echo "$_f does not cite docs/agents/WORKFLOW.md"
+  done
+  return 0
+}
+F03_R7_agent_citations() {
+  _bad="$(wf_agent_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F03 R7: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _w() { rm -rf "$T/f37"; mkdir -p "$T/f37/agents" "$T/f37/.claude/commands" "$T/f37/.opencode/command" "$T/f37/.agents/skills/sdd-next"
+         cp "$ROOT/AGENTS.md" "$ROOT/harness-install.sh" "$T/f37/"; cp "$ROOT/agents/orchestrator.md" "$ROOT/agents/fixer.md" "$T/f37/agents/"
+         cp "$ROOT/.claude/commands/sdd-next.md" "$T/f37/.claude/commands/"; cp "$ROOT/.opencode/command/sdd-next.md" "$T/f37/.opencode/command/"
+         cp "$ROOT/.agents/skills/sdd-next/SKILL.md" "$T/f37/.agents/skills/sdd-next/"; }
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#g' "$T/f37/agents/fixer.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/agents/fixer.md"
+  wf_agent_problems "$T/f37" | grep -qF 'agents/fixer.md still cites' || fail "F03 R7: the check misses a reverted agents/fixer.md citation"
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#g' "$T/f37/agents/orchestrator.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/agents/orchestrator.md"
+  wf_agent_problems "$T/f37" | grep -qF 'agents/orchestrator.md still cites' || fail "F03 R7: the check misses a reverted agents/orchestrator.md citation"
+  _w; grep -vF -x -- "$WF_ROW_B" "$T/f37/AGENTS.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/AGENTS.md"
+  wf_agent_problems "$T/f37" | grep -qF 'is not followed by' || fail "F03 R7: the check misses a deleted AGENTS.md reference row"
+  _w; sed 's#\[the workflow\](docs/agents/WORKFLOW\.md)#[the workflow](docs/WORKFLOW.md)#' "$T/f37/AGENTS.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/AGENTS.md"
+  wf_agent_problems "$T/f37" | grep -qF 'AGENTS.md' || fail "F03 R7: the check misses a reverted AGENTS.md step 4 link"
+  _w; sed 's#\[human gates\](docs/agents/WORKFLOW\.md)#[human gates](docs/WORKFLOW.md)#' "$T/f37/AGENTS.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/AGENTS.md"
+  wf_agent_problems "$T/f37" | grep -qF 'AGENTS.md' || fail "F03 R7: the check misses a reverted AGENTS.md gate-sentence link"
+  _w; sed 's#`.harness/docs/agents/WORKFLOW\.md`#`.harness/docs/WORKFLOW.md`#' "$T/f37/harness-install.sh" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/harness-install.sh"
+  wf_agent_problems "$T/f37" | grep -qF 'harness-install.sh' || fail "F03 R7: the check misses a reverted emitter line"
+  _w; sed 's#docs/agents/WORKFLOW\.md#docs/WORKFLOW.md#' "$T/f37/.opencode/command/sdd-next.md" > "$T/f37/n" && mv "$T/f37/n" "$T/f37/.opencode/command/sdd-next.md"
+  wf_agent_problems "$T/f37" | grep -qF '.opencode/command/sdd-next.md' || fail "F03 R7: the check misses a stale generated body"
+  pass "F03_R7_agent_citations"
+}
+
+# F03_R8 — sibling-doc citations re-point. wf_sibling_problems <root> lets a mirror be scanned.
+wf_sibling_problems() {
+  for _f in docs/RATIONALE.md docs/UMBRELLA.md; do
+    grep -qF 'docs/WORKFLOW.md' "$1/$_f" && echo "$_f still cites docs/WORKFLOW.md"
+  done
+  [ "$(grep -cF '[`docs/agents/WORKFLOW.md`](agents/WORKFLOW.md)' "$1/docs/RATIONALE.md")" -eq 4 ] || echo "docs/RATIONALE.md: the four ledger rows do not carry the counterpart link"
+  grep -F 'cadence note' "$1/docs/RATIONALE.md" | grep -qF 'the `docs/agents/WORKFLOW.md` cadence note' || echo "docs/RATIONALE.md: the cadence-note token is not the counterpart path"
+  grep -qF 'see `docs/agents/WORKFLOW.md` for the' "$1/docs/UMBRELLA.md" || echo "docs/UMBRELLA.md: the landing-record pointer does not name docs/agents/WORKFLOW.md"
+  [ "$(grep -cF 'docs/WORKFLOW.md' "$1/docs/SPEC-FORMAT.md")" -eq 1 ] || echo "docs/SPEC-FORMAT.md does not hold exactly one docs/WORKFLOW.md line"
+  grep -qF 'into the ADR and plan templates, `agents/architect.md` and `docs/agents/WORKFLOW.md`. Four forms:' "$1/docs/SPEC-FORMAT.md" || echo "docs/SPEC-FORMAT.md: the grammar sentence does not name docs/agents/WORKFLOW.md"
+  grep -qF 'See `docs/agents/WORKFLOW.md` → "Which Builder runs".' "$1/docs/agents/INSTALL.md" || echo "docs/agents/INSTALL.md: the arming-verdict pointer does not name docs/agents/WORKFLOW.md"
+  grep -qF '(WORKFLOW.md#diagnosing-blocked-selection)' "$1/docs/agents/README.md" || echo "docs/agents/README.md: the blocked-selection link does not target WORKFLOW.md#diagnosing-blocked-selection"
+  grep -qF '(../WORKFLOW.md#' "$1/docs/agents/README.md" && echo "docs/agents/README.md: a stale ../WORKFLOW.md# anchor remains"
+  for _f in README.md docs/CONCEPTS.md docs/HARNESS.md docs/INSTALL.md docs/README.md; do
+    grep -qF 'WORKFLOW.md](' "$1/$_f" || echo "$_f lost its plain WORKFLOW.md link"
+    grep -qF 'agents/WORKFLOW.md' "$1/$_f" && echo "$_f was re-pointed at the counterpart"
+  done
+  return 0
+}
+F03_R8_sibling_citations() {
+  _bad="$(wf_sibling_problems "$ROOT")"
+  [ -z "$_bad" ] || fail "F03 R8: $(printf '%s' "$_bad" | tr '\n' ';')"
+  _w() { rm -rf "$T/f38"; mkdir -p "$T/f38"; cp "$ROOT/README.md" "$T/f38/"; cp -R "$ROOT/docs" "$T/f38/docs"; }
+  _w; sed 's#see `docs/agents/WORKFLOW\.md` for the#see `docs/WORKFLOW.md` for the#' "$T/f38/docs/UMBRELLA.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/UMBRELLA.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/UMBRELLA.md' || fail "F03 R8: the check misses a reverted docs/UMBRELLA.md sentence"
+  _w; sed 's#See `docs/agents/WORKFLOW\.md` → "Which#See `docs/WORKFLOW.md` → "Which#' "$T/f38/docs/agents/INSTALL.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/agents/INSTALL.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/agents/INSTALL.md' || fail "F03 R8: the check misses a reverted docs/agents/INSTALL.md pointer"
+  _w; sed 's#(WORKFLOW\.md\#diagnosing-blocked-selection)#(../WORKFLOW.md\#diagnosing-blocked-selection)#' "$T/f38/docs/agents/README.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/agents/README.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/agents/README.md' || fail "F03 R8: the check misses a reverted docs/agents/README.md anchor"
+  _w; sed 's#\[`docs/agents/WORKFLOW\.md`\](agents/WORKFLOW\.md)#[`docs/WORKFLOW.md`](WORKFLOW.md)#' "$T/f38/docs/RATIONALE.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/RATIONALE.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/RATIONALE.md' || fail "F03 R8: the check misses a reverted docs/RATIONALE.md ledger row"
+  _w; sed 's#the `docs/agents/WORKFLOW\.md` cadence note#the `docs/WORKFLOW.md` cadence note#' "$T/f38/docs/RATIONALE.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/RATIONALE.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'cadence-note' || fail "F03 R8: the check misses a reverted cadence-note token"
+  _w; sed 's#`agents/architect.md` and `docs/agents/WORKFLOW.md`#`agents/architect.md` and `docs/WORKFLOW.md`#' "$T/f38/docs/SPEC-FORMAT.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/SPEC-FORMAT.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/SPEC-FORMAT.md' || fail "F03 R8: the check misses a reverted docs/SPEC-FORMAT.md grammar sentence"
+  _w; sed 's#(WORKFLOW\.md)#(agents/WORKFLOW.md)#' "$T/f38/docs/CONCEPTS.md" > "$T/f38/n" && mv "$T/f38/n" "$T/f38/docs/CONCEPTS.md"
+  wf_sibling_problems "$T/f38" | grep -qF 'docs/CONCEPTS.md' || fail "F03 R8: the check misses a re-pointed docs/CONCEPTS.md link"
+  pass "F03_R8_sibling_citations"
+}
+
+# F03_R10 — release: a CHANGELOG heading equals the runtime VERSION, and the section naming E39-F03,
+# docs/agents/WORKFLOW.md and docs/WORKFLOW.md sits one MINOR (patch 0) above the section below it.
+f03_changelog_problem() {
+  _v="$(awk '
+    function flush() {
+      if (sec != "" && f == "" && body ~ /E39-F03/ && body ~ /docs\/agents\/WORKFLOW\.md/ && body ~ /docs\/WORKFLOW\.md/) f = sec
+      else if (f != "" && o == "" && sec != "") o = sec
+    }
+    /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ { flush(); v = $2; gsub(/[][]/, "", v); sec = v; body = ""; next }
+    { body = body "\n" $0 }
+    END { flush(); print f; print o }' "$1")"
+  _f="$(printf '%s\n' "$_v" | sed -n '1p')"; _o="$(printf '%s\n' "$_v" | sed -n '2p')"
+  [ -n "$_f" ] || { echo "no section names E39-F03, docs/agents/WORKFLOW.md and docs/WORKFLOW.md"; return 0; }
+  [ -n "$_o" ] || { echo "the section $_f has no older section below it"; return 0; }
+  IFS=. read -r _fa _fb _fc <<EOV
+$_f
+EOV
+  IFS=. read -r _oa _ob _oc <<EOV
+$_o
+EOV
+  [ "$_fa" -eq "$_oa" ] && [ "$_fb" -eq $((_ob + 1)) ] && [ "$_fc" -eq 0 ] || echo "$_f is not one MINOR above $_o with patch 0"
+  return 0
+}
+F03_R10_version_and_changelog() {
+  _cur="$(cat "$ROOT/VERSION")"
+  grep -qF "## [$_cur]" "$ROOT/CHANGELOG.md" || fail "F03 R10: CHANGELOG has no '## [$_cur]' section for the runtime VERSION"
+  _p="$(f03_changelog_problem "$ROOT/CHANGELOG.md")"
+  [ -z "$_p" ] || fail "F03 R10: $_p"
+  sed 's#docs/agents/WORKFLOW\.md#docs/agents/GONE.md#g' "$ROOT/CHANGELOG.md" > "$T/f310a.md"
+  [ -n "$(f03_changelog_problem "$T/f310a.md")" ] || fail "F03 R10: the changelog check misses a section without docs/agents/WORKFLOW.md"
+  _fv="$(awk '/^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ { v = $2; gsub(/[][]/, "", v); sec = v } /E39-F03/ { print sec; exit }' "$ROOT/CHANGELOG.md")"
+  [ -n "$_fv" ] || fail "F03 R10: no CHANGELOG section names E39-F03"
+  sed "s/^## \[$_fv\]/## [${_fv%.*}.1]/" "$ROOT/CHANGELOG.md" > "$T/f310b.md"
+  grep -qF "## [${_fv%.*}.1]" "$T/f310b.md" || fail "F03 R10: setup: the PATCH mutant did not apply"
+  [ -n "$(f03_changelog_problem "$T/f310b.md")" ] || fail "F03 R10: the changelog check misses a PATCH-step E39-F03 section"
+  pass "F03_R10_version_and_changelog"
+}
 # DISPATCH
 if [ -n "${ONLY:-}" ]; then for _r in $ONLY; do row "$_r"; done; exit 0; fi
 row R1_announcement; row R1_index_table; row R1_conventions_named; row R1_human_index
@@ -1358,6 +1781,17 @@ row F02_R5_accuracy_sentences; row F02_R5_no_over_claims
 row F02_R7_no_stale_citations
 row F02_R8_anchors_resolve
 row F02_R11_version_and_changelog
+# ---- E39-F03
+row F03_R1_counterpart_announcement; row F03_R1_counterpart_headings_in_order; row F03_R1_counterpart_retargets
+row F03_R9_registry_and_index
+row F03_R6_suites_cite_counterpart
+row F03_R2_human_shape
+row F03_R3_state_diagram
+row F03_R4_pr_loop_diagram
+row F03_R5_accuracy_sentences; row F03_R5_no_over_claims
+row F03_R7_agent_citations
+row F03_R8_sibling_citations
+row F03_R10_version_and_changelog
 # Dispatch completeness: sees a defined-but-undispatched R*() row.
 for f in $(sed -n 's/^\(\(F[0-9]*_\)\{0,1\}R[0-9][0-9]*_[A-Za-z0-9_]*\)() *{.*/\1/p' "$ROOT/tests/test_docs_for_humans.sh"); do
   grep -qE "^$f( |\$)" "$T/passed" || fail "$f: defined but not dispatched from the row list"

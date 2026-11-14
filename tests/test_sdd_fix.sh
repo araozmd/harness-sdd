@@ -248,15 +248,15 @@ pass "R18 portable_contract"
 
 # ── R19: WORKFLOW.md documents the lightweight lane; adds no new status/routing ───
 # R19_workflow_doc
-grep -qF '/sdd-fix' docs/WORKFLOW.md          || fail "R19: WORKFLOW.md does not mention /sdd-fix"
-grep -qi 'sdd: false\|sdd:false' docs/WORKFLOW.md || fail "R19: WORKFLOW.md does not mention sdd:false"
-tr '\n' ' ' < docs/WORKFLOW.md | grep -qiE 'maintenance epic[^.]{0,15}E99' || fail "R19: WORKFLOW.md does not mention the E99 maintenance epic"
-grep -qi 'inbox brief\|brief' docs/WORKFLOW.md || fail "R19: WORKFLOW.md does not mention the inbox brief"
-grep -qF 'Builder' docs/WORKFLOW.md           || fail "R19: WORKFLOW.md does not mention the Builder"
-grep -qF 'Reviewer' docs/WORKFLOW.md          || fail "R19: WORKFLOW.md does not mention the Reviewer"
-grep -qi 'no 4-file spec\|no spec' docs/WORKFLOW.md || fail "R19: WORKFLOW.md does not state no 4-file spec"
-grep -qi 'no new' docs/WORKFLOW.md            || fail "R19: WORKFLOW.md does not state 'no new'"
-grep -qi 'status\|routing' docs/WORKFLOW.md   || fail "R19: WORKFLOW.md does not name status/routing"
+grep -qF '/sdd-fix' docs/agents/WORKFLOW.md          || fail "R19: WORKFLOW.md does not mention /sdd-fix"
+grep -qi 'sdd: false\|sdd:false' docs/agents/WORKFLOW.md || fail "R19: WORKFLOW.md does not mention sdd:false"
+tr '\n' ' ' < docs/agents/WORKFLOW.md | grep -qiE 'maintenance epic[^.]{0,15}E99' || fail "R19: WORKFLOW.md does not mention the E99 maintenance epic"
+grep -qi 'inbox brief\|brief' docs/agents/WORKFLOW.md || fail "R19: WORKFLOW.md does not mention the inbox brief"
+grep -qF 'Builder' docs/agents/WORKFLOW.md           || fail "R19: WORKFLOW.md does not mention the Builder"
+grep -qF 'Reviewer' docs/agents/WORKFLOW.md          || fail "R19: WORKFLOW.md does not mention the Reviewer"
+grep -qi 'no 4-file spec\|no spec' docs/agents/WORKFLOW.md || fail "R19: WORKFLOW.md does not state no 4-file spec"
+grep -qi 'no new' docs/agents/WORKFLOW.md            || fail "R19: WORKFLOW.md does not state 'no new'"
+grep -qi 'status\|routing' docs/agents/WORKFLOW.md   || fail "R19: WORKFLOW.md does not name status/routing"
 pass "R19 workflow_doc"
 
 # ── R20: README one-liner for /sdd-fix ────────────────────────────────────────────

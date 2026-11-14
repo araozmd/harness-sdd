@@ -645,7 +645,7 @@ test_pi_operator_text() {
   _t="$(new_target r12f)"; ok_inst - - --agents=antigravity "$_t"
   grep -qF '3. Antigravity: open the repo and run /sdd-plan' "$OUT" || fail "R12: Antigravity banner changed"
   # docs
-  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/agents/INSTALL.md docs/WORKFLOW.md; do
+  for _d in docs/agents/README.md AGENTS.md docs/HARNESS.md docs/agents/INSTALL.md docs/agents/WORKFLOW.md; do
     grep -qw 'pi' "$SRC/$_d" || fail "R12: $_d does not name pi"
     grep -qE '/trust|--approve|`-a`' "$SRC/$_d" || fail "R12: $_d lacks the pi trust prerequisite"
     grep -q 'pi-dispatch.sh' "$SRC/$_d" || fail "R12: $_d lacks the pi role-isolation note (pi-dispatch.sh)"

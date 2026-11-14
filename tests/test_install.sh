@@ -299,8 +299,8 @@ test_change_size_block_seeded() {
     || fail "installed driller.md does not carry the size budget rule (E21-F01 R10)"
   grep -qF 'change_size.max_requirements' "$T/.harness/agents/architect.md" \
     || fail "installed architect.md does not carry the size budget rule (E21-F01 R10)"
-  grep -qF 'change_size' "$T/.harness/docs/WORKFLOW.md" \
-    || fail "installed docs/WORKFLOW.md does not document change_size (E21-F01 R9)"
+  grep -qF 'change_size' "$T/.harness/docs/agents/WORKFLOW.md" \
+    || fail "installed docs/agents/WORKFLOW.md does not document change_size (E21-F01 R9)"
   # E21-F02: the pre-PR check ships as a runnable tool, not just a rule in a prompt. A role
   # file that tells the Reviewer to run a script the installer never made executable is a
   # silent no-op in every consumer.
@@ -661,7 +661,7 @@ test_paraphrase_back_installed_contract() {
     fail "E37-F02: installed reviewer lacks the Accepted trade-offs section"
   grep -qxF '## Accepted trade-offs' "$T/.harness/specs/_templates/feature.spec.md" ||
     fail "E37-F02: installed feature spec template lacks ## Accepted trade-offs"
-  grep -qF 'could-not-restate' "$T/.harness/docs/WORKFLOW.md" ||
+  grep -qF 'could-not-restate' "$T/.harness/docs/agents/WORKFLOW.md" ||
     fail "E37-F02: installed WORKFLOW does not describe could-not-restate"
 }
 
@@ -675,8 +675,8 @@ test_drift_report_installed_contract() {
     fail "E37-F03: installed drift-report.py differs from source"
   grep -qF 'chmod +x "$H/tools/drift-report.py"' "$SRC/harness-install.sh" ||
     fail "E37-F03: installer lacks explicit drift-report executable wiring"
-  grep -qF 'tools/drift-report.py' "$T/.harness/docs/WORKFLOW.md" ||
-    fail "E37-F03: installed docs/WORKFLOW.md does not name tools/drift-report.py"
+  grep -qF 'tools/drift-report.py' "$T/.harness/docs/agents/WORKFLOW.md" ||
+    fail "E37-F03: installed docs/agents/WORKFLOW.md does not name tools/drift-report.py"
   command -v git >/dev/null 2>&1 || return 0
   _g="$T/.drift-gitignore-probe"
   rm -rf "$_g"; mkdir -p "$_g"
@@ -690,7 +690,7 @@ test_drift_report_installed_contract() {
 }
 
 test_docs_for_humans_installed_contract() {
-  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md docs/INSTALL.md docs/agents/INSTALL.md; do
+  for _f in docs/agents/README.md docs/README.md docs/CONCEPTS.md docs/BRAND.md docs/INSTALL.md docs/agents/INSTALL.md docs/WORKFLOW.md docs/agents/WORKFLOW.md; do
     cmp -s "$SRC/$_f" "$T/.harness/$_f" || fail "E39-F01: installed $_f is missing or differs from source"
   done
   find "$T/.harness" -name assets | grep -q . && fail "E39-F01: a path named assets was installed under .harness/"
