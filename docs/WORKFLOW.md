@@ -83,9 +83,9 @@ Two Builder roles exist. `builder-heavy` is the same instructions at a heavier m
 
 Both routes need a second yes from the installer's arming verdict, and `after_rejections: 0` turns escalation off entirely, `complexity: complex` included.
 
-The choice is made by a tool, `tools/builder-role.sh`, not by judgement, so the same recorded state — the board,
-`escalation.after_rejections`, the installer's arming verdict and, when the host is known, its
-front-end — always yields the same answer. The check looks at whether the stamp differs, not whether it is
+The choice is made by a tool, `tools/builder-role.sh`, not by judgement, so the same recorded inputs — the spec's `complexity:` tag, the build↔review round,
+the configured Builder backend and `escalation.after_rejections`, the installer's arming verdict and,
+when the host is known, its front-end — always yield the same answer. The check looks at whether the stamp differs, not whether it is
 stronger; ranking models is up to you.
 
 ## The PR review loop
